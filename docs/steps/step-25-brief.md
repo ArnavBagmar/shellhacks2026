@@ -22,10 +22,37 @@ starts stepping rungs on its own, that is why — read the rung from the stats l
 steering. If p95 RTT sits above 500 ms the monitor will step down, and that is correct behaviour, not
 a bug to chase mid-walk.
 
-**Verify before walking** (the exact invocation was not smoke-tested while step 27 was still editing
-`cane.cloud`): start the service, `GET /warmup`, and confirm the response reports a warmed **depth**
-model as well as the detector. If `/warmup` reports no depth, the walk will silently produce zero
-steer frames — check this first, every time.
+### 0.1 Verified 2026-09-26 — the command, and the rung the walk must use
+
+The option-A posture was smoke-tested end to end after the merge. **Run exactly this** from `backend/`:
+
+```bash
+UV_PROJECT_ENVIRONMENT=.venv-vision CANE_DETECTOR=ultralytics CANE_DEVICE=mps CANE_DEPTH_DEVICE=mps \
+  PYTHONPATH=src uv run --extra yolo --extra depth --extra vision --extra mac \
+  uvicorn cane.cloud.app:app --port 8000
+```
+
+Then `curl localhost:8000/warmup` **twice** (the first call compiles: 2.6 s) and confirm the reply
+contains `"depth": {"backend": "torch", "ready": true}`. If depth is not ready the walk silently
+produces zero steer frames — check this every time. Warm per-crop cost: detector 136 ms, depth 35 ms
+at 640 px; 89 ms / 34 ms at 512 px (one crop each, so three forward crops ≈ 105 ms of depth).
+
+**Measured, six real crops of `step-06-live-equirect.jpg` through the live service — YOLO on all six,
+depth on the three forward ones, one MPS GPU:**
+
+| rung | crop / q / fps | round trip p50 | p95 | tick budget | headroom at p95 |
+|---|---|---|---|---|---|
+| 1 | 640 / 70 / 3 fps | 264 ms | **324 ms** | 333 ms | **9 ms — do not use** |
+| 3 | 512 / 60 / 3 fps | 204 ms | 213 ms | 333 ms | **120 ms** |
+
+**Ruling: start the walk at rung 3** (`--rung 3`), not rung 1. At rung 1 the tick is at capacity, so
+frames drop and the cue goes ragged — and it will not look like a latency problem, it will look like
+the steering being erratic. Rung 3 costs a little resolution and buys 120 ms of slack. Rung 1 is the
+right default against the **L4**, where the round trip was 72 ms; it is wrong against a laptop running
+both models on one GPU.
+
+Both runs returned **3 `gap_profiles` and 4–5 detections** on a real frame, and the echoed
+`t_capture_ms` was byte-identical — so the whole 22→23 chain is proven on real data, not fixtures.
 
 ## 1. Preconditions
 
