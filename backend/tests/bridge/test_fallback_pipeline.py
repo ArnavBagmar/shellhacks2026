@@ -210,6 +210,9 @@ async def test_an_unexpected_backend_fault_is_counted_not_raised() -> None:
 
     assert harness.monitor.is_local
     assert stats.failed > 0
+    # The transition must name what actually failed, or the log says only
+    # "three strikes" about a fault that was never a network at all.
+    assert harness.monitor.state.transitions[-1].reason.endswith("last=ZeroDivisionError")
 
 
 async def test_recovery_needs_thirty_seconds_of_healthy_probes_then_events_return() -> None:
@@ -244,7 +247,8 @@ async def test_recovery_needs_thirty_seconds_of_healthy_probes_then_events_retur
         assert harness.monitor.is_local, "recovered before the 30 s were up"
 
         await probe.probe_once()
-        assert harness.monitor.state.mode == Mode.cloud(4)
+        # The flip happened on rung 1, so recovery re-enters on rung 2.
+        assert harness.monitor.state.mode == Mode.cloud(2)
 
         before = harness.cloud.calls
         for _ in range(400):

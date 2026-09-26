@@ -110,7 +110,8 @@ async def test_a_probe_feeds_the_monitor_and_thirty_seconds_recovers() -> None:
         await probe.probe_once()
         clock.advance(S - FAST_MS)
 
-    assert monitor.state.mode == Mode.cloud(4)
+    # The flip happened on rung 1, so the cloud is re-entered on rung 2.
+    assert monitor.state.mode == Mode.cloud(2)
     assert monitor.state.counters.recoveries == 1
 
 

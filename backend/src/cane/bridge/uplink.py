@@ -139,10 +139,17 @@ class MonitoredUplink:
             self._monitor.observe(Timeout(), self._clock())
             raise
         except BackendError as exc:
-            self._monitor.observe(Error(exc.status), self._clock())
+            # The type name is the label for a statusless failure (a refused
+            # connection, a local decode fault): `status_500` when there was
+            # a server, the exception's own name when there was not.
+            self._monitor.observe(
+                Error(exc.status, cause=type(exc).__name__), self._clock()
+            )
             raise
-        except Exception:  # noqa: BLE001 - an unpromised fault is still an outcome
-            self._monitor.observe(Error(UNEXPECTED_STATUS), self._clock())
+        except Exception as exc:  # noqa: BLE001 - an unpromised fault is still an outcome
+            self._monitor.observe(
+                Error(UNEXPECTED_STATUS, cause=type(exc).__name__), self._clock()
+            )
             raise
         self._last_source = backend.source
         self._monitor.observe(Ok(float(self._clock() - started_ms)), self._clock())

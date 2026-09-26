@@ -172,10 +172,35 @@ def test_rule2_an_error_counts_as_a_timeout() -> None:
     state = monitor.observe(Error(500), T0 + 600)
 
     assert state.mode.is_local
-    # Two errors and one timeout added up to the three-strike flip, and the
-    # strike count starts clean for the next cloud stint.
-    assert state.transitions[-1].reason == f"consecutive_timeouts={TIMEOUTS_TO_LOCAL}"
+    # Two errors and one timeout added up to the three-strike flip, the
+    # reason names the cause of the *last* strike, and the strike count
+    # starts clean for the next cloud stint.
+    assert state.transitions[-1].reason == (
+        f"consecutive_timeouts={TIMEOUTS_TO_LOCAL} last=status_500"
+    )
     assert state.consecutive_timeouts == 0
+
+
+def test_rule2_the_reason_names_the_last_cause() -> None:
+    """`reason=` must say *what* failed, not only how many times."""
+    monitor = _monitor(rung=1)
+    monitor.observe(Error(None, cause="ConnectError"), T0)
+    monitor.observe(Timeout(), T0 + 300)
+
+    state = monitor.observe(Error(None, cause="TypeError"), T0 + 600)
+
+    assert state.transitions[-1].reason.endswith("last=TypeError")
+
+
+def test_rule2_an_error_with_no_status_or_cause_still_reads() -> None:
+    monitor = _monitor(rung=1)
+
+    for index in range(TIMEOUTS_TO_LOCAL):
+        state = monitor.observe(Error(), T0 + index * 300)
+
+    assert state.transitions[-1].reason == (
+        f"consecutive_timeouts={TIMEOUTS_TO_LOCAL} last=error"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -279,8 +304,35 @@ def test_rule5_recovery_needs_thirty_seconds_of_continuous_healthy_probes() -> N
     assert monitor.state.mode.is_local
 
     state = monitor.observe_probe(True, FAST_MS, T0 + S + RECOVER_HEALTHY_S * S)
-    assert state.mode == Mode.cloud(MIN_RUNG)
+    # One rung more conservative than the rung the flip happened on: the
+    # uplink that just failed is not the one to re-enter on.
+    assert state.mode == Mode.cloud(2)
     assert state.counters.recoveries == 1
+
+
+def test_rule5_recovery_re_enters_one_rung_below_the_rung_that_flipped() -> None:
+    """Flip at rung 1 -> come back at rung 2 -> climb to rung 1 in 30 s."""
+    monitor = _monitor(rung=1)
+    _flip_to_local(monitor)
+
+    _probe_for(monitor, RECOVER_HEALTHY_S, T0 + S)
+    recovered_at = T0 + S + RECOVER_HEALTHY_S * S
+    assert monitor.state.mode == Mode.cloud(2)
+
+    for tick in range(2 * (RECOVER_HEALTHY_S + 1)):
+        state = monitor.observe(Ok(FAST_MS), recovered_at + tick * 500)
+
+    assert state.mode == Mode.cloud(MAX_RUNG)
+    assert state.counters.steps_up == 1
+
+
+def test_rule5_recovery_never_re_enters_below_the_bottom_rung() -> None:
+    monitor = _monitor(rung=MIN_RUNG)
+    _flip_to_local(monitor)
+
+    _probe_for(monitor, RECOVER_HEALTHY_S, T0 + S)
+
+    assert monitor.state.mode == Mode.cloud(MIN_RUNG)
 
 
 def test_rule5_one_unhealthy_probe_resets_the_healthy_clock() -> None:
@@ -315,8 +367,12 @@ def test_rule5_probes_are_ignored_while_the_uplink_is_in_use() -> None:
 
 
 def test_rule5_the_upward_ladder_runs_at_thirty_second_spacing() -> None:
-    """The 120 s acceptance run: cloud(4) -> (3) -> (2) -> (1), never faster."""
-    monitor = _monitor(rung=1)
+    """The 120 s acceptance run: cloud(4) -> (3) -> (2) -> (1), never faster.
+
+    The flip happens on rung 4, so recovery re-enters at rung 4 (it can be
+    no more conservative than that) and the whole ladder is in play.
+    """
+    monitor = _monitor(rung=MIN_RUNG)
     _flip_to_local(monitor)
     _probe_for(monitor, RECOVER_HEALTHY_S, T0 + S)
     assert monitor.state.mode == Mode.cloud(MIN_RUNG)
@@ -391,7 +447,50 @@ def test_rule6_an_unhealthy_phone_report_blocks_recovery() -> None:
     monitor.observe_phone_health(_phone(0.0, t_phone_ms=healthy_at), healthy_at)
     state = monitor.observe_probe(True, FAST_MS, healthy_at)
 
-    assert state.mode == Mode.cloud(MIN_RUNG)
+    assert state.mode == Mode.cloud(2)
+
+
+# --- F2: rule 6 judges freshness in the laptop clock domain, like rule 4 ---
+
+
+def test_rule6_an_unhealthy_phone_blocks_recovery_across_a_clock_offset() -> None:
+    """The phone's clock is 20 s ahead; rule 6 must still see its reports
+    as fresh, exactly as rule 4 does.
+    """
+    offset_ms = 20 * S
+    monitor = _monitor(rung=1)
+    monitor.observe_phone_health(
+        _phone(0.9, t_phone_ms=T0 + offset_ms), T0, phone_offset_ms=offset_ms
+    )
+    assert monitor.state.mode.is_local
+
+    for second in range(RECOVER_HEALTHY_S + 2):
+        now = T0 + S + second * S
+        monitor.observe_phone_health(
+            _phone(0.9, t_phone_ms=now + offset_ms), now, phone_offset_ms=offset_ms
+        )
+        state = monitor.observe_probe(True, FAST_MS, now)
+
+    assert state.mode.is_local
+    # Not one recovery, not even a recovery that rule 4 immediately undid:
+    # rule 6 must see the same fresh, unhealthy report rule 4 sees.
+    assert state.counters.recoveries == 0
+
+
+def test_rule6_a_phone_that_went_quiet_stops_blocking_recovery() -> None:
+    """A dead signal must not pin the bridge to local forever -- with the
+    same 20 s offset, one report and then silence.
+    """
+    offset_ms = 20 * S
+    monitor = _monitor(rung=1)
+    monitor.observe_phone_health(
+        _phone(0.9, t_phone_ms=T0 + offset_ms), T0, phone_offset_ms=offset_ms
+    )
+    assert monitor.state.mode.is_local
+
+    _probe_for(monitor, RECOVER_HEALTHY_S, T0 + S)
+
+    assert monitor.state.mode == Mode.cloud(2)
 
 
 # --------------------------------------------------------------------------
@@ -418,7 +517,7 @@ def test_rule7_a_flip_to_local_logs_its_reason(caplog: pytest.LogCaptureFixture)
         _flip_to_local(monitor)
 
     lines = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
-    assert lines == ["health: cloud(2) -> local reason=consecutive_timeouts=3"]
+    assert lines == ["health: cloud(2) -> local reason=consecutive_timeouts=3 last=timeout"]
 
 
 def test_rule7_nothing_is_logged_when_nothing_changes(

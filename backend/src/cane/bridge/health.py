@@ -47,6 +47,10 @@ MAX_RUNG: Final = 1
 #: ahead cannot produce a "future" report that is silently trusted forever.
 PHONE_HEALTH_MAX_AGE_MS: Final = 3000
 MAX_TRANSITIONS: Final = 32
+#: The `last=` labels of a rule-2 reason (rule 7's line must name a cause).
+TIMEOUT_CAUSE: Final = "timeout"
+STATUS_CAUSE_PREFIX: Final = "status_"
+UNKNOWN_CAUSE: Final = "error"
 MS_PER_S: Final = 1000
 RECOVER_HEALTHY_MS: Final = RECOVER_HEALTHY_S * MS_PER_S
 #: The nearest-rank p95 of a full 10-sample window is its second largest
@@ -64,8 +68,9 @@ class Mode:
     """Who answers, and at which rung.
 
     A flip carries the rung with it: the crops keep their size, quality and
-    rate across the switch, because only the *answerer* changed. Recovery
-    re-enters the cloud at `MIN_RUNG` and climbs from there.
+    rate across the switch, because only the *answerer* changed. That is
+    also what lets recovery re-enter one rung below the rung that failed
+    (`recovery_rung`) instead of guessing.
     """
 
     kind: ModeKind
@@ -108,14 +113,33 @@ class Timeout:
 @dataclass(frozen=True, slots=True)
 class Error:
     """An answer, but not a usable one. `status` is `None` for "never
-    reached a server" (a refused connection). Counts as a timeout for the
-    three-strike rule: a 5xx is also "no answer in time".
+    reached a server" (a refused connection, or a fault nobody promised).
+    Counts as a timeout for the three-strike rule: a 5xx is also "no answer
+    in time".
+
+    `cause` labels a statusless failure -- normally the exception type the
+    uplink caught -- so the transition line says *what* broke and not only
+    how many times it broke.
     """
 
     status: int | None = None
+    cause: str | None = None
 
 
 Outcome = Ok | Timeout | Error
+
+
+def failure_cause(outcome: Outcome) -> str:
+    """The `last=` half of a rule-2 reason: `timeout`, `status_503`, or the
+    exception type of a fault the backends never promised.
+    """
+    if isinstance(outcome, Timeout):
+        return TIMEOUT_CAUSE
+    if isinstance(outcome, Error):
+        if outcome.status is not None:
+            return f"{STATUS_CAUSE_PREFIX}{outcome.status}"
+        return outcome.cause or UNKNOWN_CAUSE
+    return UNKNOWN_CAUSE  # pragma: no cover - Ok is not a failure
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +175,11 @@ class HealthState:
     healthy_since_ms: int | None = None
     last_step_ms: int | None = None
     last_phone_health: PhoneHealth | None = None
+    #: When the last phone report was taken, **in the laptop's clock**.
+    #: Converted once at ingestion (`observe_phone_health`) so every later
+    #: freshness test is offset-free by construction -- rule 4 and rule 6
+    #: cannot drift into different clock domains again.
+    last_phone_health_at_ms: int | None = None
     transitions: tuple[Transition, ...] = ()
     counters: HealthCounters = field(default_factory=HealthCounters)
 
@@ -171,6 +200,18 @@ def p95_nearest_rank(window: tuple[float, ...]) -> float | None:
     return sorted(window)[-P95_OFFSET_FROM_TOP]
 
 
+def recovery_rung(rung_before_flip: int) -> int:
+    """Where a recovering bridge re-enters the cloud: one rung *more*
+    conservative than the rung that failed, and never below the bottom one.
+
+    `Mode.local(rung)` carries the pre-flip rung through the outage, so
+    this is the rung the uplink was on when it stopped answering -- coming
+    back onto exactly that operating point is how a flapping venue uplink
+    gets flipped twice. The ladder then climbs one rung per 30 s healthy.
+    """
+    return min(rung_before_flip + 1, MIN_RUNG)
+
+
 def phone_reports_unhealthy(health: PhoneHealth) -> bool:
     """Rule 4's predicate, matching the phone's `isStaleDropRateUnhealthy`."""
     return (
@@ -180,8 +221,20 @@ def phone_reports_unhealthy(health: PhoneHealth) -> bool:
     )
 
 
-def _is_fresh(health: PhoneHealth, now_ms: int, phone_offset_ms: int) -> bool:
-    return abs(now_ms + phone_offset_ms - health.t_phone_ms) <= PHONE_HEALTH_MAX_AGE_MS
+def to_laptop_ms(t_phone_ms: int, phone_offset_ms: int) -> int:
+    """The phone's stamp in the laptop's clock. `phone_offset_ms` is the
+    phone clock minus the laptop clock, so the conversion subtracts it.
+    """
+    return t_phone_ms - phone_offset_ms
+
+
+def _is_fresh(taken_at_ms: int | None, now_ms: int) -> bool:
+    """Both arguments are laptop-clock. Symmetric on purpose: a phone clock
+    running ahead must not produce a "future" report that is trusted forever.
+    """
+    if taken_at_ms is None:
+        return False
+    return abs(now_ms - taken_at_ms) <= PHONE_HEALTH_MAX_AGE_MS
 
 
 class HealthMonitor:
@@ -218,16 +271,21 @@ class HealthMonitor:
             return state
         if isinstance(outcome, Ok):
             return self._store(self._observe_ok(state, outcome.rtt_ms, now_ms))
-        return self._store(self._observe_failure(state, now_ms))
+        return self._store(self._observe_failure(state, now_ms, failure_cause(outcome)))
 
     def observe_phone_health(
         self, health: PhoneHealth, now_ms: int, phone_offset_ms: int = 0
     ) -> HealthState:
         """Rule 4. `phone_offset_ms` is the phone clock minus the laptop
-        clock, so the freshness test happens in one domain.
+        clock, and it is applied **here, once**: the stored timestamp is
+        already laptop-clock, so rules 4 and 6 judge freshness identically
+        without either of them knowing the offset exists.
         """
-        state = replace(self._state, last_phone_health=health)
-        if state.mode.is_local or not _is_fresh(health, now_ms, phone_offset_ms):
+        taken_at_ms = to_laptop_ms(health.t_phone_ms, phone_offset_ms)
+        state = replace(
+            self._state, last_phone_health=health, last_phone_health_at_ms=taken_at_ms
+        )
+        if state.mode.is_local or not _is_fresh(taken_at_ms, now_ms):
             return self._store(state)
         if not phone_reports_unhealthy(health):
             return self._store(state)
@@ -269,7 +327,7 @@ class HealthMonitor:
         return self._store(
             self._transition(
                 state,
-                Mode.cloud(MIN_RUNG),
+                Mode.cloud(recovery_rung(state.mode.rung)),
                 f"probe_healthy_{RECOVER_HEALTHY_S}s",
                 now_ms,
                 recoveries=1,
@@ -295,8 +353,15 @@ class HealthMonitor:
             return self._step_down(state, p95, now_ms)
         return self._maybe_step_up(state, now_ms)
 
-    def _observe_failure(self, state: HealthState, now_ms: int) -> HealthState:
-        """Rule 2: a `Timeout` and an `Error` are the same event here."""
+    def _observe_failure(
+        self, state: HealthState, now_ms: int, cause: str
+    ) -> HealthState:
+        """Rule 2: a `Timeout` and an `Error` are the same event here.
+
+        The reason carries the *last* cause, because "three strikes" alone
+        cannot tell a saturated uplink from a 422 the bridge is sending, or
+        from a bug in this process wearing a network's clothes.
+        """
         strikes = state.consecutive_timeouts + 1
         state = replace(state, consecutive_timeouts=strikes, healthy_since_ms=None)
         if strikes < TIMEOUTS_TO_LOCAL:
@@ -304,7 +369,7 @@ class HealthMonitor:
         return self._transition(
             state,
             Mode.local(state.mode.rung),
-            f"consecutive_timeouts={strikes}",
+            f"consecutive_timeouts={strikes} last={cause}",
             now_ms,
             flips_to_local=1,
         )
@@ -350,7 +415,7 @@ class HealthMonitor:
         same reason a stale report cannot trigger rule 4.
         """
         health = state.last_phone_health
-        if health is None or not _is_fresh(health, now_ms, 0):
+        if health is None or not _is_fresh(state.last_phone_health_at_ms, now_ms):
             return False
         return phone_reports_unhealthy(health)
 
