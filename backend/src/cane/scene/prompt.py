@@ -179,7 +179,15 @@ def build_prompt(
             subject_words=MAX_SUBJECT_WORDS,
             detail_words=MAX_DETAIL_WORDS,
         )
-        return _PREAMBLE + context_line(now or datetime.now(), location, facts) + body
+        # The ring belongs on an ask too: route() sends anything it cannot parse
+        # here, so "is it safe to walk forward" lands on this branch and is
+        # exactly the kind of question the depth evidence answers.
+        return (
+            _PREAMBLE
+            + context_line(now or datetime.now(), location, facts)
+            + body
+            + ("" if gap is None else gap_clause(gap))
+        )
     if query.kind == "find":
         body = _FIND.format(
             utterance=utterance,

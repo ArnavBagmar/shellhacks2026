@@ -209,3 +209,18 @@ Also smoke-run so the wiring point is known to still start:
   step 25's walk. The character/token cost is measured above; the network cost is unchanged.
 * `cane.scene.__main__` (`--serve`, `--equirect`) has no ring and does not pretend to; a
   `--fake-ring` flag would make the wording demoable without the X4.
+
+## Post-merge addendum (2026-09-26, after merging the natural-voice work)
+
+Two things changed when `origin/main` landed the `ask` intent and the ElevenLabs voice:
+
+1. **`route()` falls back to `.ask(text)` for anything `parse()` does not recognise**, so before the
+   `IntentParser` fix above, "which way is clear" became an `ask` — and the `ask` branch of
+   `build_prompt` returned early, *without* the gap clause. The fix therefore does more than stop a
+   "Sorry, I didn't catch that": it routes the ring question to the one branch that carries the ring.
+2. **The `ask` branch now carries the gap clause too.** It is the catch-all, so "is it safe to walk
+   forward" lands there, and that is exactly the question the depth evidence answers. Without this the
+   ring was reachable only from `describe_front`/`describe_around` and invisible to the intent most
+   free-form questions become. `gap=None` still produces a byte-identical prompt.
+
+`tests/scene tests/transport` → 334 passed, 1 skipped.

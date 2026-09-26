@@ -94,6 +94,11 @@ Ordered by how much they threaten the demo.
    the L4's external IP is ephemeral and the firewall pins one /32, so both need re-checking if the
    venue network or a stop/start changes them. CoreML export stays blocked on the coremltools/torch
    mismatch, so the local fallback is `.pt` on MPS at ~170 ms.
+6. **A third load-sensitive test, found 2026-09-26 during the merge:**
+   `tests/bridge/test_backends.py::test_a_frame_arriving_while_an_abandoned_worker_still_runs_is_rejected_not_run`
+   failed once in a full-suite run at load 5.6/8 cores, then passed 3/3 in isolation and on the next
+   full run. It is a concurrency test about an abandoned worker, so it is timing-sensitive by
+   nature. Check the load average before chasing it.
 6. **Two tests are load-sensitive by design** and self-skip or wobble under a saturated machine: `tests/cloud/test_app.py`'s non-inference latency budget (skips above one job per core, printing the number) and the 2 s real-time fallback test. A third, the synthetic burned-in counter, was genuinely flaky at ~37% and is now fixed. If a suite goes red during a parallel build, check the load average before chasing the code.
 7. **Steps 15 (Firestore) and 16 (latency benchmark) are unstarted** but cheap and do not block the
    demo. 11, 13, 14 and the 🔶 stretch items 17/18 are untouched.
