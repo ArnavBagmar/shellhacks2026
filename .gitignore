@@ -37,3 +37,13 @@ backend/logs/
 
 # xcodebuild -derivedDataPath output (./startcane phone)
 ios/CaneApp/build/
+
+# Sync-service conflict copies ("name 2.ext", "name 2"). ~/Desktop is synced,
+# so two writers touching one file leaves numbered duplicates behind; they are
+# never real work (verified: each was byte-identical to a committed version) and
+# duplicate test modules break collection.
+* 2
+* 3
+* 4
+* [0-9].*
+* 2.*
