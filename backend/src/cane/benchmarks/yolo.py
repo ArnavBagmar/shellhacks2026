@@ -10,6 +10,7 @@ import platform
 import re
 import resource
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -167,6 +168,91 @@ class Frames:
     def close(self):
         if self.capture is not None:
             self.capture.release()
+
+
+class LatestFrames:
+    """Newest-frame-only camera grab; one slot, never a queue.
+
+    A thread reads the camera in a tight loop and keeps exactly one frame, so
+    the consumer always gets the freshest one. Without it the driver's own
+    buffering serves a frame from 100-300 ms ago and nothing in the logs says
+    so -- the same failure the X4 bridge's `capture/grab_thread.py` exists to
+    prevent.
+
+    **Camera sources only.** Files, directories and video keep `Frames`'
+    no-skipping guarantee, which is what makes two benchmark runs comparable
+    frame for frame; dropping frames there would silently break that.
+
+    `frame_id` therefore counts frames *processed*, and `identity` carries the
+    camera's own grab sequence, so `dropped` is visible rather than implied.
+    """
+
+    def __init__(self, frames: Frames, timeout_s: float = 10.0):
+        if not frames.is_camera:
+            raise ValueError("LatestFrames is for cameras only; file inputs must not drop frames")
+        self.frames, self.timeout_s = frames, timeout_s
+        self.index = self.grabbed = self.dropped = 0
+        self._state = threading.Condition()
+        self._latest = None
+        self._seq = self._taken = 0
+        self._error: Exception | None = None
+        self._ended = False
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._grab, name="camera-grab", daemon=True)
+        self._thread.start()
+
+    @property
+    def stop_event(self):
+        return self.frames.stop_event
+
+    @stop_event.setter
+    def stop_event(self, event):
+        self.frames.stop_event = event
+
+    def _grab(self) -> None:
+        while not self._stop.is_set():
+            try:
+                item = self.frames.read()
+            except (ValueError, OSError) as exc:  # camera timeout, decode failure
+                with self._state:
+                    self._error = exc
+                    self._state.notify_all()
+                return
+            if item is None:
+                with self._state:
+                    self._ended = True
+                    self._state.notify_all()
+                return
+            with self._state:
+                if self._latest is not None:
+                    # The consumer never took the previous frame: drop it and
+                    # count it, rather than letting it queue up behind.
+                    self.dropped += 1
+                self._seq += 1
+                self.grabbed += 1
+                self._latest = item[3]
+                self._state.notify_all()
+
+    def read(self):
+        with self._state:
+            ready = self._state.wait_for(
+                lambda: self._seq > self._taken or self._error is not None or self._ended,
+                timeout=self.timeout_s)
+            if self._error is not None:
+                raise self._error
+            if not ready or self._latest is None:
+                return None
+            frame, self._taken = self._latest, self._seq
+            self._latest = None
+        index, self.index = self.index, self.index + 1
+        return index, f"camera-grab:{self._taken}", None, frame
+
+    def close(self) -> None:
+        self._stop.set()
+        # The thread can be inside a blocking camera read; it is a daemon, so a
+        # bounded join is enough and never holds up shutdown.
+        self._thread.join(timeout=2.0)
+        self.frames.close()
 
 
 def run(args) -> Path | None:

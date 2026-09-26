@@ -36,7 +36,9 @@ class ArgumentTests(unittest.TestCase):
     def test_defaults_run_both_layers(self):
         args = parser().parse_args(['--camera', '0', '--show'])
         self.assertFalse(args.no_depth or args.no_detection)
-        self.assertEqual((args.input_size, args.imgsz, args.opacity), (280, 640, 35))
+        # 196, deliberately not the depth benchmark's 280: see parser().
+        self.assertEqual((args.input_size, args.imgsz, args.opacity), (196, 640, 35))
+        self.assertFalse(args.no_latest_frame)
         self.assertEqual(args.model, 'yoloe-26s-seg.pt')
 
     def test_either_layer_can_be_switched_off_at_startup(self):

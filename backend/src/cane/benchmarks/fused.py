@@ -23,7 +23,8 @@ from .depth_model import DEFAULT_REPO, DEFAULT_WEIGHTS, load_depth, normalize_de
 from .metrics import summarize
 from .palette import depth_color, depth_heatmap, depth_legend, readable_text
 from .preview_ui import PreviewQuit, PreviewWindow, Toggle, fit_display, status_bar
-from .yolo import DEFAULT_CLASSES, Frames, check_model, choose_device, instrument_stages, records, synchronize
+from .yolo import (DEFAULT_CLASSES, Frames, LatestFrames, check_model, choose_device,
+                   instrument_stages, records, synchronize)
 
 WINDOW = "Smart cane perception - objects + relative depth"
 NO_DEPTH_TIMING = {"predict_ms": 0.0, "preprocess_ms": 0.0, "inference_ms": 0.0, "postprocess_ms": 0.0}
@@ -48,7 +49,11 @@ def parser():
     p.add_argument("--imgsz", type=int, default=640)
     p.add_argument("--conf", type=float, default=0.25)
     p.add_argument("--iou", type=float, default=0.7)
-    p.add_argument("--input-size", type=int, default=280, help="Depth short side; 280 for speed, 518 for detail")
+    # 196, not the depth benchmark's 280: depth is over half the frame budget
+    # here and 196 nearly halves it. The standalone runner keeps 280 so its
+    # recorded baseline stays comparable with every run already taken.
+    p.add_argument("--input-size", type=int, default=196,
+                   help="Depth short side; 196 for the live view, 280 to match the depth benchmark, 518 for detail")
     p.add_argument("--warmup", type=int, default=10)
     p.add_argument("--max-frames", type=int, default=300, help="0 runs until q, Ctrl-C or end of input")
     p.add_argument("--save-every", type=int, default=30, help="Save preview, raw depth and detections every N frames; 0 disables")
@@ -56,6 +61,8 @@ def parser():
     p.add_argument("--opacity", type=int, default=35, help="Initial depth overlay percentage")
     p.add_argument("--no-detection", action="store_true", help="Skip loading and running YOLOE entirely")
     p.add_argument("--no-depth", action="store_true", help="Skip loading and running the depth model entirely")
+    p.add_argument("--no-latest-frame", action="store_true",
+                   help="Read the camera inline instead of dropping stale frames; slower and laggier, but every frame is processed")
     p.add_argument("--output", type=Path)
     return p
 
@@ -270,6 +277,10 @@ def run(args):
             if ui:
                 ui.status(f"Opening {'camera ' + str(args.camera) if args.camera is not None else str(args.source)}...")
             frames = Frames(cv2, args.source, args.camera, args.camera_timeout)
+            if args.camera is not None and not args.no_latest_frame:
+                # Newest-frame-only, cameras only: files keep the no-skipping
+                # guarantee that makes two runs comparable frame for frame.
+                frames = LatestFrames(frames, args.camera_timeout)
             if ui:
                 frames.stop_event = ui.stop
             first, read_ms = call(read_frame)
@@ -312,6 +323,7 @@ def run(args):
             "conf": args.conf, "iou": args.iou, "warmup": args.warmup, "max_frames": args.max_frames,
             "source": str(args.source.resolve()) if args.source else f"camera:{args.camera}",
             "camera_startup_ms": startup, "camera_timeout_s": args.camera_timeout, "setup_ms": setup_ms,
+            "latest_frame_grab": isinstance(frames, LatestFrames),
             "platform": platform.platform(), "python": sys.version,
             "versions": {name: importlib.metadata.version(name) for name in
                          ["torch", "torchvision", "numpy", "opencv-python"]
@@ -326,7 +338,11 @@ def run(args):
                            "read, normalization and box medians; it excludes drawing, saving, hashing and "
                            "display, so it is not capture-to-feedback latency. A layer switched off contributes "
                            "0 ms to its own stages, so aggregates are only comparable across frames where the "
-                           "same layers ran: see layer_frames.",
+                           "same layers ran: see layer_frames. With latest_frame_grab true, a background thread "
+                           "keeps only the newest camera frame, so read_ms measures taking an already-waiting "
+                           "frame (near zero) rather than waiting for the driver, and frames_dropped counts the "
+                           "camera frames skipped. Camera read_ms and frame_ms from such a run are therefore NOT "
+                           "comparable with runs made without it, nor with the file path, which never drops.",
         }
         summary_path = output / "summary.json"
         summary_path.write_text(json.dumps(metadata, indent=2))
@@ -418,12 +434,17 @@ def run(args):
             return output
         metadata.update(summarize(rows))
         metadata.update(status="complete", stop_reason=stop_reason, layer_frames=layer_frames)
+        if isinstance(frames, LatestFrames):
+            # Dropping is the point, but it must never be silent.
+            metadata.update(frames_grabbed=frames.grabbed, frames_dropped=frames.dropped)
         rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         metadata["process_peak_rss_bytes"] = rss if sys.platform == "darwin" else rss * 1024
         metadata["cuda_peak_allocated_bytes"] = torch.cuda.max_memory_allocated() if device == "cuda" else None
         metadata["mps_current_allocated_bytes"] = torch.mps.current_allocated_memory() if device == "mps" else None
         summary_path.write_text(json.dumps(metadata, indent=2))
-        print(json.dumps({"output": str(output), "layer_frames": layer_frames, **summarize(rows)}, indent=2))
+        dropped = {"frames_dropped": frames.dropped} if isinstance(frames, LatestFrames) else {}
+        print(json.dumps({"output": str(output), "layer_frames": layer_frames, **dropped,
+                          **summarize(rows)}, indent=2))
         return output
     finally:
         if ui:

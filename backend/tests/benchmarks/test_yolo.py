@@ -1,4 +1,6 @@
 """Dependency-free checks for the benchmark."""
+import threading
+import time
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
@@ -80,6 +82,45 @@ class BenchmarkTests(unittest.TestCase):
         with patch("cane.benchmarks.yolo.time.sleep") as sleep:
             self.assertIsNone(frames.read())
             sleep.assert_not_called()
+
+    def test_latest_frames_keeps_only_the_newest_and_counts_the_drops(self):
+        from cane.benchmarks.yolo import LatestFrames
+        produced = ["a", "b", "c", "d"]
+        done = threading.Event()
+        class Capture:
+            reads = 0
+            def isOpened(self): return True
+            def read(self):
+                if self.reads >= len(produced):
+                    done.set()
+                    time.sleep(0.01)
+                    return (False, None)
+                frame, self.reads = produced[self.reads], self.reads + 1
+                return (True, frame)
+            def release(self): pass
+        cv2 = SimpleNamespace(VideoCapture=lambda *a: Capture(), CAP_AVFOUNDATION=1200)
+        frames = Frames(cv2, None, 0, camera_timeout=0.2)
+        latest = LatestFrames(frames, timeout_s=0.5)
+        self.addCleanup(latest.close)
+        self.assertTrue(done.wait(2), "grab thread never drained the source")
+        # The consumer arrives late: it gets the newest frame, not the oldest.
+        first = latest.read()
+        self.assertEqual(first[3], "d")
+        self.assertEqual(first[0], 0)
+        self.assertIn("camera-grab", first[1])
+        self.assertEqual(latest.grabbed, 4)
+        self.assertEqual(latest.dropped, 3)
+
+    def test_latest_frames_refuses_file_sources(self):
+        from cane.benchmarks.yolo import LatestFrames
+        from pathlib import Path as P
+        capture = SimpleNamespace(isOpened=lambda: True, read=lambda: (True, "x"), release=lambda: None)
+        cv2 = SimpleNamespace(VideoCapture=lambda *a: capture, CAP_AVFOUNDATION=1200)
+        with patch.object(P, "exists", return_value=True):
+            frames = Frames(cv2, P("route.mp4"), None)
+        # Files must keep the no-skipping guarantee that makes runs comparable.
+        with self.assertRaisesRegex(ValueError, "cameras only"):
+            LatestFrames(frames)
 
     def test_cli(self):
         args = parser().parse_args(["--source", "route.mp4", "--classes", "door", "overhanging obstacle"])
