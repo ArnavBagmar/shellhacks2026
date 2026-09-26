@@ -122,7 +122,7 @@ public struct RouteFollower: Sendable {
         let advanced = index < steps.count - 1
             && hasPassedEnd(ofStep: index, at: fix.latLng, travelled: progress(around: index, to: fix.latLng).travelledM)
         let newIndex = advanced ? index + 1 : index
-        let here = progress(around: newIndex, to: fix.latLng)
+        let here = progress(around: newIndex, to: fix.latLng, headingDeg: heading?.trueHeadingDeg)
         let destination = route.destination ?? steps[steps.count - 1].end
         let toDestination = Geo.haversineMeters(fix.latLng, destination)
 
@@ -164,14 +164,14 @@ public struct RouteFollower: Sendable {
     /// projection onto the new leg would otherwise sit motionless at
     /// that leg's start.
     private func progress(
-        around index: Int, to point: LatLng
+        around index: Int, to point: LatLng, headingDeg: Double? = nil
     ) -> (projection: SegmentProjection?, travelledM: Double) {
         let lower = max(0, index - 1)
         let upper = min(steps.count - 1, index + 1)
         let windowPoints = (lower...upper).flatMap { steps[$0].points }
         let base = lower == 0 ? 0 : stepEndCumulative[lower - 1]
         return (
-            RouteGeometry.nearestSegment(to: point, on: windowPoints),
+            RouteGeometry.nearestSegment(to: point, on: windowPoints, headingDeg: headingDeg),
             base + RouteGeometry.progressAlong(windowPoints, from: point)
         )
     }

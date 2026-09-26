@@ -138,6 +138,33 @@ final class RouteFollowerTests: XCTestCase {
         }
     }
 
+    /// Found on the live FIU route: at a vertex both legs are equidistant,
+    /// and picking the earlier one made a completed sharp left read as a
+    /// large heading error. Within a few metres of a vertex the reference
+    /// segment is the one whose bearing agrees with the walker.
+    func testAtACornerTheHeadingErrorIsMeasuredAgainstTheLegTheWalkerFaces() throws {
+        let route = try NavigationFixtures.twoTurnsRoute()
+        let follower = RouteFollower(route: route)
+        let corner = NavigationFixtures.firstCorner
+        let leg1 = Geo.initialBearingDeg(from: NavigationFixtures.origin, to: corner)
+        let leg2 = Geo.initialBearingDeg(from: corner, to: NavigationFixtures.secondCorner)
+        func errorFacing(_ bearing: Double, at point: LatLng) throws -> Double {
+            let fix = LocationFix(
+                latLng: point, horizontalAccuracyM: 5, speedMps: 1.4, timestampMs: 1_000
+            )
+            let heading = HeadingSample(trueHeadingDeg: bearing, accuracyDeg: 5, timestampMs: 1_000)
+            let state = follower.advance(from: follower.initialState, fix: fix, heading: heading)
+            return try XCTUnwrap(state.headingErrorDeg)
+        }
+
+        XCTAssertEqual(try errorFacing(leg2, at: corner), 0, accuracy: 1, "turned: no error")
+        XCTAssertEqual(try errorFacing(leg1, at: corner), 0, accuracy: 1, "not yet turned: no nag")
+        let onePast = Geo.destinationPoint(from: corner, bearingDeg: leg2, distanceMeters: 1)
+        XCTAssertEqual(try errorFacing(leg1, at: onePast), 0, accuracy: 1, "GPS noise past the corner")
+        let fivePast = Geo.destinationPoint(from: corner, bearingDeg: leg2, distanceMeters: 5)
+        XCTAssertEqual(abs(try errorFacing(leg1, at: fivePast)), 90, accuracy: 1, "clearly past: correct")
+    }
+
     func testMissingHeadingLeavesTheErrorNil() throws {
         let route = try NavigationFixtures.twoTurnsRoute()
         let follower = RouteFollower(route: route)

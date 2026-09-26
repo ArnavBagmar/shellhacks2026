@@ -30,24 +30,41 @@ enum RouteGeometry {
         cumulativeLengths(points).last ?? 0
     }
 
+    /// Within this many metres of the closest segment, a candidate may win
+    /// on heading agreement instead. At a vertex both legs sit at 0 m, and
+    /// GPS noise around a corner is larger than this; the heading is the
+    /// better witness to which leg the walker is on (live FIU route).
+    static let headingTieBandM: Double = 3
+
     /// The segment of `points` the walker is closest to, skipping
     /// zero-length segments (their bearing is undefined). `nil` for a
-    /// polyline with no real segment at all.
-    static func nearestSegment(to point: LatLng, on points: [LatLng]) -> SegmentProjection? {
-        var best: SegmentProjection?
-        for index in 0..<max(0, points.count - 1) {
+    /// polyline with no real segment at all. With a heading, ties within
+    /// `headingTieBandM` go to the segment whose bearing agrees with it.
+    static func nearestSegment(
+        to point: LatLng, on points: [LatLng], headingDeg: Double? = nil
+    ) -> SegmentProjection? {
+        let candidates = projections(of: point, on: points)
+        guard let closest = candidates.min(by: { $0.offsetM < $1.offsetM }) else { return nil }
+        guard let headingDeg else { return closest }
+        let band = candidates.filter { $0.offsetM <= closest.offsetM + headingTieBandM }
+        return band.min { lhs, rhs in
+            abs(Geo.normalizedAngleDeg(headingDeg - lhs.bearingDeg))
+                < abs(Geo.normalizedAngleDeg(headingDeg - rhs.bearingDeg))
+        } ?? closest
+    }
+
+    private static func projections(of point: LatLng, on points: [LatLng]) -> [SegmentProjection] {
+        (0..<max(0, points.count - 1)).compactMap { index in
             let start = points[index]
             let end = points[index + 1]
-            guard Geo.haversineMeters(start, end) > 0 else { continue }
-            let candidate = SegmentProjection(
+            guard Geo.haversineMeters(start, end) > 0 else { return nil }
+            return SegmentProjection(
                 segmentIndex: index,
                 alongM: Geo.alongTrackMeters(point: point, start: start, end: end),
                 offsetM: Geo.distanceToSegmentMeters(point: point, start: start, end: end),
                 bearingDeg: Geo.initialBearingDeg(from: start, to: end)
             )
-            if candidate.offsetM < (best?.offsetM ?? .infinity) { best = candidate }
         }
-        return best
     }
 
     /// How far along `points` the walker has come: the projection onto

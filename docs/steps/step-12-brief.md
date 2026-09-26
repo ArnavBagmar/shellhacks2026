@@ -75,6 +75,7 @@ Evaluated once per follower update (~1 Hz). Constants in `TurnCuePolicy`:
 - `.arrived` once when within 10 m of the destination; afterwards the engine stops.
 - `.gpsLost` once when no fix for 10 s; **no other cue is emitted while lost** (acceptance: "losing GPS degrades navigation"); `.gpsRestored` once when fixes resume.
 - **Amendment (2026-09-26, from the live FIU route Graham Center → Green Library):** `POST_MANEUVER_GRACE_S = 6` — no `.correctHeading` within 6 s after a `.now`, because the heading swings through a sharp vertex for a tick and the policy otherwise says "Right to rejoin route" one second after "Sharp left now". Persistent errors are still corrected once the grace ends.
+- **Amendment (same run):** `RouteGeometry.headingTieBandM = 3` — when several segments lie within 3 m of the closest one (a vertex, or GPS noise at a corner), the heading error is measured against the segment whose bearing agrees with the walker's heading. This was the actual cause of the spurious cue; the grace above is belt-and-braces. After both, the live FIU route plays exactly prepare/now ×3 and Arrived.
 
 ### F4. Phrasing (H-12b) and haptics (H-12a)
 - Direction first, ≤ 6 words, digits rounded: `"Left in 30 metres"`, `"Left now"`, `"Right in 30 metres"`, `"Slight right now"`, `"Straight on"`, `"Turn around"`, `"Off route, rerouting"`, `"Arrived"`, `"GPS lost, navigation paused"`, `"GPS back"`. A test asserts every phrase is ≤ 6 words and begins with the direction word when there is one. Distances round to the nearest 10 m.
