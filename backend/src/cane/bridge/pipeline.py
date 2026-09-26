@@ -339,7 +339,3 @@ class BridgePipeline:
             rtt_p95_ms=sender.rtt_p95_ms,
         )
 
-
-def now_laptop_ms() -> int:
-    """Re-exported so callers need only one import for "the laptop clock"."""
-    return now_ms()
