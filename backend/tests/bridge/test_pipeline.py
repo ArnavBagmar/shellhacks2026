@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import pytest
 import websockets
@@ -238,6 +239,31 @@ async def test_a_stalled_camera_is_skipped_not_shipped_stale() -> None:
     assert transport.requests == []
     assert stats.skipped_stale > 0
     assert stats.sent == 0
+
+
+async def test_an_overrun_tick_still_yields_to_the_event_loop() -> None:
+    """The overrun branch must not return synchronously.
+
+    ``try_send`` only creates the request task; that task first touches the
+    wire when the loop next gets a scheduling slot. A pacing branch that
+    returns without awaiting can therefore hold a finished frame back by a
+    whole tick, which lands directly in frame age at send.
+    """
+    transport = EchoingFakeCloud()
+    pipeline, _grab = _pipeline(transport, _config(), clock_provider=LaptopClock, sink=None)
+    started: list[str] = []
+
+    async def pending_request() -> None:
+        started.append("ran")
+
+    task = asyncio.get_running_loop().create_task(pending_request())
+    overrun_due = time.monotonic() - 1.0
+
+    next_due = await pipeline._sleep_until_next_tick(overrun_due)
+
+    assert started == ["ran"], "the overrun branch returned without yielding"
+    assert next_due <= time.monotonic()
+    await task
 
 
 async def test_laptop_clock_applies_the_pipeline_delay_constant() -> None:

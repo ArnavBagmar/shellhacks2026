@@ -121,10 +121,14 @@ class OneInFlightSender:
         if self.busy:
             self._dropped_busy += 1
             return SendOutcome.DROPPED_BUSY
-        frame_age_ms = now_ms() - t_arrival_laptop_ms
-        self._frame_age_ms.add(float(frame_age_ms))
         self._sent += 1
-        self._task = asyncio.get_running_loop().create_task(self._run(request))
+        # Frame age is sampled inside the task, immediately before the wire:
+        # this call only *creates* the task, and on a busy loop the body runs
+        # a scheduling slot (or a whole tick) later. Sampling here would
+        # under-count the true time-to-wire, which is the acceptance number.
+        self._task = asyncio.get_running_loop().create_task(
+            self._run(request, t_arrival_laptop_ms)
+        )
         self._max_in_flight = max(self._max_in_flight, self.in_flight)
         return SendOutcome.SENT
 
@@ -142,8 +146,9 @@ class OneInFlightSender:
         await self.drain()
         await self._transport.aclose()
 
-    async def _run(self, request: InferenceRequest) -> None:
+    async def _run(self, request: InferenceRequest, t_arrival_laptop_ms: int) -> None:
         started_ms = now_ms()
+        self._frame_age_ms.add(float(started_ms - t_arrival_laptop_ms))
         try:
             raw = await self._transport.post_crops(request)
         except asyncio.CancelledError:

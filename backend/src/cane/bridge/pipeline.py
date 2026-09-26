@@ -198,6 +198,11 @@ class BridgePipeline:
         if delay > 0:
             await asyncio.sleep(delay)
             return next_due
+        # Overrun: there is no time left to sleep, but the loop must still
+        # yield -- the request task this tick just created has not run yet,
+        # and returning synchronously would hold it back until the next
+        # await, adding a whole tick to frame age at send.
+        await asyncio.sleep(0)
         return time.monotonic()
 
     async def _tick(self) -> None:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import pytest
 
@@ -21,6 +22,11 @@ TICK_S = 0.1
 RUN_TICKS = 20
 SLOW_TRANSPORT_S = 0.3
 MAX_FRAME_AGE_MS = 50
+# A synchronous block of the event loop between try_send() and the next
+# await: exactly what CPU load does to the real pipeline.
+LOOP_BLOCK_S = 0.03
+LOOP_BLOCK_MS = 30
+SAMPLING_SLACK_MS = 8
 YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0)
 T_CAPTURE_MS = 1_790_000_000_000
 
@@ -54,6 +60,27 @@ class FakeTransport:
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+class ClockRecordingTransport:
+    """Records the wall clock at the instant the request reaches the wire."""
+
+    def __init__(self) -> None:
+        self.entered_at_ms: list[int] = []
+
+    async def post_crops(self, request: InferenceRequest) -> bytes:
+        self.entered_at_ms.append(now_ms())
+        return json.dumps(
+            {
+                "schema": 1,
+                "t_capture_ms": request.meta.t_capture_ms,
+                "inference_ms": 1.0,
+                "detections": [],
+            }
+        ).encode()
+
+    async def aclose(self) -> None:
+        return None
 
 
 class RaisingTransport:
@@ -141,6 +168,31 @@ async def test_frame_age_is_measured_not_assumed() -> None:
     stats = sender.stats
     assert stats.frame_age_p50_ms is not None
     assert 15 <= stats.frame_age_p50_ms <= 40
+
+
+async def test_frame_age_is_sampled_at_the_wire_not_at_try_send() -> None:
+    """The number this step is judged on must be the true time-to-wire.
+
+    ``try_send`` only *creates* the request task; if the loop is busy, the
+    body is built and posted a whole tick later. Sampling the clock in
+    ``try_send`` would under-count that gap and the reported p95 would be
+    fiction.
+    """
+    transport = ClockRecordingTransport()
+    sender = OneInFlightSender(transport)
+
+    arrival_ms = now_ms()
+    assert sender.try_send(_request(), t_arrival_laptop_ms=arrival_ms) is SendOutcome.SENT
+    time.sleep(LOOP_BLOCK_S)
+    await sender.aclose()
+
+    assert len(transport.entered_at_ms) == 1
+    age_at_wire_ms = transport.entered_at_ms[0] - arrival_ms
+    assert age_at_wire_ms >= LOOP_BLOCK_MS
+    recorded = sender.stats.frame_age_p50_ms
+    assert recorded is not None
+    assert recorded >= LOOP_BLOCK_MS, f"reported {recorded} ms, true age {age_at_wire_ms} ms"
+    assert abs(recorded - age_at_wire_ms) <= SAMPLING_SLACK_MS
 
 
 async def test_the_response_handler_receives_the_parsed_model() -> None:
