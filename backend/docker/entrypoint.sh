@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# UNVERIFIED as of 2026-09-26: no GPU, no gcloud, no GCP project. Nothing here has been executed.
+# Verified on an NVIDIA L4 (us-east1-d, 2026-09-26): built and run on the GPU; see deploy/README.md for the measured numbers.
 # Export the engine on THIS GPU if the cache does not match, then serve.
 set -euo pipefail
 

@@ -1,4 +1,4 @@
-# UNVERIFIED as of 2026-09-26: no GPU, no gcloud, no GCP project. Nothing here has been executed.
+# Verified on an NVIDIA L4 (us-east1-d, 2026-09-26): built and run on the GPU; see deploy/README.md for the measured numbers.
 # Base image supplies torch AND TensorRT. Do NOT install the project's `gpu`
 # extra here: PyPI `tensorrt` resolves to a CUDA-13 build that would install a
 # second, conflicting TensorRT over the image's own (design A11).
