@@ -1,8 +1,12 @@
-"""Cloud detections -> ``AwarenessEvent(source=x4_cloud)``.
+"""Inference detections -> ``AwarenessEvent``.
 
-The cloud is timeless and geometry-free: it returns boxes in crop coordinates
-and echoes the capture stamp. Everything below -- bearing, TTL, the "never
-state metres" rule -- is the bridge's job.
+The inference side is timeless and geometry-free: it returns boxes in crop
+coordinates and echoes the capture stamp. Everything below -- bearing, TTL,
+the "never state metres" rule -- is the bridge's job.
+
+``source`` is a parameter, not a constant: step 8's health monitor can put
+the *same* service behind either ``x4_cloud`` or ``x4_local``, and the phone
+must be told which one answered (step-07-design H2).
 """
 
 from __future__ import annotations
@@ -69,6 +73,7 @@ def event_from_detection(
     t_capture_ms: int,
     yaws_deg: tuple[float, ...],
     delta_deg: float,
+    source: Source = Source.X4_CLOUD,
 ) -> AwarenessEvent | None:
     """Build one validated event, or ``None`` if the cloud gave us something
     the contract refuses. Rejected and logged -- never raised into the loop.
@@ -82,7 +87,7 @@ def event_from_detection(
         return None
     payload = {
         "schema": SCHEMA_VERSION,
-        "source": Source.X4_CLOUD.value,
+        "source": source.value,
         "track_id": detection.track_id,
         "t_capture_ms": t_capture_ms,
         "ttl_ms": ttl_ms_for(detection.cls),
@@ -98,16 +103,21 @@ def event_from_detection(
     try:
         return parse_awareness_event(payload)
     except AwarenessEventError as exc:
-        logger.warning("rejected a cloud detection (track_id=%s): %s", detection.track_id, exc)
+        logger.warning(
+            "rejected a %s detection (track_id=%s): %s", source.value, detection.track_id, exc
+        )
         return None
 
 
 def events_from_response(
-    response: InferenceResponse, yaws_deg: tuple[float, ...], delta_deg: float
+    response: InferenceResponse,
+    yaws_deg: tuple[float, ...],
+    delta_deg: float,
+    source: Source = Source.X4_CLOUD,
 ) -> tuple[AwarenessEvent, ...]:
     """Every detection the contract accepts, in response order."""
     events = (
-        event_from_detection(detection, response.t_capture_ms, yaws_deg, delta_deg)
+        event_from_detection(detection, response.t_capture_ms, yaws_deg, delta_deg, source)
         for detection in response.detections
     )
     return tuple(event for event in events if event is not None)

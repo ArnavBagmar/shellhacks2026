@@ -15,6 +15,7 @@ from cane.cloud.api_models import InferenceRequest
 logger = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT_S = 2.0
+RESPONSE_PREVIEW_CHARS = 200
 
 
 class HttpInferenceTransport:
@@ -42,7 +43,8 @@ class HttpInferenceTransport:
         if response.status_code != httpx.codes.OK:
             raise CloudResponseError(
                 f"{self._url} answered HTTP {response.status_code}: "
-                f"{response.text[:200]!r}"
+                f"{response.text[:RESPONSE_PREVIEW_CHARS]!r}",
+                status_code=response.status_code,
             )
         return response.content
 
@@ -51,4 +53,13 @@ class HttpInferenceTransport:
 
 
 class CloudResponseError(RuntimeError):
-    """The inference service answered, but not with a 200."""
+    """The inference service answered, but not with a 200.
+
+    `status_code` is carried separately from the message so step 8's
+    `CloudBackend` can turn it into a `BackendError(status)` without
+    parsing English.
+    """
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
