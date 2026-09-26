@@ -19,8 +19,11 @@ import time
 import pytest
 
 from cane.bridge.capture.grab_thread import GrabThread
+from cane.bridge.capture.synthetic_source import (
+    SyntheticEquirectSource,
+    make_equirect_frame,
+)
 from cane.bridge.metrics import percentile
-from cane.bridge.capture.synthetic_source import SyntheticEquirectSource
 
 SOURCE_FPS = 30.0
 SMALL_W = 160
@@ -118,6 +121,29 @@ def test_synthetic_source_paces_itself_at_the_requested_fps() -> None:
     assert src.read() is None
     # 10 frames at 50 fps is 0.2 s; allow slack but reject "as fast as possible".
     assert 0.12 <= elapsed <= 0.6
+
+
+def test_the_burned_in_counter_fits_inside_the_frame() -> None:
+    """The counter exists to tell frames apart, so it must not run off the edge.
+
+    A full epoch stamp is 13 digits and was 175 px wide in a 160 px frame, which
+    clipped the fast-moving low-order digits -- the only ones that change between
+    two frames milliseconds apart.
+    """
+    import cv2
+
+    from cane.bridge.capture.synthetic_source import counter_text, text_scale
+
+    text = counter_text(1_790_443_212_345)
+    (width_px, _), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, text_scale(SMALL_W), 2)
+    assert width_px < SMALL_W, f"counter {text!r} is {width_px}px wide in a {SMALL_W}px frame"
+
+
+def test_one_millisecond_changes_the_picture() -> None:
+    """Two frames 1 ms apart must be distinguishable, at the smallest size used."""
+    a = make_equirect_frame(SMALL_W, SMALL_H, 1_790_443_212_345)
+    b = make_equirect_frame(SMALL_W, SMALL_H, 1_790_443_212_346)
+    assert not (a == b).all()
 
 
 def test_synthetic_frames_are_equirect_2to1_with_a_burned_in_counter() -> None:
