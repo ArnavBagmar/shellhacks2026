@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "CaneTransport", targets: ["CaneTransport"]),
         .library(name: "CaneFeedback", targets: ["CaneFeedback"]),
         .library(name: "CaneNavigation", targets: ["CaneNavigation"]),
+        .library(name: "CaneOutput", targets: ["CaneOutput"]),
         .executable(name: "nav-cli", targets: ["NavCLI"]),
     ],
     targets: [
@@ -22,6 +23,10 @@ let package = Package(
         // Step 9 — feedback manager gauntlet (consumes AwarenessEvent, emits Announcement).
         .target(name: "CaneFeedback", dependencies: ["CaneContracts"]),
         .testTarget(name: "CaneFeedbackTests", dependencies: ["CaneFeedback", "CaneContracts"]),
+        // Step 10 — output layer: haptic alphabet, spoken phrases, panning.
+        // Renders what step 9 decides; implements CaneFeedback.AnnouncementSink.
+        .target(name: "CaneOutput", dependencies: ["CaneFeedback", "CaneContracts"]),
+        .testTarget(name: "CaneOutputTests", dependencies: ["CaneOutput", "CaneFeedback", "CaneContracts"]),
         // Step 12 — navigation engine (Routes API, heading, turn cues). Deliberately
         // independent of CaneContracts: CoreLocation never feeds the awareness path.
         .target(name: "CaneNavigation"),

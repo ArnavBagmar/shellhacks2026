@@ -39,6 +39,11 @@ contradict. The `CMHeadphoneMotionManager` reason for avoiding the AirPods mic i
 tracking is cut), but `.allowBluetooth` still changes the audio session category, which affects TTS
 routing. **Pick one and write it down.**
 
+> **Resolved 2026-09-26 — the iPhone's own microphone.** Recorded in `build-plan.md` §6
+> conflict #1; `camera-sync-design.md` §5 is annotated as superseded. The binding session
+> configuration is Amendment 5 of `step-10-design.md`: never `.allowBluetooth`, so output
+> stays on A2DP and `.defaultToSpeaker` covers the no-AirPods case.
+
 
 ## C. Spec: insta360feed.md bearing words (verbatim)
 
