@@ -25,6 +25,9 @@ final class AppModel {
     /// Microphone loudness 0...1 (drives the orb).
     private(set) var level = 0.0
     private(set) var notes: [String] = []
+    /// Live TrueDepth reading for the debug panel; nil when this phone
+    /// has no depth sensor or none has arrived yet.
+    private(set) var depthLine: String?
 
     private var runtime: Runtime?
     private var hazardClear: Task<Void, Never>?
@@ -50,6 +53,7 @@ final class AppModel {
         }
         settingsBox.update(settings.snapshot)
         notes.removeAll()
+        depthLine = nil
         let runtime = Runtime(url: url, settings: settingsBox, callbacks: callbacks())
         self.runtime = runtime
         mode = .walking
@@ -93,7 +97,8 @@ final class AppModel {
             onSaid: { [weak self] text in Task { @MainActor in self?.lastSaid = text } },
             onLevel: { [weak self] value in Task { @MainActor in self?.level = value } },
             onAssist: { [weak self] state in Task { @MainActor in self?.assist = state } },
-            onNote: { [weak self] text in Task { @MainActor in self?.note(text) } }
+            onNote: { [weak self] text in Task { @MainActor in self?.note(text) } },
+            onDepth: { [weak self] line in Task { @MainActor in self?.showDepth(line) } }
         )
     }
 
@@ -110,5 +115,9 @@ final class AppModel {
     private func note(_ text: String) {
         notes.append(text)
         if notes.count > 12 { notes.removeFirst(notes.count - 12) }
+    }
+
+    func showDepth(_ line: String) {
+        depthLine = line
     }
 }

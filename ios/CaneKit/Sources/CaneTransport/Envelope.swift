@@ -8,6 +8,8 @@ public enum InboundMessage: Equatable, Sendable {
     case event(AwarenessEvent)
     case answer(SceneAnswer)
     case steer(SteerCommand)
+    /// The natural-voice audio for one `SpeakRequest`.
+    case voice(VoiceClip)
     case unknown(type: String)
 
     /// Decodes one wire frame. Throws `TransportError.malformed` for bad
@@ -36,6 +38,8 @@ public enum InboundMessage: Equatable, Sendable {
             return .answer(try SceneAnswer.decode(object))
         case "steer":
             return .steer(try SteerCommand.decode(object))
+        case "voice":
+            return .voice(try VoiceClip.decode(object))
         default:
             return .unknown(type: type)
         }

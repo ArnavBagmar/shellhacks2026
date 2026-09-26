@@ -12,6 +12,7 @@ final class AppSettings {
         static let port = "laptopPort"
         static let rate = "speechRate"
         static let gain = "hapticGain"
+        static let naturalVoice = "naturalVoice"
     }
 
     private let defaults: UserDefaults
@@ -22,6 +23,9 @@ final class AppSettings {
     var laptopPort: Int { didSet { defaults.set(laptopPort, forKey: Key.port) } }
     var speechRate: Double { didSet { defaults.set(speechRate, forKey: Key.rate) } }
     var hapticGain: Double { didSet { defaults.set(hapticGain, forKey: Key.gain) } }
+    /// Answers and prompts in the ElevenLabs voice (through the laptop).
+    /// Hazards always use the phone's own voice.
+    var naturalVoice: Bool { didSet { defaults.set(naturalVoice, forKey: Key.naturalVoice) } }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -29,6 +33,7 @@ final class AppSettings {
         laptopPort = defaults.object(forKey: Key.port) as? Int ?? 8765
         speechRate = defaults.object(forKey: Key.rate) as? Double ?? 0.55
         hapticGain = defaults.object(forKey: Key.gain) as? Double ?? 1.0
+        naturalVoice = defaults.object(forKey: Key.naturalVoice) as? Bool ?? true
     }
 
     var laptopURL: URL? {
@@ -39,12 +44,13 @@ final class AppSettings {
 
     /// A value snapshot the non-UI runtime can read from any thread.
     var snapshot: Snapshot {
-        Snapshot(speechRate: Float(speechRate), hapticGain: Float(hapticGain))
+        Snapshot(speechRate: Float(speechRate), hapticGain: Float(hapticGain), naturalVoice: naturalVoice)
     }
 
     struct Snapshot: Sendable {
         let speechRate: Float
         let hapticGain: Float
+        let naturalVoice: Bool
     }
 }
 

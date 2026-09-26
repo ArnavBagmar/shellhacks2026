@@ -20,6 +20,8 @@ from cane.transport.messages import (
     Ping,
     SceneAnswer,
     SceneQuery,
+    SpeakRequest,
+    VoiceClip,
     decode,
     encode,
 )
@@ -65,7 +67,7 @@ async def _wait_for(predicate: Any, timeout_s: float = RECV_TIMEOUT_S) -> None:
 def test_the_decoder_matches_the_fixture(case: dict[str, Any]) -> None:
     text = json.dumps(case["frame"])
     if case["expect"] == "valid":
-        assert isinstance(decode(text), (SceneQuery, SceneAnswer))
+        assert isinstance(decode(text), (SceneQuery, SceneAnswer, SpeakRequest, VoiceClip))
     else:
         with pytest.raises(MalformedMessageError):
             decode(text)
@@ -197,3 +199,60 @@ async def test_send_answer_with_no_phone_returns_false() -> None:
         answer = decode(json.dumps(_frame("answer_unavailable")))
         assert isinstance(answer, SceneAnswer)
         assert await srv.send_answer(answer) is False
+
+
+# --------------------------------------------------------------------------
+# speak / voice: the natural voice for answers
+# --------------------------------------------------------------------------
+
+
+def test_a_voice_clip_encodes_to_exactly_the_wire_shape() -> None:
+    frame = _frame("voice_ok")
+    clip = decode(json.dumps(frame))
+    assert isinstance(clip, VoiceClip)
+    assert json.loads(encode(clip)) == frame
+
+
+async def test_speak_with_no_voice_attached_is_answered_unavailable_at_once() -> None:
+    # The phone must never wait out a timeout for a voice the laptop lacks.
+    async with EventLinkServer("127.0.0.1", 0, ping_interval_s=10) as srv:
+        async with websockets.connect(f"ws://127.0.0.1:{srv.port}") as phone:
+            await phone.send(json.dumps(_frame("speak_valid")))
+            clip = await _recv_decoded(phone)
+
+    assert isinstance(clip, VoiceClip)
+    assert clip.speak_id == "s-0001"
+    assert clip.status == "unavailable"
+    assert clip.audio_b64 is None
+
+
+async def test_speak_reaches_on_speak_and_its_clip_reaches_the_phone() -> None:
+    seen: list[SpeakRequest] = []
+
+    async def voice_it(request: SpeakRequest) -> VoiceClip:
+        seen.append(request)
+        return VoiceClip(speak_id=request.speak_id, status="ok", format="mp3_44100_64",
+                         audio_b64="SUQzBA==", latency_ms=300)
+
+    async with EventLinkServer("127.0.0.1", 0, ping_interval_s=10, on_speak=voice_it) as srv:
+        async with websockets.connect(f"ws://127.0.0.1:{srv.port}") as phone:
+            await phone.send(json.dumps(_frame("speak_valid")))
+            clip = await _recv_decoded(phone)
+
+    assert [r.text for r in seen] == ["To your right, restroom sign."]
+    assert isinstance(clip, VoiceClip)
+    assert clip.status == "ok"
+    assert clip.audio_b64 == "SUQzBA=="
+
+
+async def test_a_raising_on_speak_still_answers_unavailable() -> None:
+    async def explode(request: SpeakRequest) -> VoiceClip:
+        raise RuntimeError("elevenlabs blew up")
+
+    async with EventLinkServer("127.0.0.1", 0, ping_interval_s=10, on_speak=explode) as srv:
+        async with websockets.connect(f"ws://127.0.0.1:{srv.port}") as phone:
+            await phone.send(json.dumps(_frame("speak_valid")))
+            clip = await _recv_decoded(phone)
+
+    assert isinstance(clip, VoiceClip)
+    assert clip.status == "unavailable"

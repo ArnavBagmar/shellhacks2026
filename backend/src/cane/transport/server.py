@@ -30,7 +30,9 @@ from cane.transport.messages import (
     Pong,
     SceneAnswer,
     SceneQuery,
+    SpeakRequest,
     Steer,
+    VoiceClip,
     Unknown,
     decode,
     encode,
@@ -51,6 +53,7 @@ IGNORED_LOG_INTERVAL_S = 5.0
 MAX_FRAME_BYTES = 4 * 1024 * 1024
 
 QueryHandler = Callable[[SceneQuery], Awaitable[None]]
+SpeakHandler = Callable[[SpeakRequest], Awaitable[VoiceClip]]
 
 
 class EventLinkServer:
@@ -68,6 +71,7 @@ class EventLinkServer:
         pipeline_delay_d_ms: int = 0,
         on_health: Callable[[PhoneHealth], None] | None = None,
         on_query: QueryHandler | None = None,
+        on_speak: SpeakHandler | None = None,
     ) -> None:
         self._host = host
         self._port = port
@@ -81,6 +85,10 @@ class EventLinkServer:
         # Step 20's scene service. Async and slow (a VLM call), so it runs
         # as its own task: the inbound loop keeps answering pongs meanwhile.
         self._on_query = on_query
+        # The natural voice (ElevenLabs). Every ``speak`` gets exactly one
+        # ``voice`` back -- ``unavailable`` without a hook -- so the phone
+        # never waits out a timeout before using its own voice.
+        self._on_speak = on_speak
         self._query_tasks: set[asyncio.Task[None]] = set()
         self._estimator = OffsetEstimator()
         self._frames_ignored = 0
@@ -242,6 +250,8 @@ class EventLinkServer:
             phone_logger.info(msg.model_dump_json())
         elif isinstance(msg, SceneQuery):
             self._apply_query(msg)
+        elif isinstance(msg, SpeakRequest):
+            self._spawn(self._run_speak(msg))
         elif isinstance(msg, Unknown):
             self._count_ignored(msg.type)
         else:
@@ -293,6 +303,29 @@ class EventLinkServer:
         task = asyncio.create_task(self._run_query(self._on_query, query))
         self._query_tasks.add(task)
         task.add_done_callback(self._query_tasks.discard)
+
+    def _spawn(self, work: Awaitable[None]) -> None:
+        task = asyncio.ensure_future(work)
+        self._query_tasks.add(task)
+        task.add_done_callback(self._query_tasks.discard)
+
+    async def _run_speak(self, request: SpeakRequest) -> None:
+        clip = VoiceClip.unavailable(request.speak_id)
+        if self._on_speak is not None:
+            try:
+                clip = await self._on_speak(request)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - the phone falls back to its own voice
+                logger.exception("the on_speak hook raised for %s", request.speak_id)
+        await self.send_voice(clip)
+
+    async def send_voice(self, clip: VoiceClip) -> bool:
+        """Send one ``voice`` frame. Never raises; ``False`` with no phone."""
+        connection = self._connection
+        if connection is None:
+            return False
+        return await self._send_on(connection, encode(clip), "send_voice")
 
     @staticmethod
     async def _run_query(handler: QueryHandler, query: SceneQuery) -> None:

@@ -124,8 +124,13 @@ object with a `type` string:
 - `query` (phone → laptop) and `answer` (laptop → phone) are step 20's
   spoken questions ("Hey Cane, is there a bathroom around?", see
   `docs/steps/step-20-brief.md`). One `answer` per `query_id`; a newer
-  query supersedes an older one. `target` is required exactly when `kind`
-  is `find`; `bearing_deg` is present exactly when `status` is `found`
+  query supersedes an older one. `kind` is `find`, `describe_around`,
+  `describe_front`, or `ask` (any other question, answered in a sentence).
+  `speak` (phone → laptop) / `voice` (laptop → phone) carry the natural
+  voice: one `voice` per `speak_id`, `ok` with base64 audio + its format, or
+  `unavailable` with neither (the phone then uses its own voice). Hazards
+  are never sent as `speak`.
+  `target` is required exactly when `kind` is `find`; `bearing_deg` is present exactly when `status` is `found`
   (same `(-180, 180]` torso-relative convention as events). The optional
   `phone_frame` is one base64 front-camera JPEG, unmirrored. As everywhere
   else, every key is present and unknown keys are rejected:

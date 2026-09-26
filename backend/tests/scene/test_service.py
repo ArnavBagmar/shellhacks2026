@@ -24,12 +24,15 @@ PHONE_HFOV = 70.0
 TINY_JPEG_B64 = base64.b64encode(b"\xff\xd8\xff\xe0 not really a jpeg").decode("ascii")
 
 
-def _query(kind: str = "find", *, phone: bool = False, query_id: str = "q-1") -> SceneQuery:
+def _query(
+    kind: str = "find", *, phone: bool = False, query_id: str = "q-1",
+    utterance: str = "is there a bathroom around",
+) -> SceneQuery:
     return SceneQuery(
         query_id=query_id,
         kind=kind,  # type: ignore[arg-type]
         target="bathroom" if kind == "find" else None,
-        utterance="is there a bathroom around",
+        utterance=utterance,
         t_phone_ms=1_790_000_000_000,
         phone_frame=PhoneFrame(jpeg_b64=TINY_JPEG_B64, hfov_deg=PHONE_HFOV, width=4, height=3)
         if phone
@@ -310,3 +313,77 @@ async def test_save_views_writes_what_the_model_saw(tmp_path: object) -> None:
     summary = json.loads((saved / "query.json").read_text())
     assert summary["answer"]["bearing_deg"] == 60.0
     assert "bathroom" in summary["prompt"]
+
+
+# --------------------------------------------------------------------- ask
+
+
+async def test_ask_sends_every_view_with_the_question_and_where_and_when() -> None:
+    from datetime import datetime
+
+    vlm = FakeVLM(VlmReply(status="answered", detail="Cloudy, and the ground looks wet."))
+    service = _service(vlm, location="FIU, Miami", now=lambda: datetime(2026, 9, 26, 15, 7))
+    await service.answer(_query("ask", phone=True, utterance="how's the weather"))
+
+    (prompt, images), = vlm.calls
+    assert len(images) == 7
+    assert "how's the weather" in prompt
+    assert "FIU, Miami" in prompt
+    assert "Saturday 26 September 2026" in prompt and "3:07 PM" in prompt
+    assert vlm.searches == [True]
+
+
+async def test_only_ask_may_search() -> None:
+    vlm = FakeVLM(_found(0, 0.5))
+    await _service(vlm).answer(_query())
+    assert vlm.searches == [False]
+
+
+async def test_an_ask_answer_is_spoken_as_given() -> None:
+    vlm = FakeVLM(VlmReply(status="answered", detail="Paris."))
+    answer = await _service(vlm).answer(_query("ask", utterance="what is the capital of france"))
+    assert answer.status == "described"
+    assert answer.detail == "Paris."
+    assert answer.bearing_deg is None
+
+
+async def test_an_ask_about_one_visible_thing_gets_a_bearing() -> None:
+    vlm = FakeVLM(_found(1, 0.5))
+    answer = await _service(vlm).answer(_query("ask", utterance="do you see a bathroom nearby"))
+    assert answer.status == "found"
+    assert answer.subject == "restroom sign"
+    assert answer.bearing_deg == 60.0
+
+
+async def test_an_empty_ask_answer_is_unavailable() -> None:
+    vlm = FakeVLM(VlmReply(status="answered"))
+    answer = await _service(vlm).answer(_query("ask", utterance="hmm"))
+    assert answer.status == "unavailable"
+
+
+class _Weather:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def summary(self) -> str | None:
+        self.calls += 1
+        return "Live weather for Miami, Florida: 85°F and mainly clear."
+
+
+async def test_a_weather_question_gets_live_weather_in_the_prompt() -> None:
+    weather = _Weather()
+    vlm = FakeVLM(VlmReply(status="answered", detail="85 and clear."))
+    await _service(vlm, weather=weather).answer(_query("ask", utterance="how is the weather today"))
+    (prompt, _), = vlm.calls
+    assert "85°F and mainly clear" in prompt
+    assert weather.calls == 1
+    # The facts are already here; a web search would only add latency.
+    assert vlm.searches == [False]
+
+
+async def test_other_questions_do_not_fetch_weather() -> None:
+    weather = _Weather()
+    vlm = FakeVLM(VlmReply(status="answered", detail="Paris."))
+    await _service(vlm, weather=weather).answer(_query("ask", utterance="what is the capital of france"))
+    await _service(vlm, weather=weather).answer(_query())
+    assert weather.calls == 0

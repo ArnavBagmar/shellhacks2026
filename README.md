@@ -16,6 +16,12 @@ An assistive extension to the white cane. A chest-mounted iPhone detects front h
 
 ## Quick start
 
+**Running the phone demo:** `./startcane` (laptop serve over the still image), `./startcane x4` (live X4),
+`./startcane phone` (build + install the app on plugged-in iPhones), `./startcane test`, `./startcane logs`.
+It needs `backend/.env` with `GEMINI_API_KEY=...` (optionally `CANE_LOCATION="FIU, Miami, Florida"` for live weather
+and `ELEVENLABS_API_KEY=...` for the natural answer voice),
+stops a stale serve on the port, and prints the address to type into the phone app.
+
 ```bash
 # Python (needs uv; CPython 3.12 is fetched automatically)
 cd backend && uv sync --extra mac && uv run pytest -q   # 693 tests (+1 live-X4 test behind CANE_LIVE_X4=1)

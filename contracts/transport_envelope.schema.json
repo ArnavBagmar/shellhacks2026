@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://cane.shellhacks/contracts/transport_envelope.schema.json",
   "title": "TransportEnvelope",
-  "description": "The eight WebSocket frame shapes exchanged between the laptop (server) and the phone (client); see docs/camera-sync-design.md Sec 4.2 and Sec 4.4, docs/steps/step-20-brief.md (query/answer), docs/shepherd-steering-plan.md step 21 (steer) and contracts/README.md 'Transport envelope'. The reserved type 'location' (phone -> laptop, defined in a later step) and any other unrecognised 'type' are valid JSON that a receiver logs and ignores -- they are deliberately out of scope for this schema, which only documents the shapes the laptop and phone actually exchange today.",
+  "description": "The ten WebSocket frame shapes exchanged between the laptop (server) and the phone (client); see docs/camera-sync-design.md Sec 4.2 and Sec 4.4, docs/steps/step-20-brief.md (query/answer), docs/shepherd-steering-plan.md step 21 (steer) and contracts/README.md 'Transport envelope'. The reserved type 'location' (phone -> laptop, defined in a later step) and any other unrecognised 'type' are valid JSON that a receiver logs and ignores -- they are deliberately out of scope for this schema, which only documents the shapes the laptop and phone actually exchange today.",
   "oneOf": [
     { "$ref": "#/$defs/ping" },
     { "$ref": "#/$defs/pong" },
@@ -11,7 +11,9 @@
     { "$ref": "#/$defs/query" },
     { "$ref": "#/$defs/answer" },
     { "$ref": "#/$defs/diag" },
-    { "$ref": "#/$defs/steer" }
+    { "$ref": "#/$defs/steer" },
+    { "$ref": "#/$defs/speak" },
+    { "$ref": "#/$defs/voice" }
   ],
   "$defs": {
     "ping": {
@@ -161,8 +163,8 @@
           "pattern": "^[A-Za-z0-9_-]{1,64}$"
         },
         "kind": {
-          "enum": ["find", "describe_around", "describe_front"],
-          "description": "find: look for 'target' all around. describe_around: summarise the 360 view. describe_front: describe the phone frame (X4 crops optional)."
+          "enum": ["find", "describe_around", "describe_front", "ask"],
+          "description": "find: look for 'target' all around. describe_around: summarise the 360 view. describe_front: describe the phone frame (X4 crops optional). ask: any other question, answered in a sentence from every view (and web search when the laptop has it)."
         },
         "target": {
           "type": ["string", "null"],
@@ -424,6 +426,37 @@
           "source": "x4_cloud"
         }
       ]
+    },
+    "speak": {
+      "type": "object",
+      "description": "Phone -> laptop. 'Say this in the natural voice': the laptop synthesizes 'text' (ElevenLabs) and replies with exactly one 'voice' frame carrying the same speak_id. Answers and prompts only; hazards are always spoken on the phone.",
+      "additionalProperties": false,
+      "required": ["type", "speak_id", "text"],
+      "properties": {
+        "type": { "const": "speak" },
+        "speak_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 400 }
+      },
+      "examples": [
+        { "type": "speak", "speak_id": "s-3", "text": "To your right, restroom sign, past the elevators." }
+      ]
+    },
+    "voice": {
+      "type": "object",
+      "description": "Laptop -> phone. The audio for one 'speak'. status 'unavailable' (no key, timeout, API error) carries no audio: the phone speaks with its own voice instead.",
+      "additionalProperties": false,
+      "required": ["type", "speak_id", "status", "format", "audio_b64", "latency_ms"],
+      "properties": {
+        "type": { "const": "voice" },
+        "speak_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "status": { "enum": ["ok", "unavailable"] },
+        "format": { "type": ["string", "null"], "minLength": 1, "maxLength": 40, "description": "ElevenLabs output_format, e.g. 'mp3_44100_64'." },
+        "audio_b64": { "type": ["string", "null"], "minLength": 4, "maxLength": 2800000 },
+        "latency_ms": { "type": "integer", "minimum": 0 }
+      },
+      "if": { "properties": { "status": { "const": "ok" } } },
+      "then": { "properties": { "format": { "type": "string" }, "audio_b64": { "type": "string" } } },
+      "else": { "properties": { "format": { "type": "null" }, "audio_b64": { "type": "null" } } }
     }
   }
 }

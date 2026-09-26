@@ -15,6 +15,13 @@ final class SceneMessagesTests: XCTestCase {
             do {
                 if type == "query" {
                     _ = try SceneQuery.decode(data)
+                } else if type == "speak" {
+                    _ = try SpeakRequest.decode(data)
+                } else if type == "voice" {
+                    guard case .voice = try InboundMessage.decode(data) else {
+                        XCTFail("\(item.name): decoded to something other than .voice")
+                        continue
+                    }
                 } else {
                     guard case .answer = try InboundMessage.decode(data) else {
                         XCTFail("\(item.name): decoded to something other than .answer")
@@ -26,6 +33,25 @@ final class SceneMessagesTests: XCTestCase {
                 XCTAssertFalse(item.valid, "\(item.name) should decode, threw \(error)")
             }
         }
+    }
+
+    func testASpeakRequestEncodesItsThreeKeys() throws {
+        let data = try SpeakRequest(speakId: "s-1", text: "Let me check.").encoded()
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(object as NSDictionary, ["type": "speak", "speak_id": "s-1", "text": "Let me check."])
+        XCTAssertEqual(try SpeakRequest.decode(data).text, "Let me check.")
+    }
+
+    func testAVoiceClipDecodesItsAudio() throws {
+        let frame: [String: Any] = [
+            "type": "voice", "speak_id": "s-1", "status": "ok", "format": "mp3_44100_64",
+            "audio_b64": Data("ID3 audio".utf8).base64EncodedString(), "latency_ms": 260,
+        ]
+        guard case .voice(let clip) = try InboundMessage.decode(JSONSerialization.data(withJSONObject: frame)) else {
+            return XCTFail("not a voice frame")
+        }
+        XCTAssertEqual(clip.audio, Data("ID3 audio".utf8))
+        XCTAssertEqual(clip.latencyMs, 260)
     }
 
     func testAFoundAnswerDecodesEveryField() throws {

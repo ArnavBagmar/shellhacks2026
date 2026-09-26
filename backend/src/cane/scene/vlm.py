@@ -50,6 +50,12 @@ DEFAULT_HEDGE_S = 3.0
 #: reply wins. flash-lite is cheap; halving the tail is worth the tokens.
 GEMINI_PARALLEL_ENV = "CANE_GEMINI_PARALLEL"
 DEFAULT_PARALLEL = 2
+#: Google Search grounding for ``ask`` questions (weather, opening hours).
+#: "off" disables. Live 2026-09-26 the key answered plain calls but got 429
+#: for search, so a refused search is retried at once without it, and
+#: search then rests for SEARCH_COOLDOWN_S instead of taxing every question.
+GEMINI_SEARCH_ENV = "CANE_GEMINI_SEARCH"
+SEARCH_COOLDOWN_S = 600.0
 GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
 JPEG_MIME = "image/jpeg"
 #: Low temperature: this is a lookup, not creative writing.
@@ -81,7 +87,9 @@ class VisionLanguageModel(Protocol):
     @property
     def name(self) -> str: ...
 
-    async def ask(self, prompt: str, images: Sequence[LabeledImage]) -> VlmReply: ...
+    async def ask(
+        self, prompt: str, images: Sequence[LabeledImage], *, search: bool = False
+    ) -> VlmReply: ...
 
 
 class VlmUnavailableError(RuntimeError):
@@ -107,6 +115,7 @@ class GeminiVLM:
         fallback_model: str | None = DEFAULT_FALLBACK_MODEL,
         hedge_s: float = DEFAULT_HEDGE_S,
         parallel: int = DEFAULT_PARALLEL,
+        search: bool = True,
     ) -> None:
         from google import genai
         from google.genai import types
@@ -122,6 +131,8 @@ class GeminiVLM:
             None if self._thinking_setting == "auto" else _enum_member(types.ThinkingLevel, thinking)
         )
         self._media_resolution = _enum_member(types.MediaResolution, f"MEDIA_RESOLUTION_{media_resolution}")
+        self.search_enabled = search
+        self._search_off_until = 0.0
 
     @classmethod
     def from_env(cls) -> GeminiVLM:
@@ -137,6 +148,7 @@ class GeminiVLM:
             fallback_model=None if fallback.lower() in {"", "none", "off"} else fallback,
             hedge_s=float(os.environ.get(GEMINI_HEDGE_ENV, DEFAULT_HEDGE_S)),
             parallel=int(os.environ.get(GEMINI_PARALLEL_ENV, DEFAULT_PARALLEL)),
+            search=os.environ.get(GEMINI_SEARCH_ENV, "on").strip().lower() not in {"off", "0", "false", "no"},
         )
 
     @property
@@ -161,7 +173,10 @@ class GeminiVLM:
         except Exception as exc:  # noqa: BLE001 - warm-up is best effort
             logger.warning("%s warm-up failed: %s", self._model, exc)
 
-    async def ask(self, prompt: str, images: Sequence[LabeledImage]) -> VlmReply:
+    async def ask(
+        self, prompt: str, images: Sequence[LabeledImage], *, search: bool = False
+    ) -> VlmReply:
+        """``search``: ground on Google Search while it is available."""
         contents = self._contents(prompt, images)
         # (model, start offset): the parallel primaries at 0, then one more
         # attempt -- the fallback model when there is one -- at hedge_s.
@@ -170,6 +185,7 @@ class GeminiVLM:
         started = loop.time()
         pending: set[asyncio.Task[VlmReply]] = set()
         errors: list[str] = []
+        searching: dict[asyncio.Task[VlmReply], bool] = {}
         launched = 0
         try:
             while True:
@@ -181,9 +197,12 @@ class GeminiVLM:
                             "no reply after %.1fs; also asking %s", loop.time() - started, model
                         )
                     launched += 1
-                    pending.add(asyncio.create_task(
-                        self._call(model, contents, thinking=self._thinking_for(model))
-                    ))
+                    use_search = search and self._search_available()
+                    task = asyncio.create_task(
+                        self._call(model, contents, thinking=self._thinking_for(model), search=use_search)
+                    )
+                    searching[task] = use_search
+                    pending.add(task)
                     continue
                 if not pending:
                     raise VlmUnavailableError("; ".join(errors) or "no attempt was made")
@@ -197,9 +216,19 @@ class GeminiVLM:
                         return task.result()
                     errors.append(str(error))
                     logger.warning("%s", error)
+                    if searching.get(task) and self._search_off_until <= loop.time():
+                        # Quota, or a model that will not mix search with
+                        # JSON: ask again plainly, now, and rest search.
+                        self._search_off_until = loop.time() + SEARCH_COOLDOWN_S
+                        logger.warning("search unavailable; answering without it for %.0f min",
+                                       SEARCH_COOLDOWN_S / 60)
+                        plan.insert(launched, (self._model, 0.0))
         finally:
             for task in pending:
                 task.cancel()
+
+    def _search_available(self) -> bool:
+        return self.search_enabled and asyncio.get_running_loop().time() >= self._search_off_until
 
     def _thinking_for(self, model: str) -> object | None:
         if self._thinking_setting != "auto":
@@ -214,7 +243,9 @@ class GeminiVLM:
         contents.append(prompt)
         return contents
 
-    async def _call(self, model: str, contents: list[object], *, thinking: object | None) -> VlmReply:
+    async def _call(
+        self, model: str, contents: list[object], *, thinking: object | None, search: bool = False
+    ) -> VlmReply:
         types = self._types
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -223,7 +254,8 @@ class GeminiVLM:
             # Latency over depth: the wearer is standing still waiting.
             thinking_config=types.ThinkingConfig(thinking_level=thinking) if thinking else None,
             media_resolution=self._media_resolution,
-            # No tools are declared; keep the SDK out of its function-calling loop.
+            tools=[types.Tool(google_search=types.GoogleSearch())] if search else None,
+            # Only built-in tools; keep the SDK out of its function-calling loop.
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
         started = time.monotonic()
@@ -234,8 +266,11 @@ class GeminiVLM:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - every SDK failure means "unavailable"
-            raise VlmUnavailableError(f"{model} call failed: {exc}") from exc
-        logger.info("%s answered in %.1fs", model, time.monotonic() - started)
+            # The SDK's message carries the whole JSON error body; the first
+            # line ("429 RESOURCE_EXHAUSTED. ...") is the useful part.
+            reason = str(exc).split(". {", 1)[0][:200]
+            raise VlmUnavailableError(f"{model}{' with search' if search else ''} call failed: {reason}") from exc
+        logger.info("%s%s answered in %.1fs", model, " with search" if search else "", time.monotonic() - started)
         parsed = response.parsed
         if isinstance(parsed, VlmReply):
             return parsed
@@ -275,13 +310,17 @@ class FakeVLM:
         self._error = error
         self._delay_s = delay_s
         self.calls: list[tuple[str, tuple[LabeledImage, ...]]] = []
+        self.searches: list[bool] = []
 
     @property
     def name(self) -> str:
         return "fake"
 
-    async def ask(self, prompt: str, images: Sequence[LabeledImage]) -> VlmReply:
+    async def ask(
+        self, prompt: str, images: Sequence[LabeledImage], *, search: bool = False
+    ) -> VlmReply:
         self.calls.append((prompt, tuple(images)))
+        self.searches.append(search)
         if self._delay_s:
             await asyncio.sleep(self._delay_s)
         if self._error is not None:

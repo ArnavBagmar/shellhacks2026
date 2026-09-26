@@ -25,9 +25,11 @@ def _vlm(
     vlm = GeminiVLM("test-key", model="primary", fallback_model="backup", hedge_s=HEDGE_S, parallel=parallel)
     calls: list[str] = []
 
-    async def fake_call(model: str, contents: list[object], *, thinking: object | None) -> VlmReply:
+    async def fake_call(
+        model: str, contents: list[object], *, thinking: object | None, search: bool = False
+    ) -> VlmReply:
         outcome = outcomes[len(calls)]
-        calls.append(model)
+        calls.append(f"{model}+search" if search else model)
         if outcome == "slow":
             await asyncio.sleep(5)
         if isinstance(outcome, Exception):
@@ -87,3 +89,37 @@ def test_fallback_none_disables_it(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     monkeypatch.setenv("CANE_GEMINI_FALLBACK_MODEL", "none")
     assert "fallback" not in GeminiVLM.from_env().name
+
+
+# ------------------------------------------------------------ search grounding
+
+
+async def test_a_search_question_searches_on_every_first_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
+    vlm, calls = _vlm(monkeypatch, ["slow", "described"], parallel=2)
+    assert (await vlm.ask("p", IMAGES, search=True)).status == "described"
+    assert calls == ["primary+search", "primary+search"]
+
+
+async def test_refused_search_retries_the_primary_without_it_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Live 2026-09-26: the key answered plain calls but returned 429 for search.
+    refused = VlmUnavailableError("429 RESOURCE_EXHAUSTED")
+    vlm, calls = _vlm(monkeypatch, [refused, "described", "described"])
+    started = asyncio.get_running_loop().time()
+    assert (await vlm.ask("p", IMAGES, search=True)).status == "described"
+    assert asyncio.get_running_loop().time() - started < HEDGE_S
+    assert calls == ["primary+search", "primary"]
+    # ...and search stays off for a while instead of costing every question a retry.
+    await vlm.ask("p", IMAGES, search=True)
+    assert calls[-1] == "primary"
+
+
+async def test_a_plain_question_never_searches(monkeypatch: pytest.MonkeyPatch) -> None:
+    vlm, calls = _vlm(monkeypatch, ["found"])
+    await vlm.ask("p", IMAGES)
+    assert calls == ["primary"]
+
+
+def test_search_can_be_switched_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("CANE_GEMINI_SEARCH", "off")
+    assert GeminiVLM.from_env().search_enabled is False

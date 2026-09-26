@@ -34,3 +34,6 @@ backend/logs/
 .env
 .env.*
 !.env.example
+
+# xcodebuild -derivedDataPath output (./startcane phone)
+ios/CaneApp/build/

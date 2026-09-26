@@ -14,6 +14,7 @@ import os
 ///     laptop --steer---> FeedbackManager --> SteerCueOutput -^ (step 24)
 ///     laptop <--query--- QueryCoordinator <-- VoiceRouter <-- SpeechListener (open mic)
 ///     laptop --answer--> QueryCoordinator --> OutputArbiter
+///     laptop <--speak--- NaturalSpeechRenderer (answers, prompts) --voice--> clip player
 ///
 /// The phone is the master clock: every `now` here is phone wall-clock ms.
 @MainActor
@@ -27,6 +28,8 @@ final class Runtime {
         var onLevel: @Sendable (Double) -> Void
         var onAssist: @Sendable (QueryCoordinator.State) -> Void
         var onNote: @Sendable (String) -> Void
+        /// A live TrueDepth reading for the debug panel, once a second.
+        var onDepth: @Sendable (String) -> Void
     }
 
     static let tickMs = 100
@@ -35,6 +38,7 @@ final class Runtime {
     let arbiter: OutputArbiter
     let client: EventLinkClient
     let camera: FrontCamera
+    private let laptopVoice: LaptopVoice
     private let feedback: FeedbackManager
     private let coordinator: QueryCoordinator
     private let voice: VoiceRouter
@@ -59,7 +63,27 @@ final class Runtime {
         self.callbacks = callbacks
         let haptics = CoreHapticsRenderer()
         let speech = AVSpeechRenderer(rate: { settings.current.speechRate })
-        let arbiter = OutputArbiter(haptics: haptics, speech: speech, earcon: EarconPlayer(), clock: Self.now)
+        let laptopVoice = LaptopVoice(link: client, clock: Self.now)
+        self.laptopVoice = laptopVoice
+        let natural = NaturalSpeechRenderer(
+            fallback: speech,
+            player: AVClipPlayer(),
+            onOutcome: { text, outcome in
+                switch outcome {
+                case .natural(let waitedMs):
+                    diagnostics.record("voice", ["source": .text("elevenlabs"), "waited_ms": .number(Double(waitedMs)),
+                                                 "text": .text(text)])
+                case .fallback(let reason):
+                    diagnostics.record("voice", ["source": .text("phone"), "reason": .text(reason), "text": .text(text)])
+                }
+            },
+            fetch: { text in
+                guard settings.current.naturalVoice else { return nil }
+                return await laptopVoice.audio(for: text)
+            }
+        )
+        let arbiter = OutputArbiter(haptics: haptics, speech: speech, naturalSpeech: natural,
+                                    earcon: EarconPlayer(), clock: Self.now)
         self.arbiter = arbiter
 
         let sink = NotifyingSink(
@@ -126,7 +150,9 @@ final class Runtime {
             onSaid: { text in diag.record("say", ["text": .text(text)]); ui.onSaid(text) },
             onLevel: { value in diag.micLevel(value); ui.onLevel(value) },
             onAssist: { state in diag.record("assist", ["state": .text(String(describing: state))]); ui.onAssist(state) },
-            onNote: { text in diag.record("note", ["text": .text(text)]); ui.onNote(text) }
+            onNote: { text in diag.record("note", ["text": .text(text)]); ui.onNote(text) },
+            // Already recorded by the depth loop itself; this only drives the panel.
+            onDepth: { line in ui.onDepth(line) }
         )
     }
 
@@ -186,7 +212,12 @@ final class Runtime {
 
     private func startLoops() {
         let client = client, feedback = feedback, coordinator = coordinator, voice = voice, callbacks = callbacks
-        let diagnostics = diagnostics
+        let diagnostics = diagnostics, laptopVoice = laptopVoice
+        tasks.append(Task {
+            for await clip in client.voices {
+                await laptopVoice.receive(clip)
+            }
+        })
         tasks.append(Task {
             for await event in client.events {
                 await feedback.ingest(event, now: Self.now())
@@ -245,12 +276,45 @@ final class Runtime {
             callbacks.onNote("camera: no permission -- questions use the 360 camera only")
             return
         }
+        // Prototype: measure what is straight ahead. Only phones with a
+        // TrueDepth sensor get readings; the rest run exactly as before.
+        camera.wantsDepth = true
         do {
             try camera.start()
-            callbacks.onNote("camera: front, mirroring off")
+            if camera.hasDepth {
+                callbacks.onNote("camera: front, mirroring off, TrueDepth on")
+                startDepthLog()
+            } else {
+                callbacks.onNote("camera: front, mirroring off, no TrueDepth on this phone")
+            }
+            diagnostics.record("depth_available", ["has_depth": .text(camera.hasDepth ? "yes" : "no")])
         } catch {
             callbacks.onNote("camera: \(error)")
         }
+    }
+
+    /// Logs one reading a second to the black box, so the range and the
+    /// sunlight question can be answered from real numbers rather than
+    /// guessed at. Purely observational: nothing is spoken from it yet.
+    private func startDepthLog() {
+        tasks.append(Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, let sample = self.camera.depth else { continue }
+                let trusted = sample.isTrustworthy()
+                self.callbacks.onDepth(String(
+                    format: "ahead %.2f m · coverage %.0f%% · %@%@",
+                    sample.metres, sample.coverage * 100, sample.accuracy.rawValue,
+                    trusted ? "" : "  NOT TRUSTED"))
+                self.diagnostics.record("depth", [
+                    "metres": .number(sample.metres),
+                    "nearest_m": .number(sample.nearestMetres),
+                    "coverage": .number(sample.coverage),
+                    "accuracy": .text(sample.accuracy.rawValue),
+                    "trustworthy": .text(sample.isTrustworthy() ? "yes" : "no"),
+                ])
+            }
+        })
     }
 
     private func startMicrophone() async {

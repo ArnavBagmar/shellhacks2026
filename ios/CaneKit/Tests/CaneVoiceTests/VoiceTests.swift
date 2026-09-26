@@ -76,6 +76,33 @@ final class IntentParserTests: XCTestCase {
         }
     }
 
+    func testTimeAndHelp() {
+        for utterance in ["what time is it", "What's the time?", "tell me the time", "do you know what time it is"] {
+            XCTAssertEqual(IntentParser.parse(utterance), .time, utterance)
+        }
+        for utterance in ["help", "what can you do", "what can I say", "what can I ask you"] {
+            XCTAssertEqual(IntentParser.parse(utterance), .help, utterance)
+        }
+    }
+
+    func testDoYouSeeIsAFind() {
+        XCTAssertEqual(IntentParser.parse("do you see a bathroom nearby?"), .find("bathroom"))
+        XCTAssertEqual(IntentParser.parse("can you see the door"), .find("door"))
+        XCTAssertEqual(IntentParser.parse("do you see any stairs around here"), .find("stairs"))
+        XCTAssertEqual(IntentParser.parse("what do you see"), .describeFront)
+        XCTAssertEqual(IntentParser.parse("do you see anything"), .describeAround)
+    }
+
+    func testEverythingElseIsAQuestionForGemini() {
+        XCTAssertEqual(IntentParser.route("how's the weather today"), .ask("how is the weather today"))
+        XCTAssertEqual(IntentParser.route("is this line for the food"), .ask("is this line for the food"))
+        XCTAssertEqual(IntentParser.route("is there a bathroom around"), .find("bathroom"))
+        XCTAssertEqual(IntentParser.route("what time is it"), .time)
+        // One stray word is a mishearing, not a question.
+        XCTAssertNil(IntentParser.route("yeah"))
+        XCTAssertNil(IntentParser.route(""))
+    }
+
     func testArmingLetsTheWearerRepeatWithoutTheWakeWord() {
         var gate = WakeWordGate()
         gate.arm(nowMs: 0)
@@ -104,7 +131,8 @@ final class WakeWordGateTests: XCTestCase {
     }
 
     func testMisheardNamesStillWake() {
-        for name in ["Kane", "Cain", "cane"] {
+        // "King" and "keen" are what the recognizer heard live (2026-09-26).
+        for name in ["Kane", "Cain", "cane", "King", "keen", "Keane", "Kane's"] {
             var gate = WakeWordGate()
             XCTAssertEqual(gate.feed(text: "okay \(name) what's around me", isFinal: true, nowMs: 0),
                            .command("what is around me"), name)

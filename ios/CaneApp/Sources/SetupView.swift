@@ -49,6 +49,7 @@ struct SetupView: View {
                     LabeledContent("Haptic strength", value: settings.hapticGain.formatted(.number.precision(.fractionLength(1))))
                     Slider(value: $settings.hapticGain, in: 0.6...1.4, step: 0.1)
                         .accessibilityLabel("Haptic strength")
+                    Toggle("Natural voice for answers", isOn: $settings.naturalVoice)
                     Button(testingHaptics ? "Playing…" : "Play the haptic alphabet") {
                         testingHaptics = true
                         Task {
@@ -60,7 +61,7 @@ struct SetupView: View {
                 } header: {
                     Text("Comfort")
                 } footer: {
-                    Text("Two clicks is left, three quick clicks is right. A short bump is ahead, a long swell is behind. A long hard rattle means act now.")
+                    Text("Two clicks is left, three quick clicks is right. A short bump is ahead, a long swell is behind. A long hard rattle means act now. The natural voice (ElevenLabs, through the laptop) speaks answers; warnings always use the phone's own voice.")
                 }
 
                 if !model.notes.isEmpty {
@@ -74,6 +75,7 @@ struct SetupView: View {
             .navigationTitle("Cane")
             .onChange(of: settings.speechRate) { model.settingsChanged() }
             .onChange(of: settings.hapticGain) { model.settingsChanged() }
+            .onChange(of: settings.naturalVoice) { model.settingsChanged() }
         }
         .accessibilityAction(.magicTap) { Task { await model.startWalking() } }
     }

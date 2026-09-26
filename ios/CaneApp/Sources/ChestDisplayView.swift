@@ -121,6 +121,9 @@ struct ChestDisplayView: View {
                     .onSubmit(send)
                 Button("Send", action: send)
             }
+            if let depth = model.depthLine {
+                Text(depth).font(.callout.monospaced().bold()).foregroundStyle(.cyan)
+            }
             ForEach(Array(model.notes.enumerated()), id: \.offset) { _, line in
                 Text(line).font(.caption.monospaced()).foregroundStyle(.white.opacity(0.6))
             }

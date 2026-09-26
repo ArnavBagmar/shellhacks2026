@@ -49,6 +49,20 @@ final class AnswerPhrasingTests: XCTestCase {
         XCTAssertEqual(AnswerPhrasing.phrase(for: try answer(.unavailable), target: nil),
                        "Looking around isn't available right now.")
     }
+
+    func testTheTimeIsSpokenInTheWearersClockStyle() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        let date = calendar.date(from: DateComponents(year: 2026, month: 9, day: 26, hour: 15, minute: 7))!
+        XCTAssertEqual(AnswerPhrasing.time(date, locale: Locale(identifier: "en_US"), timeZone: calendar.timeZone),
+                       "It's 3:07\u{202F}PM.")
+    }
+
+    func testNotUnderstoodSaysWhatWasHeardAndWhatWorks() {
+        let phrase = AnswerPhrasing.notUnderstood(heard: "how is the weather today")
+        XCTAssertTrue(phrase.hasPrefix("I heard: how is the weather today."), phrase)
+        XCTAssertTrue(phrase.contains("find"), phrase)
+    }
 }
 
 // MARK: - Coordinator
@@ -101,6 +115,19 @@ final class QueryCoordinatorTests: XCTestCase {
         XCTAssertEqual(speaker.said.map(\.1), [.prompt])
         let state = await c.state
         XCTAssertEqual(state, .looking(queryId: "q-1"))
+    }
+
+    func testAnyOtherQuestionIsAskedWithThePhotoAndNoHoldStill() async {
+        let link = FakeLink(), speaker = FakeSpeaker()
+        let c = coordinator(link, speaker)
+
+        await c.handle(.ask("how is the weather today"))
+
+        XCTAssertEqual(link.sent.first?.kind, .ask)
+        XCTAssertNil(link.sent.first?.target)
+        XCTAssertEqual(link.sent.first?.utterance, "how is the weather today")
+        XCTAssertNotNil(link.sent.first?.phoneFrame)
+        XCTAssertEqual(speaker.said.map(\.0), [AnswerPhrasing.checking])
     }
 
     func testTheMatchingAnswerIsSpokenOnTheAnswerChannelWithASideBuzz() async throws {
@@ -187,7 +214,85 @@ final class QueryCoordinatorTests: XCTestCase {
         let c = coordinator(FakeLink(), FakeSpeaker())
         let nav = await c.handle(.navigate("library"))
         let sign = await c.handle(.readSign)
+        let time = await c.handle(.time)
+        let help = await c.handle(.help)
         XCTAssertFalse(nav)
         XCTAssertFalse(sign)
+        XCTAssertFalse(time)
+        XCTAssertFalse(help)
     }
+}
+
+
+// MARK: - Laptop voice
+
+final class FakeVoiceLink: VoiceLink, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _sent: [SpeakRequest] = []
+    let connected: Bool
+    var onSend: (@Sendable (SpeakRequest) -> Void)?
+
+    init(connected: Bool = true) { self.connected = connected }
+
+    var sent: [SpeakRequest] { lock.withLock { _sent } }
+
+    func send(_ request: SpeakRequest) async throws {
+        guard connected else { throw TransportError.notConnected }
+        lock.withLock { _sent.append(request) }
+        onSend?(request)
+    }
+}
+
+final class LaptopVoiceTests: XCTestCase {
+    private let mp3 = Data("ID3 mp3".utf8)
+
+    private func replying(_ status: VoiceClipStatus, audio: Data?) -> (FakeVoiceLink, LaptopVoice) {
+        let link = FakeVoiceLink()
+        let voice = LaptopVoice(link: link)
+        link.onSend = { request in
+            Task {
+                let clip = try VoiceClip(speakId: request.speakId, status: status,
+                                         format: audio == nil ? nil : "mp3_44100_64", audio: audio, latencyMs: 250)
+                await voice.receive(clip)
+            }
+        }
+        return (link, voice)
+    }
+
+    func testTheReplyForTheRequestIsReturned() async {
+        let (link, voice) = replying(.ok, audio: mp3)
+        let audio = await voice.audio(for: "Paris.")
+        XCTAssertEqual(audio, mp3)
+        XCTAssertEqual(link.sent.map(\.text), ["Paris."])
+    }
+
+    func testTheSameWordsAreFetchedOncePerWalk() async {
+        let (link, voice) = replying(.ok, audio: mp3)
+        _ = await voice.audio(for: "Let me check.")
+        let again = await voice.audio(for: "Let me check.")
+        XCTAssertEqual(again, mp3)
+        XCTAssertEqual(link.sent.count, 1)
+    }
+
+    func testNoLinkIsNilAtOnce() async {
+        let voice = LaptopVoice(link: FakeVoiceLink(connected: false))
+        let ms = await elapsedMs { _ = await voice.audio(for: "Paris.") }
+        XCTAssertLessThan(ms, 100)
+    }
+
+    func testAnUnavailableLaptopIsNotAskedAgainForAWhile() async {
+        let (link, voice) = replying(.unavailable, audio: nil)
+        let first = await voice.audio(for: "Paris.")
+        let second = await voice.audio(for: "Rome.")
+        XCTAssertNil(first)
+        XCTAssertNil(second)
+        XCTAssertEqual(link.sent.count, 1)
+    }
+}
+
+private func elapsedMs(_ body: () async -> Void) async -> Double {
+    let start = ContinuousClock.now
+    await body()
+    let d = ContinuousClock.now - start
+    return Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
 }

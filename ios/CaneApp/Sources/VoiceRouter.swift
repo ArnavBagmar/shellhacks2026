@@ -56,7 +56,7 @@ actor VoiceRouter {
         case .command(let text):
             onHeard(text)
             logger.info("heard: \(text, privacy: .public)")
-            let intent = IntentParser.parse(text)
+            let intent = IntentParser.route(text)
             diagnostics.record("intent", [
                 "command": .text(text),
                 "intent": .text(intent.map { String(describing: $0) } ?? "none"),
@@ -83,15 +83,19 @@ actor VoiceRouter {
         _ text: String, arbiter: OutputArbiter, coordinator: QueryCoordinator,
         navigate: @Sendable (String) async -> Void
     ) async -> Bool {
-        guard let intent = IntentParser.parse(text) else {
+        guard let intent = IntentParser.route(text) else {
             logger.info("not understood: \(text, privacy: .public)")
-            await arbiter.say(SpokenPhrase(text: "Sorry, I didn't catch that. Say it again."), on: .prompt, maxWaitMs: 3_000)
+            await arbiter.say(SpokenPhrase(text: AnswerPhrasing.notUnderstood(heard: text)), on: .prompt, maxWaitMs: 3_000)
             return false
         }
         if await coordinator.handle(intent, utterance: text) { return true }
         switch intent {
         case .navigate(let place):
             await navigate(place)
+        case .time:
+            await arbiter.say(SpokenPhrase(text: AnswerPhrasing.time()), on: .prompt, maxWaitMs: 3_000)
+        case .help:
+            await arbiter.say(SpokenPhrase(text: AnswerPhrasing.help), on: .prompt, maxWaitMs: 3_000)
         case .readSign:
             // Step 13 reads text on the phone frame; until it lands, ask the
             // laptop to describe what is ahead, which reads signs too.

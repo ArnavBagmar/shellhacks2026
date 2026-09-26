@@ -23,8 +23,10 @@ import base64
 import binascii
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Sequence, get_args
 
@@ -35,6 +37,7 @@ from cane.scene.gap import ClearWay, ClearWayProvider
 from cane.scene.gap_speech import clear_way_fragment, clear_way_sentence
 from cane.scene.prompt import GapHint, build_prompt, crop_label, phone_label
 from cane.scene.vlm import LabeledImage, VisionLanguageModel, VlmReply
+from cane.scene.weather import WeatherSource, is_weather_question
 from cane.transport.messages import Confidence, SceneAnswer, SceneQuery
 
 logger = logging.getLogger(__name__)
@@ -45,6 +48,9 @@ DEFAULT_CROP_PX = 512
 DEFAULT_JPEG_QUALITY = 75
 MAX_SUBJECT_CHARS = 80
 MAX_DETAIL_CHARS = 240
+#: Where the wearer is, for ``ask`` questions ("how's the weather?"), e.g.
+#: "FIU Graham Center, Miami, Florida". Optional.
+LOCATION_ENV = "CANE_LOCATION"
 #: describe_front without a phone photo falls back to the three forward crops.
 FRONT_CROP_INDICES = (5, 0, 1)
 #: An x of exactly 0 or 1 is a legitimate edge, and inverting a bearing that
@@ -129,8 +135,14 @@ class SceneQueryService:
         jpeg_quality: int = DEFAULT_JPEG_QUALITY,
         monotonic: Callable[[], float] = time.monotonic,
         dump_dir: Path | None = None,
+        location: str | None = None,
+        now: Callable[[], datetime] = datetime.now,
+        weather: WeatherSource | None = None,
     ) -> None:
+        self._weather = weather
         self._dump_dir = dump_dir
+        self._location = location if location is not None else (os.environ.get(LOCATION_ENV, "").strip() or None)
+        self._now = now
         self._vlm = vlm
         self._frames = frames
         self._clear_ways = clear_ways
@@ -164,7 +176,16 @@ class SceneQueryService:
 
     async def answer(self, query: SceneQuery) -> SceneAnswer:
         started = self._monotonic()
-        views = await self._views(query)
+        # Looked up while the wearer holds still and the crops are cut.
+        facts_task = None
+        if query.kind == "ask" and self._weather is not None and is_weather_question(query.utterance):
+            facts_task = asyncio.create_task(self._weather.summary())
+        try:
+            views = await self._views(query)
+            facts = await facts_task if facts_task is not None else None
+        finally:
+            if facts_task is not None and not facts_task.done():
+                facts_task.cancel()
         if not views:
             logger.warning("query %s: no X4 frame and no phone photo", query.query_id)
             return self._unavailable(query, started)
@@ -172,10 +193,14 @@ class SceneQueryService:
         # must be the same tick, or the two halves of this step could disagree
         # across a 1-3 s model call.
         way = None if self._clear_ways is None else self._clear_ways.latest_clear_way()
-        prompt = build_prompt(query, gap_hint_for(way, views))
+        prompt = self._prompt(query, facts, gap_hint_for(way, views))
         try:
             reply = await asyncio.wait_for(
-                self._vlm.ask(prompt, [v.image for v in views]),
+                self._vlm.ask(
+                    prompt,
+                    [v.image for v in views],
+                    search=query.kind == "ask" and facts is None,
+                ),
                 timeout=self._vlm_timeout_s,
             )
         except TimeoutError:
@@ -195,6 +220,13 @@ class SceneQueryService:
             answer.bearing_deg, answer.latency_ms,
         )
         return answer
+
+    def _prompt(
+        self, query: SceneQuery, facts: str | None = None, gap: GapHint | None = None
+    ) -> str:
+        return build_prompt(
+            query, gap, now=self._now(), location=self._location, facts=facts
+        )
 
     # ------------------------------------------------------------------ views
 
@@ -266,7 +298,8 @@ class SceneQueryService:
                 "query": query.model_dump(exclude={"phone_frame"}),
                 "labels": [v.image.label for v in views],
                 # The prompt that was actually sent, passed in rather than
-                # rebuilt: it now depends on a ring reading that has moved on.
+                # rebuilt: it depends on a ring reading, and on looked-up
+                # facts, that have both moved on by now.
                 "prompt": prompt,
                 "model_reply": reply.model_dump(),
                 "answer": answer.model_dump(),
@@ -288,6 +321,17 @@ class SceneQueryService:
     ) -> SceneAnswer:
         status = (reply.status or "").strip().lower()
         detail = _clean(reply.detail, MAX_DETAIL_CHARS)
+        if query.kind == "ask":
+            located = (
+                status == "found" and reply.image_index is not None and reply.x_center is not None
+                and 0 <= reply.image_index < len(views) and _clean(reply.subject, MAX_SUBJECT_CHARS)
+            )
+            if located:
+                return self._found(query, reply, views, started, detail, way)
+            spoken = detail or _clean(reply.subject, MAX_DETAIL_CHARS)
+            if spoken is None:
+                return self._unavailable(query, started)
+            return self._build(query, started, status="described", detail=spoken)
         if query.kind != "find":
             if detail is None:
                 # A ring is not a description. Dressing one up as "described"
@@ -299,6 +343,17 @@ class SceneQueryService:
             )
         if status != "found":
             return self._build(query, started, status="not_found")
+        return self._found(query, reply, views, started, detail, way)
+
+    def _found(
+        self,
+        query: SceneQuery,
+        reply: VlmReply,
+        views: list[View],
+        started: float,
+        detail: str | None,
+        way: ClearWay | None = None,
+    ) -> SceneAnswer:
         bearing = None
         index = reply.image_index
         if index is not None and 0 <= index < len(views) and reply.x_center is not None:
