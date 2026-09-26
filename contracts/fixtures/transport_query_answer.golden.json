@@ -1,6 +1,6 @@
 {
   "fixture_version": 1,
-  "note": "query/answer frames (docs/steps/step-20-brief.md). Both suites run every case: valid decodes, invalid is rejected, never crashes.",
+  "note": "query/answer and speak/voice frames (docs/steps/step-20-brief.md). Both suites run every case: valid decodes, invalid is rejected, never crashes.",
   "cases": [
     {
       "name": "query_find_no_frame",
@@ -65,6 +65,25 @@
       }
     },
     {
+      "name": "query_ask_with_frame",
+      "expect": "valid",
+      "note": "a free question; Gemini answers from the views and may search",
+      "frame": {
+        "type": "query",
+        "query_id": "q-0001",
+        "kind": "ask",
+        "target": null,
+        "utterance": "do you see a bathroom nearby",
+        "t_phone_ms": 1790000000000,
+        "phone_frame": {
+          "jpeg_b64": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP8=",
+          "hfov_deg": 68.0,
+          "width": 1280,
+          "height": 960
+        }
+      }
+    },
+    {
       "name": "query_find_null_target",
       "expect": "invalid",
       "note": "find needs a target",
@@ -88,6 +107,20 @@
         "kind": "describe_around",
         "target": "bathroom",
         "utterance": "is there a bathroom around",
+        "t_phone_ms": 1790000000000,
+        "phone_frame": null
+      }
+    },
+    {
+      "name": "query_ask_with_target",
+      "expect": "invalid",
+      "note": "only find carries a target",
+      "frame": {
+        "type": "query",
+        "query_id": "q-0001",
+        "kind": "ask",
+        "target": "weather",
+        "utterance": "how's the weather",
         "t_phone_ms": 1790000000000,
         "phone_frame": null
       }
@@ -345,6 +378,124 @@
         "confidence": "medium",
         "latency_ms": 2140,
         "urgency": 2
+      }
+    },
+    {
+      "name": "speak_valid",
+      "expect": "valid",
+      "frame": {
+        "type": "speak",
+        "speak_id": "s-0001",
+        "text": "To your right, restroom sign."
+      }
+    },
+    {
+      "name": "speak_empty_text",
+      "expect": "invalid",
+      "frame": {
+        "type": "speak",
+        "speak_id": "s-0001",
+        "text": ""
+      }
+    },
+    {
+      "name": "speak_text_too_long",
+      "expect": "invalid",
+      "frame": {
+        "type": "speak",
+        "speak_id": "s-0001",
+        "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "speak_bad_id",
+      "expect": "invalid",
+      "frame": {
+        "type": "speak",
+        "speak_id": "has space",
+        "text": "To your right, restroom sign."
+      }
+    },
+    {
+      "name": "speak_extra_key",
+      "expect": "invalid",
+      "frame": {
+        "type": "speak",
+        "speak_id": "s-0001",
+        "text": "hi",
+        "voice": "Sarah"
+      }
+    },
+    {
+      "name": "voice_ok",
+      "expect": "valid",
+      "frame": {
+        "type": "voice",
+        "speak_id": "s-0001",
+        "status": "ok",
+        "format": "mp3_44100_64",
+        "audio_b64": "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA",
+        "latency_ms": 310
+      }
+    },
+    {
+      "name": "voice_unavailable",
+      "expect": "valid",
+      "frame": {
+        "type": "voice",
+        "speak_id": "s-0001",
+        "status": "unavailable",
+        "format": null,
+        "audio_b64": null,
+        "latency_ms": 0
+      }
+    },
+    {
+      "name": "voice_ok_without_audio",
+      "expect": "invalid",
+      "frame": {
+        "type": "voice",
+        "speak_id": "s-0001",
+        "status": "ok",
+        "format": "mp3_44100_64",
+        "audio_b64": null,
+        "latency_ms": 310
+      }
+    },
+    {
+      "name": "voice_unavailable_with_audio",
+      "expect": "invalid",
+      "frame": {
+        "type": "voice",
+        "speak_id": "s-0001",
+        "status": "unavailable",
+        "format": null,
+        "audio_b64": "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA",
+        "latency_ms": 310
+      }
+    },
+    {
+      "name": "voice_unknown_status",
+      "expect": "invalid",
+      "frame": {
+        "type": "voice",
+        "speak_id": "s-0001",
+        "status": "maybe",
+        "format": "mp3_44100_64",
+        "audio_b64": "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA",
+        "latency_ms": 310
+      }
+    },
+    {
+      "name": "voice_negative_latency",
+      "expect": "invalid",
+      "frame": {
+        "type": "voice",
+        "speak_id": "s-0001",
+        "status": "ok",
+        "format": "mp3_44100_64",
+        "audio_b64": "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA",
+        "latency_ms": -1
       }
     }
   ]

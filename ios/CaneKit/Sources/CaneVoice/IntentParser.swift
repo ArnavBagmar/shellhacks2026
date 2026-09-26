@@ -14,6 +14,13 @@ public enum VoiceIntent: Equatable, Sendable {
     case navigate(String)
     /// "Never mind" / "stop" / "cancel".
     case cancel
+    /// "What time is it?" -- answered on the phone.
+    case time
+    /// "What can you do?" -- the command list, spoken.
+    case help
+    /// Anything else ("how's the weather?"): Gemini answers it from the
+    /// cameras. `route` produces it; `parse` never does.
+    case ask(String)
 }
 
 /// Keyword and grammar matching, no LLM: an LLM adds 0.5-2 s for a fixed
@@ -24,11 +31,21 @@ public enum IntentParser {
     /// people say "can you tell me if there's a bathroom around", and live
     /// testing (2026-09-26) answered "Sorry, I didn't catch that" to exactly
     /// that kind of sentence.
+    /// `parse`, else the whole sentence as a question for Gemini -- unless
+    /// it is a single stray word, which is a mishearing, not a question.
+    public static func route(_ command: String) -> VoiceIntent? {
+        if let intent = parse(command) { return intent }
+        let text = normalize(command)
+        return text.split(separator: " ").count >= 2 ? .ask(text) : nil
+    }
+
     public static func parse(_ command: String) -> VoiceIntent? {
         let text = stripFiller(normalize(command))
         guard !text.isEmpty else { return nil }
 
         if cancelPhrases.contains(text) { return .cancel }
+        if timePhrases.contains(where: text.contains) { return .time }
+        if text == "help" || helpPhrases.contains(where: text.contains) { return .help }
         if let place = after(navigatePrefixes, in: text).flatMap(clean) { return .navigate(place) }
         if let target = after(findPrefixes, in: text).flatMap(clean) {
             if genericTargets.contains(where: { target == $0 || target.hasPrefix($0 + " ") }) {
@@ -79,6 +96,8 @@ public enum IntentParser {
 
     static let frontPhrases = ["in front of me", "ahead of me", "what is ahead", "what do you see", "what can you see"]
     static let aroundPhrases = ["around me", "look around", "describe", "surroundings", "what is here", "where am i"]
+    static let timePhrases = ["what time", "the time", "time is it"]
+    static let helpPhrases = ["what can you do", "what can i say", "what can i ask", "what do you do", "help me out"]
     static let genericTargets = ["anything", "something", "stuff", "things"]
 
     static let cancelPhrases: Set<String> = [
@@ -97,6 +116,10 @@ public enum IntentParser {
         "where is the nearest ", "where is the closest ", "where is the ", "where is a ", "where is an ", "where is ",
         "where are the ", "where are ",
         "can you find me ", "can you find ", "find me ", "find ", "look for ", "search for ",
+        // "do you see a bathroom nearby" ("can you " is stripped as filler,
+        // leaving "see the door").
+        "do you see any ", "do you see an ", "do you see a ", "do you see ", "can you see ",
+        "see any ", "see an ", "see a ", "see the ",
         "i need to find ", "i need ", "i am looking for ", "help me find ",
     ]
 
@@ -138,6 +161,6 @@ public enum IntentParser {
 
     static let contractions = [
         ("what's", "what is"), ("where's", "where is"), ("there's", "there is"), ("i'm", "i am"),
-        ("that's", "that is"), ("whats", "what is"), ("wheres", "where is"),
+        ("that's", "that is"), ("whats", "what is"), ("wheres", "where is"), ("how's", "how is"),
     ]
 }

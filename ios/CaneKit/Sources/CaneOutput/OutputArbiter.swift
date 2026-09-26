@@ -32,6 +32,9 @@ public final class OutputArbiter: @unchecked Sendable {
 
     public let haptics: HapticRenderer
     private let speech: SpeechRenderer
+    /// Answers and prompts, when set (the ElevenLabs voice via the laptop).
+    /// Hazards and navigation always use `speech`: instant and offline.
+    private let naturalSpeech: SpeechRenderer?
     private let earcon: EarconRenderer
     private let clock: @Sendable () -> Int64
 
@@ -52,11 +55,13 @@ public final class OutputArbiter: @unchecked Sendable {
     public init(
         haptics: HapticRenderer,
         speech: SpeechRenderer,
+        naturalSpeech: SpeechRenderer? = nil,
         earcon: EarconRenderer = SilentEarcon(),
         clock: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }
     ) {
         self.haptics = haptics
         self.speech = speech
+        self.naturalSpeech = naturalSpeech
         self.earcon = earcon
         self.clock = clock
     }
@@ -155,13 +160,15 @@ public final class OutputArbiter: @unchecked Sendable {
         active = nil
         haptics.stop()
         speech.stop()
+        naturalSpeech?.stop()
     }
 
     private func startLocked(_ channel: OutputChannel, haptic: HapticScript?, phrase: SpokenPhrase?, pan: Double) -> UInt64 {
         nextToken += 1
         let token = nextToken
+        let renderer = (channel == .answer || channel == .prompt) ? (naturalSpeech ?? speech) : speech
         let task = Task<Void, Never> { [weak self] in
-            await self?.perform(haptic: haptic, phrase: phrase, pan: pan)
+            await self?.perform(haptic: haptic, phrase: phrase, pan: pan, renderer: renderer)
         }
         active = Active(token: token, channel: channel, task: task)
         return token
@@ -190,7 +197,7 @@ public final class OutputArbiter: @unchecked Sendable {
     /// Haptic at t=0, earcon alongside, speech at t=120 ms (Amendment 3):
     /// the body cue primes attention so the first phoneme -- the direction --
     /// is not missed. Total time is max(haptic, 120 + speech), not the sum.
-    private func perform(haptic: HapticScript?, phrase: SpokenPhrase?, pan: Double) async {
+    private func perform(haptic: HapticScript?, phrase: SpokenPhrase?, pan: Double, renderer: SpeechRenderer) async {
         await withTaskGroup(of: Void.self) { group in
             if let haptic {
                 group.addTask { await self.haptics.play(haptic) }
@@ -204,7 +211,7 @@ public final class OutputArbiter: @unchecked Sendable {
                     guard !Task.isCancelled else { return }
                     self.lock.withLock { self.phraseObserver }?(phrase.text)
                     self.setSpeaking(true)
-                    await self.speech.speak(phrase)
+                    await renderer.speak(phrase)
                     self.setSpeaking(false)
                 }
             }

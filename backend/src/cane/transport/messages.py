@@ -85,7 +85,7 @@ PHONE_FRAME_B64_MAX_CHARS = 2_800_000
 BEARING_MIN_EXCLUSIVE = -180.0
 BEARING_MAX = 180.0
 
-QueryKind = Literal["find", "describe_around", "describe_front"]
+QueryKind = Literal["find", "describe_around", "describe_front", "ask"]
 AnswerStatus = Literal["found", "not_found", "described", "unavailable"]
 Confidence = Literal["low", "medium", "high"]
 
@@ -181,6 +181,47 @@ class PhoneDiagnostic(BaseModel):
         return self
 
 
+SPEAK_TEXT_MAX_CHARS = 400
+VOICE_B64_MAX_CHARS = 2_800_000
+VoiceStatus = Literal["ok", "unavailable"]
+
+
+class SpeakRequest(BaseModel):
+    """``speak`` frame, phone -> laptop: say ``text`` in the natural voice.
+    Answers and prompts only -- hazards never leave the phone.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    speak_id: Annotated[str, Field(pattern=QUERY_ID_PATTERN)]
+    text: Annotated[str, Field(min_length=1, max_length=SPEAK_TEXT_MAX_CHARS)]
+
+
+class VoiceClip(BaseModel):
+    """``voice`` frame, laptop -> phone: the audio for one ``speak``, or
+    ``unavailable`` (the phone then speaks with its own voice).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    speak_id: Annotated[str, Field(pattern=QUERY_ID_PATTERN)]
+    status: VoiceStatus
+    format: Annotated[str | None, Field(min_length=1, max_length=40)]
+    audio_b64: Annotated[str | None, Field(min_length=4, max_length=VOICE_B64_MAX_CHARS)]
+    latency_ms: Annotated[int, Field(ge=0)]
+
+    @model_validator(mode="after")
+    def _audio_iff_ok(self) -> VoiceClip:
+        has_audio = self.format is not None and self.audio_b64 is not None
+        if (self.status == "ok") != has_audio or (self.format is None) != (self.audio_b64 is None):
+            raise ValueError("an 'ok' clip carries format and audio; 'unavailable' carries neither")
+        return self
+
+    @classmethod
+    def unavailable(cls, speak_id: str, latency_ms: int = 0) -> VoiceClip:
+        return cls(speak_id=speak_id, status="unavailable", format=None, audio_b64=None, latency_ms=latency_ms)
+
+
 @dataclass(frozen=True)
 class Unknown:
     """A frame whose ``type`` is not one of ``ping``/``pong``/``event``/
@@ -195,10 +236,13 @@ HEALTH_TYPE = "health"
 DIAG_TYPE = "diag"
 QUERY_TYPE = "query"
 ANSWER_TYPE = "answer"
+SPEAK_TYPE = "speak"
+VOICE_TYPE = "voice"
 
-OutboundMessage = Ping | Pong | EventMessage | SceneAnswer
+OutboundMessage = Ping | Pong | EventMessage | SceneAnswer | VoiceClip
 InboundMessage = (
-    Ping | Pong | EventMessage | PhoneHealth | SceneQuery | SceneAnswer | PhoneDiagnostic | Unknown
+    Ping | Pong | EventMessage | PhoneHealth | SceneQuery | SceneAnswer | PhoneDiagnostic
+    | SpeakRequest | VoiceClip | Unknown
 )
 
 
@@ -210,7 +254,7 @@ def to_wire_dict(event: AwarenessEvent) -> dict[str, Any]:
 
 
 def encode(msg: OutboundMessage) -> str:
-    """Serialize a ``Ping``, ``Pong``, ``EventMessage`` or ``SceneAnswer`` to wire JSON."""
+    """Serialize a ``Ping``, ``Pong``, ``EventMessage``, ``SceneAnswer`` or ``VoiceClip`` to wire JSON."""
     if isinstance(msg, Ping):
         payload: dict[str, Any] = {"type": "ping", "t1": msg.t1}
     elif isinstance(msg, Pong):
@@ -219,6 +263,8 @@ def encode(msg: OutboundMessage) -> str:
         payload = {"type": "event", "event": to_wire_dict(msg.event)}
     elif isinstance(msg, SceneAnswer):
         payload = {"type": ANSWER_TYPE, **msg.model_dump()}
+    elif isinstance(msg, VoiceClip):
+        payload = {"type": VOICE_TYPE, **msg.model_dump()}
     else:
         raise TypeError(f"unencodable message: {msg!r}")
     return json.dumps(payload)
@@ -307,6 +353,10 @@ def decode(text: str) -> InboundMessage:
         return _decode_model(data, PhoneDiagnostic, DIAG_TYPE)
     if msg_type == ANSWER_TYPE:
         return _decode_model(data, SceneAnswer, ANSWER_TYPE)
+    if msg_type == SPEAK_TYPE:
+        return _decode_model(data, SpeakRequest, SPEAK_TYPE)
+    if msg_type == VOICE_TYPE:
+        return _decode_model(data, VoiceClip, VOICE_TYPE)
     if isinstance(msg_type, str):
         return Unknown(type=msg_type)
     raise MalformedMessageError(f"'type' must be a string, got {msg_type!r}")

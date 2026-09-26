@@ -33,7 +33,13 @@ public struct WakeWordGate: Sendable {
     public static let wakePromptDelayMs: Int64 = 1_200
 
     static let greetings: Set<String> = ["hey", "hi", "okay", "ok", "hay", "yo"]
-    static let names: Set<String> = ["cane", "kane", "cain", "caine", "kain", "cayne", "kayne", "canes"]
+    /// What the recognizer writes for "Cane". "king" and "keen" were heard
+    /// live (2026-09-26); "can" is left out on purpose -- "hey, can you..."
+    /// would wake it.
+    static let names: Set<String> = [
+        "cane", "kane", "cain", "caine", "kain", "cayne", "kayne", "canes", "cane's", "kane's",
+        "king", "keen", "kean", "keane", "kine",
+    ]
 
     private var pending: String?
     private var lastChangeMs: Int64 = 0

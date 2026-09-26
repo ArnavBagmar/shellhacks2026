@@ -38,6 +38,9 @@ from cane.bridge.capture.grab_thread import GrabThread
 from cane.scene.frames import EquirectProvider, GrabProvider, StillProvider
 from cane.scene.service import DEFAULT_VLM_TIMEOUT_S, SceneQueryService
 from cane.scene.vlm import FakeVLM, GeminiVLM, VisionLanguageModel, VlmUnavailableError
+from cane.scene.voice import API_KEY_ENV as VOICE_KEY_ENV
+from cane.scene.voice import ElevenLabsVoice
+from cane.scene.weather import weather_from_env
 from cane.transport.file_logging import configure_file_logging
 from cane.transport.messages import PhoneFrame, SceneQuery
 
@@ -65,6 +68,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     ask.add_argument("--find", metavar="TARGET", help='one-shot: "is there a TARGET around?"')
     ask.add_argument("--describe-around", action="store_true", help="one-shot: what's around me")
     ask.add_argument("--describe-front", action="store_true", help="one-shot: what's in front of me")
+    ask.add_argument("--ask", metavar="QUESTION", help='one-shot: any question, e.g. "how is the weather"')
     ask.add_argument("--serve", action="store_true", help="run the phone link and answer its queries")
     parser.add_argument("--phone-image", type=Path, default=None, help="one-shot: attach this JPEG as the phone photo")
     parser.add_argument("--phone-hfov-deg", type=float, default=DEFAULT_PHONE_HFOV_DEG)
@@ -81,8 +85,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="also write laptop-YYYYMMDD.log and the phone's phone-YYYYMMDD.jsonl here ('' to disable)",
     )
     args = parser.parse_args(argv)
-    if not (args.find or args.describe_around or args.describe_front or args.serve):
-        parser.error("choose one of --find, --describe-around, --describe-front or --serve")
+    if not (args.find or args.describe_around or args.describe_front or args.ask or args.serve):
+        parser.error("choose one of --find, --describe-around, --describe-front, --ask or --serve")
     if args.equirect is not None and args.source is not None:
         parser.error("use --equirect or --source, not both")
     return args
@@ -95,6 +99,8 @@ def build_vlm(fake: bool) -> VisionLanguageModel:
 def one_shot_query(args: argparse.Namespace) -> SceneQuery:
     if args.find:
         kind, target, utterance = "find", args.find, f"is there a {args.find} around"
+    elif args.ask:
+        kind, target, utterance = "ask", None, args.ask
     elif args.describe_around:
         kind, target, utterance = "describe_around", None, "what's around me"
     else:
@@ -131,16 +137,26 @@ async def serve(service: SceneQueryService, vlm: VisionLanguageModel, host: str,
     from cane.transport.server import EventLinkServer
 
     box: list[EventLinkServer] = []
+    voice = ElevenLabsVoice.from_env()
 
     async def on_query(query: SceneQuery) -> None:
         answer = await service.handle(query)
         if answer is not None and box:
+            # A described answer is spoken exactly as sent: start the voice
+            # now, so the phone's `speak` for it joins this request.
+            if voice is not None and answer.status == "described" and answer.detail:
+                voice.prefetch(answer.detail)
             await box[0].send_answer(answer)
 
-    async with EventLinkServer(host, port, on_query=on_query) as server:
+    on_speak = voice.clip if voice is not None else None
+    async with EventLinkServer(host, port, on_query=on_query, on_speak=on_speak) as server:
         box.append(server)
         logger.info("scene link on ws://%s:%d -- point the phone app here", host, server.port)
-        await warm_up(vlm)
+        if voice is None:
+            logger.info("natural voice off (no %s); the phone uses its own voice", VOICE_KEY_ENV)
+        else:
+            logger.info("natural voice: %s", voice.name)
+        await asyncio.gather(warm_up(vlm), voice.warm_up() if voice is not None else asyncio.sleep(0))
         await asyncio.Event().wait()
 
 
@@ -166,7 +182,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         frames = GrabProvider(grab)
     service = SceneQueryService(
         vlm, frames, settle_s=0.0 if not args.serve else 0.4, vlm_timeout_s=args.vlm_timeout_s,
-        dump_dir=args.save_views,
+        dump_dir=args.save_views, weather=weather_from_env(),
     )
     try:
         return run(args, service, vlm)

@@ -28,7 +28,7 @@ Headline flow:
 
 ## C. Wire shapes (`contracts/transport_envelope.schema.json`, additive)
 
-`query` phone → laptop: `query_id`, `kind` ∈ `find | describe_around | describe_front`, `target`
+`query` phone → laptop: `query_id`, `kind` ∈ `find | describe_around | describe_front | ask`, `target`
 (required iff `find`), `utterance`, `t_phone_ms`, `phone_frame` {`jpeg_b64`, `hfov_deg`, `width`,
 `height`} | null. `answer` laptop → phone: `query_id`, `status` ∈ `found | not_found | described |
 unavailable`, `subject`, `bearing_deg` (only with `found`, in `(-180, 180]`), `detail`, `confidence`,
@@ -45,6 +45,45 @@ go out at once, `gemini-3.8-flash` at thinking LOW joins after 3 s with no reply
 flight. The client is warmed with one tiny call at start-up. Knobs: `CANE_GEMINI_MODEL`,
 `CANE_GEMINI_FALLBACK_MODEL` (`none` disables), `CANE_GEMINI_HEDGE_S` (default 3), `CANE_GEMINI_PARALLEL` (default 2), `CANE_GEMINI_THINKING`, `CANE_GEMINI_MEDIA_RES`,
 `--vlm-timeout-s`. The phone says "Still looking." at 7 s and gives up at 20 s.
+
+**`ask` (any other question).** The phone keeps a few commands local (stop, the time, help,
+directions) and the fixed ones above; every other sentence of two or more words goes out as
+`kind: ask` with the phone photo, and the phone says "Let me check." instead of "hold still". The
+laptop sends all views plus the question, the local date and time and `CANE_LOCATION` (optional,
+e.g. `FIU, Miami, Florida`), and asks for at most 30 spoken words, surroundings first. Gemini
+answers `found` (one visible thing → image + x → bearing, spoken direction-first like a find) or
+`answered` (→ `described`, spoken as given). Only `ask` tries Google Search grounding
+(`CANE_GEMINI_SEARCH`, default on); a refused search is retried at once without it and search
+rests 10 min. Live 2026-09-26: the key got 429 for search on every try (plain calls fine), so
+answers came from the images and the model alone — weather → "I can't check the live forecast,
+but you are indoors…", "do you see a door nearby" → "No doors are visible right here…", "capital
+of France" → "Paris is the capital of France." — 1.5–1.7 s each.
+
+**Weather (`backend/src/cane/scene/weather.py`).** Because search is refused on the demo key, a
+weather-sounding `ask` ("how's the weather", "do I need an umbrella", "is it cold out") makes the
+laptop fetch Open-Meteo (free, no key) while the crops are cut, and puts one sentence of live
+conditions into the prompt; search is then skipped. `CANE_LOCATION` is geocoded by trying each
+comma part filtered by the parts after it ("FIU, Miami, Florida" → Miami, FL); `CANE_LAT_LON=lat,lon`
+skips geocoding, `CANE_TEMP_UNIT=celsius`, `CANE_WEATHER=off`. Cached 10 min, 3 s timeout, any
+failure → no facts. Live 2026-09-26: "how's the weather outside" → "It is eighty-five degrees and
+mainly clear outside." (2.9 s); "do I need an umbrella today" → "Nope, you're good. Today's weather
+shows only a fourteen percent chance of rain."
+
+**Natural voice (`backend/src/cane/scene/voice.py`, `CaneOutput/NaturalSpeechRenderer.swift`,
+`CaneAssist/LaptopVoice.swift`).** Answers and prompts (the arbiter's `.answer` and `.prompt`
+channels) are spoken in an ElevenLabs voice; hazards and turn cues never are -- they stay on
+`AVSpeechSynthesizer`, instant and offline. The phone sends `speak {speak_id, text}`; the laptop
+(key in `backend/.env` as `ELEVENLABS_API_KEY`, never on the phone) replies with exactly one `voice
+{speak_id, status, format, audio_b64, latency_ms}` -- `unavailable` at once when it has no voice, so
+the phone never waits. The phone plays the MP3 with `AVAudioPlayer` (resume-once, watchdog at clip
+length + 1.5 s) and uses its own voice if no clip arrives within 2.5 s, the clip will not play, or the
+laptop said `unavailable` in the last 30 s. Both sides cache by text; the laptop pre-synthesizes the
+five common prompts at start and starts a described answer's audio before sending the answer.
+Defaults picked by ear: Sarah (`EXAVITQu4vr4xnSDxMaL`) on `eleven_turbo_v2_5`, `mp3_44100_64`;
+override with `CANE_ELEVENLABS_VOICE` / `CANE_ELEVENLABS_MODEL`, `CANE_VOICE=off`, or the phone's
+"Natural voice for answers" switch. At most 2 requests in flight (a burst of 5 got `429
+concurrent_limit_exceeded`), one retry on that refusal. Live 2026-09-26: new phrase 0.28 s laptop
+round trip, cached 1-2 ms; Turbo 0.26 s, Flash v2.5 0.3-0.55 s, v3 Conversational 1.0 s.
 
 Live runs (2026-09-26): cold client, 6 × 640 px, thinking LOW → timed out at 8 s. Then MINIMAL → 400 from
 3.8-flash, fallback `gemini-3.5-flash-lite` answered in 1.1 s (1.6 s end to end, found "doorway" at +14°). Then 3.8-flash at LOW: 6.0 s to warm, 5.7 s to answer, not_found → lite

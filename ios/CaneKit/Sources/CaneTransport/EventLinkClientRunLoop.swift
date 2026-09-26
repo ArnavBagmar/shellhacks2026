@@ -121,6 +121,8 @@ extension EventLinkClient {
                 sinks.events.yield(event)
             case .answer(let answer):
                 sinks.answers.yield(answer)
+            case .voice(let clip):
+                sinks.voices.yield(clip)
             case .unknown(let type):
                 logger.debug("ignoring unknown frame type: \(type, privacy: .public)")
             }

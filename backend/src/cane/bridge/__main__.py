@@ -56,6 +56,8 @@ from cane.bridge.uplink import MonitoredUplink
 from cane.scene.frames import GrabProvider
 from cane.scene.service import SceneQueryService
 from cane.scene.vlm import GeminiVLM, VlmUnavailableError
+from cane.scene.voice import ElevenLabsVoice
+from cane.scene.weather import weather_from_env
 from cane.transport.file_logging import configure_file_logging
 from cane.transport.messages import PhoneHealth, SceneQuery
 from cane.transport.server import EventLinkServer
@@ -238,13 +240,16 @@ async def run_bridge(
     scene_hook = None
     if scene_vlm is not None:
         scene_hook = SceneHook(
-            SceneQueryService(scene_vlm, GrabProvider(grab), delta_deg=config.delta_deg)
+            SceneQueryService(scene_vlm, GrabProvider(grab), delta_deg=config.delta_deg, weather=weather_from_env())
         )
+    # The natural voice rides with --scene: it speaks the answers.
+    scene_voice = ElevenLabsVoice.from_env() if scene_vlm is not None else None
     async with EventLinkServer(
         config.ws_host, config.ws_port,
         pipeline_delay_d_ms=config.pipeline_delay_d_ms,
         on_health=health_hook,
         on_query=scene_hook,
+        on_speak=scene_voice.clip if scene_voice is not None else None,
     ) as server:
         health_hook.server = server
         warm: asyncio.Task[None] | None = None

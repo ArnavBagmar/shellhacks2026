@@ -13,6 +13,7 @@ import os
 ///     laptop --events--> FeedbackManager --> OutputSink --> OutputArbiter --> haptics / speech
 ///     laptop <--query--- QueryCoordinator <-- VoiceRouter <-- SpeechListener (open mic)
 ///     laptop --answer--> QueryCoordinator --> OutputArbiter
+///     laptop <--speak--- NaturalSpeechRenderer (answers, prompts) --voice--> clip player
 ///
 /// The phone is the master clock: every `now` here is phone wall-clock ms.
 @MainActor
@@ -34,6 +35,7 @@ final class Runtime {
     let arbiter: OutputArbiter
     let client: EventLinkClient
     let camera: FrontCamera
+    private let laptopVoice: LaptopVoice
     private let feedback: FeedbackManager
     private let coordinator: QueryCoordinator
     private let voice: VoiceRouter
@@ -58,7 +60,27 @@ final class Runtime {
         self.callbacks = callbacks
         let haptics = CoreHapticsRenderer()
         let speech = AVSpeechRenderer(rate: { settings.current.speechRate })
-        let arbiter = OutputArbiter(haptics: haptics, speech: speech, earcon: EarconPlayer(), clock: Self.now)
+        let laptopVoice = LaptopVoice(link: client, clock: Self.now)
+        self.laptopVoice = laptopVoice
+        let natural = NaturalSpeechRenderer(
+            fallback: speech,
+            player: AVClipPlayer(),
+            onOutcome: { text, outcome in
+                switch outcome {
+                case .natural(let waitedMs):
+                    diagnostics.record("voice", ["source": .text("elevenlabs"), "waited_ms": .number(Double(waitedMs)),
+                                                 "text": .text(text)])
+                case .fallback(let reason):
+                    diagnostics.record("voice", ["source": .text("phone"), "reason": .text(reason), "text": .text(text)])
+                }
+            },
+            fetch: { text in
+                guard settings.current.naturalVoice else { return nil }
+                return await laptopVoice.audio(for: text)
+            }
+        )
+        let arbiter = OutputArbiter(haptics: haptics, speech: speech, naturalSpeech: natural,
+                                    earcon: EarconPlayer(), clock: Self.now)
         self.arbiter = arbiter
 
         let sink = NotifyingSink(
@@ -165,7 +187,12 @@ final class Runtime {
 
     private func startLoops() {
         let client = client, feedback = feedback, coordinator = coordinator, voice = voice, callbacks = callbacks
-        let diagnostics = diagnostics
+        let diagnostics = diagnostics, laptopVoice = laptopVoice
+        tasks.append(Task {
+            for await clip in client.voices {
+                await laptopVoice.receive(clip)
+            }
+        })
         tasks.append(Task {
             for await event in client.events {
                 await feedback.ingest(event, now: Self.now())

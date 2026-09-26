@@ -82,7 +82,7 @@ public actor QueryCoordinator {
         stateObserver = observer
     }
 
-    /// The intents this type owns: find, describe around/front, cancel.
+    /// The intents this type owns: find, describe around/front, ask, cancel.
     /// Returns false for any other intent (the caller routes it).
     @discardableResult
     public func handle(_ intent: VoiceIntent, utterance: String? = nil) async -> Bool {
@@ -97,7 +97,9 @@ public actor QueryCoordinator {
             finish()
             speaker.cancel(upTo: .answer)
             _ = await speaker.say(SpokenPhrase(text: AnswerPhrasing.cancelled), on: .prompt, haptic: nil, pan: 0, maxWaitMs: 0)
-        case .readSign, .navigate:
+        case .ask(let question):
+            await ask(.ask, target: nil, utterance: question)
+        case .readSign, .navigate, .time, .help:
             return false
         }
         return true
@@ -148,7 +150,11 @@ public actor QueryCoordinator {
         }
         guard state == .looking(queryId: id) else { return }
         startTimeout(for: id)
-        let prompt = kind == .describeFront ? AnswerPhrasing.lookingAhead : AnswerPhrasing.holdStill
+        let prompt = switch kind {
+        case .describeFront: AnswerPhrasing.lookingAhead
+        case .ask: AnswerPhrasing.checking
+        case .find, .describeAround: AnswerPhrasing.holdStill
+        }
         _ = await speaker.say(SpokenPhrase(text: prompt), on: .prompt, haptic: nil, pan: 0, maxWaitMs: Self.promptMaxWaitMs)
     }
 

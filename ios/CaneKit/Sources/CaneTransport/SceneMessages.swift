@@ -10,6 +10,8 @@ public enum SceneQueryKind: String, Sendable, CaseIterable {
     case find
     case describeAround = "describe_around"
     case describeFront = "describe_front"
+    /// Any other question, answered in a sentence.
+    case ask
 }
 
 public enum SceneAnswerStatus: String, Sendable, CaseIterable {
@@ -194,6 +196,80 @@ public struct SceneAnswer: Sendable, Equatable {
             bearingDeg: try object.optionalDouble("bearing_deg"),
             detail: try object.optionalString("detail"),
             confidence: confidence,
+            latencyMs: try object.integer("latency_ms")
+        )
+    }
+}
+
+/// Phone -> laptop: "say this in the natural voice" (answers and prompts
+/// only; hazards never leave the phone).
+public struct SpeakRequest: Sendable, Equatable {
+    public static let maxTextChars = 400
+    public let speakId: String
+    public let text: String
+
+    public init(speakId: String, text: String) throws {
+        try SceneLimits.checkQueryId(speakId)
+        guard (1...Self.maxTextChars).contains(text.count) else { throw TransportError.invalidFrame("text") }
+        self.speakId = speakId
+        self.text = text
+    }
+
+    public func encoded() throws -> Data {
+        try JSONSerialization.data(withJSONObject: ["type": "speak", "speak_id": speakId, "text": text])
+    }
+
+    /// The phone never receives one; this exists for the golden fixture.
+    public static func decode(_ data: Data) throws -> SpeakRequest {
+        let object = try StrictObject(data: data, frameType: "speak", keys: ["type", "speak_id", "text"])
+        return try SpeakRequest(speakId: try object.string("speak_id"), text: try object.string("text"))
+    }
+}
+
+public enum VoiceClipStatus: String, Sendable {
+    case ok, unavailable
+}
+
+/// Laptop -> phone: the audio for one `SpeakRequest`, or `unavailable`.
+public struct VoiceClip: Sendable, Equatable {
+    public let speakId: String
+    public let status: VoiceClipStatus
+    /// ElevenLabs `output_format`, e.g. "mp3_44100_64".
+    public let format: String?
+    public let audio: Data?
+    public let latencyMs: Int64
+
+    public init(speakId: String, status: VoiceClipStatus, format: String?, audio: Data?, latencyMs: Int64) throws {
+        try SceneLimits.checkQueryId(speakId)
+        guard (status == .ok) == (format != nil), (status == .ok) == (audio != nil) else {
+            throw TransportError.invalidFrame("audio_b64")
+        }
+        if let format, !(1...40).contains(format.count) { throw TransportError.invalidFrame("format") }
+        guard latencyMs >= 0 else { throw TransportError.invalidFrame("latency_ms") }
+        self.speakId = speakId
+        self.status = status
+        self.format = format
+        self.audio = audio
+        self.latencyMs = latencyMs
+    }
+
+    static func decode(_ raw: [String: Any]) throws -> VoiceClip {
+        let object = try StrictObject(object: raw, keys: [
+            "type", "speak_id", "status", "format", "audio_b64", "latency_ms",
+        ])
+        guard let status = VoiceClipStatus(rawValue: try object.string("status")) else {
+            throw TransportError.invalidFrame("status")
+        }
+        var audio: Data?
+        if let b64 = try object.optionalString("audio_b64") {
+            guard (4...SceneLimits.maxJPEGBase64Chars).contains(b64.utf8.count),
+                  let decoded = Data(base64Encoded: b64)
+            else { throw TransportError.invalidFrame("audio_b64") }
+            audio = decoded
+        }
+        return try VoiceClip(
+            speakId: try object.string("speak_id"), status: status,
+            format: try object.optionalString("format"), audio: audio,
             latencyMs: try object.integer("latency_ms")
         )
     }

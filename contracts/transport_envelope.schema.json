@@ -10,7 +10,9 @@
     { "$ref": "#/$defs/health" },
     { "$ref": "#/$defs/query" },
     { "$ref": "#/$defs/answer" },
-    { "$ref": "#/$defs/diag" }
+    { "$ref": "#/$defs/diag" },
+    { "$ref": "#/$defs/speak" },
+    { "$ref": "#/$defs/voice" }
   ],
   "$defs": {
     "ping": {
@@ -160,8 +162,8 @@
           "pattern": "^[A-Za-z0-9_-]{1,64}$"
         },
         "kind": {
-          "enum": ["find", "describe_around", "describe_front"],
-          "description": "find: look for 'target' all around. describe_around: summarise the 360 view. describe_front: describe the phone frame (X4 crops optional)."
+          "enum": ["find", "describe_around", "describe_front", "ask"],
+          "description": "find: look for 'target' all around. describe_around: summarise the 360 view. describe_front: describe the phone frame (X4 crops optional). ask: any other question, answered in a sentence from every view (and web search when the laptop has it)."
         },
         "target": {
           "type": ["string", "null"],
@@ -348,6 +350,37 @@
       "examples": [
         { "type": "diag", "t_phone_ms": 1790000000000, "kind": "transcript", "data": { "text": "hey cane is there a bathroom", "final": false } }
       ]
+    },
+    "speak": {
+      "type": "object",
+      "description": "Phone -> laptop. 'Say this in the natural voice': the laptop synthesizes 'text' (ElevenLabs) and replies with exactly one 'voice' frame carrying the same speak_id. Answers and prompts only; hazards are always spoken on the phone.",
+      "additionalProperties": false,
+      "required": ["type", "speak_id", "text"],
+      "properties": {
+        "type": { "const": "speak" },
+        "speak_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 400 }
+      },
+      "examples": [
+        { "type": "speak", "speak_id": "s-3", "text": "To your right, restroom sign, past the elevators." }
+      ]
+    },
+    "voice": {
+      "type": "object",
+      "description": "Laptop -> phone. The audio for one 'speak'. status 'unavailable' (no key, timeout, API error) carries no audio: the phone speaks with its own voice instead.",
+      "additionalProperties": false,
+      "required": ["type", "speak_id", "status", "format", "audio_b64", "latency_ms"],
+      "properties": {
+        "type": { "const": "voice" },
+        "speak_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "status": { "enum": ["ok", "unavailable"] },
+        "format": { "type": ["string", "null"], "minLength": 1, "maxLength": 40, "description": "ElevenLabs output_format, e.g. 'mp3_44100_64'." },
+        "audio_b64": { "type": ["string", "null"], "minLength": 4, "maxLength": 2800000 },
+        "latency_ms": { "type": "integer", "minimum": 0 }
+      },
+      "if": { "properties": { "status": { "const": "ok" } } },
+      "then": { "properties": { "format": { "type": "string" }, "audio_b64": { "type": "string" } } },
+      "else": { "properties": { "format": { "type": "null" }, "audio_b64": { "type": "null" } } }
     }
   }
 }

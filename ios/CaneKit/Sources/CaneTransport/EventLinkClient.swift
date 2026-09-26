@@ -30,6 +30,8 @@ public actor EventLinkClient {
     /// Step 20: the laptop's replies to `send(_:)`, matched by `queryId`.
     /// Same lifetime rules as `events`.
     public nonisolated let answers: AsyncStream<SceneAnswer>
+    /// Natural-voice clips, matched by `speakId`.
+    public nonisolated let voices: AsyncStream<VoiceClip>
     let sinks: InboundSinks
     let url: URL
     let session: URLSession
@@ -50,9 +52,11 @@ public actor EventLinkClient {
         self.now = now
         let (events, eventContinuation) = AsyncStream<AwarenessEvent>.makeStream()
         let (answers, answerContinuation) = AsyncStream<SceneAnswer>.makeStream(bufferingPolicy: .bufferingNewest(4))
+        let (voices, voiceContinuation) = AsyncStream<VoiceClip>.makeStream(bufferingPolicy: .bufferingNewest(8))
         self.events = events
         self.answers = answers
-        self.sinks = InboundSinks(events: eventContinuation, answers: answerContinuation)
+        self.voices = voices
+        self.sinks = InboundSinks(events: eventContinuation, answers: answerContinuation, voices: voiceContinuation)
     }
 
     /// Sends one `query` frame on the live connection. Throws
@@ -61,6 +65,13 @@ public actor EventLinkClient {
     public func send(_ query: SceneQuery) async throws {
         guard let task else { throw TransportError.notConnected }
         try await task.send(.data(query.encoded()))
+    }
+
+    /// Asks the laptop to voice `request.text`; the reply arrives on
+    /// `voices`. Throws `notConnected` with no link.
+    public func send(_ request: SpeakRequest) async throws {
+        guard let task else { throw TransportError.notConnected }
+        try await task.send(.data(request.encoded()))
     }
 
     /// Best effort: one black-box line to the laptop. Throws
@@ -133,9 +144,11 @@ public actor EventLinkClient {
 struct InboundSinks: Sendable {
     let events: AsyncStream<AwarenessEvent>.Continuation
     let answers: AsyncStream<SceneAnswer>.Continuation
+    let voices: AsyncStream<VoiceClip>.Continuation
 
     func finish() {
         events.finish()
         answers.finish()
+        voices.finish()
     }
 }

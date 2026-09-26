@@ -23,8 +23,10 @@ import base64
 import binascii
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Sequence, get_args
 
@@ -33,6 +35,7 @@ from cane.bridge.events import normalize_bearing_deg
 from cane.scene.frames import EquirectProvider
 from cane.scene.prompt import build_prompt, crop_label, phone_label
 from cane.scene.vlm import LabeledImage, VisionLanguageModel, VlmReply
+from cane.scene.weather import WeatherSource, is_weather_question
 from cane.transport.messages import Confidence, SceneAnswer, SceneQuery
 
 logger = logging.getLogger(__name__)
@@ -43,6 +46,9 @@ DEFAULT_CROP_PX = 512
 DEFAULT_JPEG_QUALITY = 75
 MAX_SUBJECT_CHARS = 80
 MAX_DETAIL_CHARS = 240
+#: Where the wearer is, for ``ask`` questions ("how's the weather?"), e.g.
+#: "FIU Graham Center, Miami, Florida". Optional.
+LOCATION_ENV = "CANE_LOCATION"
 #: describe_front without a phone photo falls back to the three forward crops.
 FRONT_CROP_INDICES = (5, 0, 1)
 _CONFIDENCES: tuple[str, ...] = get_args(Confidence)
@@ -78,8 +84,14 @@ class SceneQueryService:
         jpeg_quality: int = DEFAULT_JPEG_QUALITY,
         monotonic: Callable[[], float] = time.monotonic,
         dump_dir: Path | None = None,
+        location: str | None = None,
+        now: Callable[[], datetime] = datetime.now,
+        weather: WeatherSource | None = None,
     ) -> None:
+        self._weather = weather
         self._dump_dir = dump_dir
+        self._location = location if location is not None else (os.environ.get(LOCATION_ENV, "").strip() or None)
+        self._now = now
         self._vlm = vlm
         self._frames = frames
         self._delta_deg = delta_deg
@@ -112,13 +124,22 @@ class SceneQueryService:
 
     async def answer(self, query: SceneQuery) -> SceneAnswer:
         started = self._monotonic()
-        views = await self._views(query)
+        # Looked up while the wearer holds still and the crops are cut.
+        facts_task = None
+        if query.kind == "ask" and self._weather is not None and is_weather_question(query.utterance):
+            facts_task = asyncio.create_task(self._weather.summary())
+        try:
+            views = await self._views(query)
+            facts = await facts_task if facts_task is not None else None
+        finally:
+            if facts_task is not None and not facts_task.done():
+                facts_task.cancel()
         if not views:
             logger.warning("query %s: no X4 frame and no phone photo", query.query_id)
             return self._unavailable(query, started)
         try:
             reply = await asyncio.wait_for(
-                self._vlm.ask(build_prompt(query), [v.image for v in views]),
+                self._vlm.ask(self._prompt(query, facts), [v.image for v in views], search=query.kind == "ask" and facts is None),
                 timeout=self._vlm_timeout_s,
             )
         except TimeoutError:
@@ -131,13 +152,16 @@ class SceneQueryService:
             return self._unavailable(query, started)
         answer = self._to_answer(query, reply, views, started)
         if self._dump_dir is not None:
-            await asyncio.to_thread(self._dump, query, views, reply, answer)
+            await asyncio.to_thread(self._dump, query, views, reply, answer, facts)
         logger.info(
             "query %s -> %s %r bearing=%s in %d ms",
             query.query_id, answer.status, answer.subject or answer.detail,
             answer.bearing_deg, answer.latency_ms,
         )
         return answer
+
+    def _prompt(self, query: SceneQuery, facts: str | None = None) -> str:
+        return build_prompt(query, now=self._now(), location=self._location, facts=facts)
 
     # ------------------------------------------------------------------ views
 
@@ -191,7 +215,9 @@ class SceneQueryService:
             fov_deg=frame.hfov_deg,
         )
 
-    def _dump(self, query: SceneQuery, views: list[View], reply: VlmReply, answer: SceneAnswer) -> None:
+    def _dump(
+        self, query: SceneQuery, views: list[View], reply: VlmReply, answer: SceneAnswer, facts: str | None
+    ) -> None:
         """Debug: exactly what the model saw and said, one folder per query."""
         folder = self._dump_dir / query.query_id  # type: ignore[operator]
         try:
@@ -201,7 +227,7 @@ class SceneQueryService:
             summary = {
                 "query": query.model_dump(exclude={"phone_frame"}),
                 "labels": [v.image.label for v in views],
-                "prompt": build_prompt(query),
+                "prompt": self._prompt(query, facts),
                 "model_reply": reply.model_dump(),
                 "answer": answer.model_dump(),
             }
@@ -217,12 +243,28 @@ class SceneQueryService:
     ) -> SceneAnswer:
         status = (reply.status or "").strip().lower()
         detail = _clean(reply.detail, MAX_DETAIL_CHARS)
+        if query.kind == "ask":
+            located = (
+                status == "found" and reply.image_index is not None and reply.x_center is not None
+                and 0 <= reply.image_index < len(views) and _clean(reply.subject, MAX_SUBJECT_CHARS)
+            )
+            if located:
+                return self._found(query, reply, views, started, detail)
+            spoken = detail or _clean(reply.subject, MAX_DETAIL_CHARS)
+            if spoken is None:
+                return self._unavailable(query, started)
+            return self._build(query, started, status="described", detail=spoken)
         if query.kind != "find":
             if detail is None:
                 return self._unavailable(query, started)
             return self._build(query, started, status="described", detail=detail)
         if status != "found":
             return self._build(query, started, status="not_found")
+        return self._found(query, reply, views, started, detail)
+
+    def _found(
+        self, query: SceneQuery, reply: VlmReply, views: list[View], started: float, detail: str | None
+    ) -> SceneAnswer:
         bearing = None
         index = reply.image_index
         if index is not None and 0 <= index < len(views) and reply.x_center is not None:
