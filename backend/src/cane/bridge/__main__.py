@@ -47,7 +47,6 @@ from cane.bridge.rungs import RUNGS, rung_by_index
 from cane.bridge.sender import OneInFlightSender
 from cane.bridge.transport_http import HttpInferenceTransport
 from cane.bridge.uplink import MonitoredUplink
-from cane.cloud.settings import CloudSettings
 from cane.transport.messages import PhoneHealth
 from cane.transport.server import EventLinkServer
 from cane.transport.wall_clock import now_ms
@@ -61,7 +60,11 @@ INDEX_PREFIX = "index:"
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 LOCAL_DETECTORS = ("fake", "ultralytics")
 START_MODES = ("cloud", "local")
-FALLBACK_DETECTOR = "fake"
+# Exit codes: 1 a failed run, 2 a bad configuration, 3 a local detector that
+# would not load. Distinct so a launch script can tell them apart.
+EXIT_RUN_FAILED = 1
+EXIT_BAD_CONFIG = 2
+EXIT_NO_LOCAL_DETECTOR = 3
 # httpx logs one INFO line per request; at 3 fps that buries the 5 s stats line.
 NOISY_LOGGERS = ("httpx", "httpcore")
 UNSYNCED_BANNER = (
@@ -137,32 +140,37 @@ def build_monitor(args: argparse.Namespace) -> HealthMonitor:
 
 
 def build_local_backend(args: argparse.Namespace) -> LocalBackend:
-    """Load the fallback detector now, not at the moment of the flip.
+    """Load the fallback detector now -- and warm it -- not at the flip.
 
-    A model that cannot load must not stop the bridge starting: the cloud
-    path is the one carrying the walk, and a scripted fallback that emits
-    nothing is still better than no bridge at all. Loud, never silent.
+    A loader fault is fatal on purpose. Silently substituting the scripted
+    detector would leave a bridge that looks healthy, flips at the worst
+    possible moment and then detects nothing at all; the only symptom would
+    be an event stream that stopped. Better to refuse to start, name the
+    fault, and let the operator choose `--local-detector fake` if a
+    detection-free fallback really is what they want.
     """
+    settings = local_settings(args.local_detector, args.local_weights)
     try:
-        return LocalBackend.build(local_settings(args.local_detector, args.local_weights))
+        return LocalBackend.build(settings, warm_up_px=rung_by_index(args.rung).crop_px)
     except Exception as exc:  # noqa: BLE001 - any loader fault, torch included
         logger.error(
-            "could not build the local detector (%s: %s); the local fallback "
-            "will emit nothing until this is fixed",
-            type(exc).__name__, exc,
+            "could not build the local detector %r from %s (%s: %s); refusing to "
+            "start without the fallback -- fix the weights, or pass "
+            "--local-detector fake to run with no local detections",
+            settings.detector, settings.weights_path, type(exc).__name__, exc,
         )
-        return LocalBackend.build(CloudSettings(detector=FALLBACK_DETECTOR))
+        raise SystemExit(EXIT_NO_LOCAL_DETECTOR) from exc
 
 
 def build_uplink(
-    config: BridgeConfig, monitor: HealthMonitor, args: argparse.Namespace
+    config: BridgeConfig, monitor: HealthMonitor, local: LocalBackend
 ) -> tuple[MonitoredUplink, CloudProbe]:
     """Cloud + local behind one switch, plus the prober that recovers."""
     transport = HttpInferenceTransport(config.inference_url, config.request_timeout_s)
     switching = SwitchingBackend(
         monitor,
         cloud=CloudBackend(transport, timeout_s=config.request_timeout_s),
-        local=build_local_backend(args),
+        local=local,
     )
     healthz = HttpHealthz(healthz_url_for(config.inference_url), config.request_timeout_s)
     return MonitoredUplink(switching, monitor), CloudProbe(healthz, monitor)
@@ -193,7 +201,8 @@ async def run_bridge(
     """Wire everything up and run until the duration elapses or Ctrl-C."""
     grab = GrabThread(open_source(config.source_spec))
     monitor = build_monitor(args)
-    uplink, probe = build_uplink(config, monitor, args)
+    local = build_local_backend(args)
+    uplink, probe = build_uplink(config, monitor, local)
     sender = OneInFlightSender(uplink)
     health_hook = PhoneHealthHook(monitor)
     async with EventLinkServer(
@@ -208,7 +217,7 @@ async def run_bridge(
             monitor=monitor, source_provider=lambda: uplink.last_source,
         )
         grab.start()
-        _log_banner(config, args)
+        _log_banner(config, args, local)
         # Outside the one-in-flight sender on purpose: the prober must never
         # occupy the slot a frame needs, and it only fires while local.
         prober = asyncio.create_task(probe.run())
@@ -224,14 +233,20 @@ async def run_bridge(
     logger.info("final: %s", format_stats_line(stats))
 
 
-def _log_banner(config: BridgeConfig, args: argparse.Namespace) -> None:
+def _log_banner(
+    config: BridgeConfig, args: argparse.Namespace, local: LocalBackend
+) -> None:
+    """`fallback=` is read off the backend that was actually built, never
+    re-derived from the flags: those two disagreeing is how a run ends up
+    believing it has a detector it does not have.
+    """
     logger.info(
         "bridge up: source=%s rung=%d crop=%dpx q%d %.1f fps -> %s (ws :%d) "
         "fallback=%s start=%s",
         config.source_spec, config.rung.index, config.rung.crop_px,
         config.rung.jpeg_quality, config.effective_send_fps,
         config.inference_url, config.ws_port,
-        local_settings(args.local_detector, args.local_weights).detector,
+        local.detector_name,
         args.start_mode,
     )
 
@@ -277,14 +292,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = build_config(args)
     except ValueError as exc:
         logger.error("bad configuration: %s", exc)
-        return 2
+        return EXIT_BAD_CONFIG
     try:
         asyncio.run(run_bridge(config, args, duration_s=args.duration_s))
     except KeyboardInterrupt:
         logger.info("interrupted; shutting down")
     except (OSError, ValueError, RuntimeError) as exc:
         logger.error("bridge failed: %s", exc)
-        return 1
+        return EXIT_RUN_FAILED
     return 0
 
 

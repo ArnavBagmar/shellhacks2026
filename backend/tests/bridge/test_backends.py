@@ -10,7 +10,9 @@ produce `AwarenessEvent`s that agree on every field except `source` and
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
+import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Callable
 
@@ -18,6 +20,7 @@ import httpx
 import pytest
 
 from cane.bridge.backends import (
+    DEFAULT_WARM_UP_PX,
     LOCAL_SESSION_SUFFIX,
     BackendError,
     BackendTimeout,
@@ -30,6 +33,7 @@ from cane.bridge.backends import (
 from cane.bridge.events import events_from_response
 from cane.bridge.transport_http import CloudResponseError
 from cane.cloud.api_models import (
+    CROP_COUNT,
     SESSION_ID_PATTERN,
     InferenceRequest,
     InferenceResponse,
@@ -57,6 +61,9 @@ SHORT_TIMEOUT_S = 0.05
 HANG_S = 5.0
 HTTP_SERVER_ERROR = 500
 HTTP_OK = 200
+CHANNELS = 3
+SLOW_DETECT_S = 0.3
+LOCAL_BUDGET_S = 0.05
 COCO_NAMES = ("person", "bicycle", "motorcycle", "truck", "bus", "stop sign")
 
 
@@ -83,7 +90,97 @@ def _script() -> list[tuple[tuple[RawDetection, ...], ...]]:
 
 def _local_backend(**overrides: object) -> LocalBackend:
     settings = CloudSettings(detector="fake", **overrides)  # type: ignore[arg-type]
-    return LocalBackend.build(settings, detector=ScriptedDetector(_script()))
+    # `warm_up_px=None`: these tests count the scripted detector's calls, and
+    # a warm-up would consume the first entry of the script.
+    return LocalBackend.build(
+        settings, detector=ScriptedDetector(_script()), warm_up_px=None
+    )
+
+
+class CountingDetector:
+    """A `FrameDetector` that records the shapes it was handed."""
+
+    def __init__(self, sleep_s: float = 0.0) -> None:
+        self.name = "fake"
+        self.engine_ready = True
+        self.gpu_name = None
+        self.weights = "counting"
+        self.sleep_s = sleep_s
+        self.batches: list[tuple[tuple[int, ...], ...]] = []
+
+    def detect(self, images):  # type: ignore[no-untyped-def]
+        self.batches.append(tuple(image.shape for image in images))
+        if self.sleep_s:
+            time.sleep(self.sleep_s)
+        return tuple(() for _ in images)
+
+
+# --------------------------------------------------------------------------
+# The local path is bounded: warmed once, and never unbounded per request
+# --------------------------------------------------------------------------
+
+
+def test_the_local_detector_is_warmed_up_exactly_once_when_it_is_built(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The cold MPS compile is ~11 s; it must not land inside the first
+    tick after a flip, and it must not touch the tracker state.
+    """
+    detector = CountingDetector()
+
+    with caplog.at_level(logging.INFO, logger="cane.bridge.backends"):
+        backend = LocalBackend.build(CloudSettings(detector="fake"), detector=detector)
+
+    assert len(detector.batches) == 1
+    assert detector.batches[0] == (
+        (DEFAULT_WARM_UP_PX, DEFAULT_WARM_UP_PX, CHANNELS),
+    ) * CROP_COUNT
+    # Warming bypasses the service, so no session was opened by it.
+    assert backend.service.registry.sessions == ()
+    assert any("warm-up" in r.getMessage() for r in caplog.records)
+
+
+def test_the_warm_up_runs_at_the_crop_size_it_is_given() -> None:
+    detector = CountingDetector()
+
+    LocalBackend.build(CloudSettings(detector="fake"), detector=detector, warm_up_px=512)
+
+    assert detector.batches[0] == ((512, 512, CHANNELS),) * CROP_COUNT
+
+
+async def test_a_local_inference_over_its_budget_is_a_timeout_and_frees_the_slot(
+    six_jpegs: Callable[..., Jpegs],
+) -> None:
+    """Local inference also takes time; a stuck model must not hold the
+    one-in-flight slot for the rest of the walk.
+    """
+    slow = CountingDetector(sleep_s=SLOW_DETECT_S)
+    backend = LocalBackend.build(
+        CloudSettings(detector="fake"),
+        detector=slow,
+        warm_up_px=None,
+        timeout_s=LOCAL_BUDGET_S,
+    )
+
+    started = time.monotonic()
+    with pytest.raises(BackendTimeout):
+        await backend.infer(make_meta(), six_jpegs())
+    elapsed = time.monotonic() - started
+
+    assert elapsed < SLOW_DETECT_S
+    # Nothing is wedged: the next request is answered normally.
+    slow.sleep_s = 0.0
+    response = await backend.infer(make_meta(), six_jpegs())
+    assert response.t_capture_ms == T_CAPTURE_MS
+
+
+def test_the_local_budget_default_is_the_configurable_one() -> None:
+    from cane.bridge.config import DEFAULT_LOCAL_TIMEOUT_S, BridgeConfig
+
+    assert DEFAULT_LOCAL_TIMEOUT_S == 2.0
+    assert BridgeConfig(inference_url="http://h/infer").local_timeout_s == 2.0
+    with pytest.raises(ValueError, match="local_timeout_s"):
+        BridgeConfig(inference_url="http://h/infer", local_timeout_s=0.0)
 
 
 # --------------------------------------------------------------------------
@@ -339,7 +436,9 @@ async def test_the_same_frames_produce_the_same_events_on_both_backends(
 ) -> None:
     jpegs = six_jpegs(DEFAULT_CROP_PX)
     local = LocalBackend.build(
-        CloudSettings(detector="fake"), detector=ScriptedDetector(_script())
+        CloudSettings(detector="fake"),
+        detector=ScriptedDetector(_script()),
+        warm_up_px=None,
     )
     cloud_events: list[tuple[AwarenessEvent, ...]] = []
     local_events: list[tuple[AwarenessEvent, ...]] = []

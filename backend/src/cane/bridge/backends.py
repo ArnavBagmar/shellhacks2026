@@ -29,10 +29,14 @@ import httpx
 import numpy as np
 from numpy.typing import NDArray
 
+# One number for the cloud budget and one for the local one, both owned by
+# the module that describes a run (F8).
+from cane.bridge.config import DEFAULT_LOCAL_TIMEOUT_S, DEFAULT_REQUEST_TIMEOUT_S
 # The step-6 uplink face, defined once where the sender declares it.
 from cane.bridge.sender import InferenceTransport
 from cane.bridge.transport_http import CloudResponseError
 from cane.cloud.api_models import (
+    CROP_COUNT,
     SESSION_ID_PATTERN,
     InferenceMeta,
     InferenceRequest,
@@ -48,7 +52,11 @@ from cane.contracts.awareness_event import Source
 logger = logging.getLogger(__name__)
 
 #: A request slower than this is a *timeout outcome*, not a slow RTT (E1).
-DEFAULT_BACKEND_TIMEOUT_S: Final = 1.0
+#: The same object as the CLI default, so the two can never drift apart.
+DEFAULT_BACKEND_TIMEOUT_S: Final = DEFAULT_REQUEST_TIMEOUT_S
+#: Rung 1's crop size: the largest the pipeline will ever ask for, so a
+#: detector warmed at this size is warm for every rung.
+DEFAULT_WARM_UP_PX: Final = 640
 LOCAL_SESSION_SUFFIX: Final = "-local"
 MAX_SESSION_ID_LENGTH: Final = 64
 CHANNELS: Final = 3
@@ -184,6 +192,25 @@ def decode_crops(jpegs: Sequence[bytes], crop_px: int) -> list[NDArray[np.uint8]
     return images
 
 
+def warm_up_detector(detector: FrameDetector, crop_px: int) -> float:
+    """One batch of six blank crops straight at the detector, before the
+    pipeline starts. Returns the elapsed milliseconds.
+
+    A cold CoreML/MPS graph compiles on its first forward pass -- about
+    eleven seconds on this laptop. Paying that inside the first tick after
+    a flip would mean the fallback arrives long after the hazard did, and
+    the only symptom would be a gap in the event stream. The service is
+    bypassed on purpose: no session is opened and no tracker sees a frame
+    of blank pixels.
+    """
+    blank = np.zeros((crop_px, crop_px, CHANNELS), dtype=np.uint8)
+    started = time.perf_counter()
+    detector.detect([blank] * CROP_COUNT)
+    elapsed_ms = (time.perf_counter() - started) * MS_PER_S
+    logger.info("local detector warm-up: %.0f ms", elapsed_ms)
+    return elapsed_ms
+
+
 class LocalBackend:
     """The step-7 service, in-process, on this laptop.
 
@@ -193,32 +220,70 @@ class LocalBackend:
     queued frame is the failure this whole step exists to avoid.
     """
 
-    def __init__(self, service: InferenceService) -> None:
+    def __init__(
+        self, service: InferenceService, timeout_s: float = DEFAULT_LOCAL_TIMEOUT_S
+    ) -> None:
+        if timeout_s <= 0:
+            raise ValueError(f"timeout_s must be > 0, got {timeout_s}")
         self.name = "local"
         self.source = Source.X4_LOCAL
         self._service = service
+        self._timeout_s = timeout_s
 
     @classmethod
     def build(
-        cls, settings: CloudSettings, detector: FrameDetector | None = None
+        cls,
+        settings: CloudSettings,
+        detector: FrameDetector | None = None,
+        warm_up_px: int | None = DEFAULT_WARM_UP_PX,
+        timeout_s: float = DEFAULT_LOCAL_TIMEOUT_S,
     ) -> LocalBackend:
+        """`warm_up_px=None` skips the warm-up -- only tests that count the
+        detector's calls should ask for that.
+        """
         registry = TrackerRegistry(
             max_sessions=settings.max_sessions, activation_threshold=settings.conf_emit
         )
         chosen = detector if detector is not None else build_detector(settings)
-        return cls(InferenceService(chosen, registry, settings))
+        if warm_up_px is not None:
+            warm_up_detector(chosen, warm_up_px)
+        return cls(InferenceService(chosen, registry, settings), timeout_s=timeout_s)
 
     @property
     def service(self) -> InferenceService:
         return self._service
+
+    @property
+    def detector_name(self) -> str:
+        """What is *actually* loaded -- the banner and the stats line must
+        never re-derive this from the CLI flags.
+        """
+        return self._service.detector.name
+
+    @property
+    def timeout_s(self) -> float:
+        return self._timeout_s
 
     async def infer(
         self, meta: InferenceMeta, jpegs: tuple[bytes, ...]
     ) -> InferenceResponse:
         """Decode + detect off the event loop: six JPEG decodes and a model
         forward pass would otherwise stall the grab/tick loop outright.
+
+        Bounded like the cloud call is. `asyncio.to_thread` cannot cancel
+        the worker, so an overrunning forward pass keeps running to its end
+        in the background -- but the *slot* is freed, which is what the
+        next frame needs. The abandoned result is discarded, and because
+        the sender only ever has one request out, the next `service.infer`
+        starts after this one's thread has been handed its own arguments.
         """
-        return await asyncio.to_thread(self._infer_sync, meta, jpegs)
+        try:
+            async with asyncio.timeout(self._timeout_s):
+                return await asyncio.to_thread(self._infer_sync, meta, jpegs)
+        except TimeoutError as exc:
+            raise BackendTimeout(
+                f"local inference exceeded {self._timeout_s:.2f}s"
+            ) from exc
 
     def _infer_sync(
         self, meta: InferenceMeta, jpegs: tuple[bytes, ...]

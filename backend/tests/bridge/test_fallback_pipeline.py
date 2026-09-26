@@ -12,21 +12,28 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import pytest
 
-from cane.bridge.backends import BackendError, BackendTimeout, SwitchingBackend
+from cane.bridge.backends import (
+    BackendError,
+    BackendTimeout,
+    LocalBackend,
+    SwitchingBackend,
+)
 from cane.bridge.capture.grab_thread import GrabThread
 from cane.bridge.capture.synthetic_source import SyntheticEquirectSource
 from cane.bridge.config import BridgeConfig
 from cane.bridge.health import RECOVER_HEALTHY_S, HealthMonitor, Mode
-from cane.bridge.pipeline import BridgePipeline, LaptopClock
+from cane.bridge.pipeline import BUSY_WATCHDOG_TICKS, BridgePipeline, LaptopClock
 from cane.bridge.probe import CloudProbe, HealthzReading
 from cane.bridge.rungs import RUNG_1, RUNG_3, rung_by_index
 from cane.bridge.sender import OneInFlightSender
 from cane.bridge.stats import format_stats_line
 from cane.bridge.uplink import MonitoredUplink, RungPlanner
 from cane.cloud.api_models import Detection, InferenceMeta, InferenceResponse
+from cane.cloud.settings import CloudSettings
 from cane.contracts.awareness_event import AwarenessEvent, Source
 
 EQUIRECT_W = 640
@@ -40,6 +47,10 @@ S = 1000
 FAIL_FROM_FRAME = 5
 FLIP_BY_FRAME = 7
 MAX_GAP_TICKS = 4
+HANG_S = 0.45
+WATCHDOG_RUN_S = 0.5
+SLOW_DETECT_S = 0.1
+LOCAL_BUDGET_S = 0.02
 
 
 class FakeClock:
@@ -112,11 +123,20 @@ class RecordingSink:
 
 
 class Harness:
-    def __init__(self, rung=RUNG_1, crop_px: int | None = CROP_PX, send_fps=SEND_FPS) -> None:
+    def __init__(
+        self,
+        rung=RUNG_1,
+        crop_px: int | None = CROP_PX,
+        send_fps=SEND_FPS,
+        local=None,
+        start_local: bool = False,
+    ) -> None:
         self.clock = FakeClock()
-        self.monitor = HealthMonitor(Mode.cloud(rung.index))
+        self.monitor = HealthMonitor(
+            Mode.local(rung.index) if start_local else Mode.cloud(rung.index)
+        )
         self.cloud = ScriptedBackend("cloud", Source.X4_CLOUD)
-        self.local = ScriptedBackend("local", Source.X4_LOCAL)
+        self.local = ScriptedBackend("local", Source.X4_LOCAL) if local is None else local
         self.switching = SwitchingBackend(self.monitor, cloud=self.cloud, local=self.local)
         self.uplink = MonitoredUplink(self.switching, self.monitor, clock=self.clock)
         self.sink = RecordingSink()
@@ -340,3 +360,78 @@ def test_a_stats_line_without_a_monitor_is_unchanged() -> None:
 
     assert stats.health is None
     assert "mode" not in format_stats_line(stats)
+
+
+# --------------------------------------------------------------------------
+# F4 -- local inference is bounded, and a held slot is reported
+# --------------------------------------------------------------------------
+
+
+class HangingBackend:
+    """A local backend that does not answer inside the run."""
+
+    def __init__(self, hang_s: float) -> None:
+        self.name = "local"
+        self.source = Source.X4_LOCAL
+        self.hang_s = hang_s
+        self.calls = 0
+
+    async def infer(
+        self, meta: InferenceMeta, jpegs: tuple[bytes, ...]
+    ) -> InferenceResponse:
+        self.calls += 1
+        await asyncio.sleep(self.hang_s)
+        return InferenceResponse(
+            schema=1, t_capture_ms=meta.t_capture_ms, inference_ms=1.0, detections=()
+        )
+
+    async def aclose(self) -> None:
+        return None
+
+
+class SleepyDetector:
+    """A `FrameDetector` whose forward pass is slower than its budget."""
+
+    def __init__(self, sleep_s: float) -> None:
+        self.name = "fake"
+        self.engine_ready = True
+        self.gpu_name = None
+        self.weights = "sleepy"
+        self._sleep_s = sleep_s
+
+    def detect(self, images):  # type: ignore[no-untyped-def]
+        time.sleep(self._sleep_s)
+        return tuple(() for _ in images)
+
+
+async def test_a_held_uplink_slot_is_reported_once_per_window(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Every frame dropped for a busy slot is already counted; the point of
+    the watchdog is to say *which* backend is holding it, while it holds it.
+    """
+    harness = Harness(local=HangingBackend(HANG_S), start_local=True)
+
+    with caplog.at_level(logging.WARNING, logger="cane.bridge.pipeline"):
+        stats = await harness.run(duration_s=WATCHDOG_RUN_S)
+
+    warnings = [r.getMessage() for r in caplog.records if "slot" in r.getMessage()]
+    assert len(warnings) == 1, warnings
+    assert "local" in warnings[0]
+    assert stats.dropped_busy > BUSY_WATCHDOG_TICKS
+
+
+async def test_a_local_inference_timeout_frees_the_slot_for_the_next_tick() -> None:
+    local = LocalBackend.build(
+        CloudSettings(detector="fake"),
+        detector=SleepyDetector(SLOW_DETECT_S),
+        warm_up_px=None,
+        timeout_s=LOCAL_BUDGET_S,
+    )
+    harness = Harness(local=local, start_local=True)
+
+    stats = await harness.run(duration_s=WATCHDOG_RUN_S)
+
+    # More than one failure means the slot was released after the first.
+    assert stats.failed >= 2
+    assert harness.sink.events == []

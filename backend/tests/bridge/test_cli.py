@@ -127,32 +127,63 @@ def test_the_local_detector_flags_reach_the_settings() -> None:
     assert settings.device == "mps"
 
 
-def test_a_local_backend_that_cannot_load_falls_back_to_the_scripted_one(
-    caplog: pytest.LogCaptureFixture,
+class _ExplodingLoader:
+    """Stands in for `LocalBackend` when the weights will not load."""
+
+    @staticmethod
+    def build(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("no torch on this machine")
+
+
+def test_a_local_detector_that_cannot_load_stops_the_bridge(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A bridge that refuses to start is worse than a degraded fallback."""
+    """No silent fake: a fallback that is not the detector the operator
+    asked for would flip in at the worst moment and detect nothing, and
+    the only sign would be an empty event stream.
+    """
     import logging
 
-    from cane.bridge.__main__ import build_local_backend
+    from cane.bridge import __main__ as main_module
 
-    class Boom:
-        detector = "ultralytics"
-
-        def __getattr__(self, name: str) -> object:
-            raise RuntimeError("no torch on this machine")
+    monkeypatch.setattr(main_module, "LocalBackend", _ExplodingLoader)
+    args = parse_args(["--inference-url", INFERENCE_URL, "--local-detector", "ultralytics"])
 
     with caplog.at_level(logging.ERROR, logger="cane.bridge"):
-        backend = build_local_backend(Boom())  # type: ignore[arg-type]
+        with pytest.raises(SystemExit) as excinfo:
+            main_module.build_local_backend(args)
 
-    assert backend.service.detector.name == "fake"
-    assert any("local detector" in r.getMessage() for r in caplog.records)
+    assert excinfo.value.code not in (0, None)
+    messages = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert any("local detector" in m and "ultralytics" in m for m in messages)
+
+
+def test_an_explicit_fake_detector_is_built_and_named_by_the_banner(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The banner reports the detector that was *built*, not the flags."""
+    import logging
+
+    from cane.bridge.__main__ import _log_banner, build_local_backend
+
+    args = parse_args(["--inference-url", INFERENCE_URL, "--local-detector", "fake"])
+    backend = build_local_backend(args)
+
+    assert backend.detector_name == backend.service.detector.name == "fake"
+
+    with caplog.at_level(logging.INFO, logger="cane.bridge"):
+        _log_banner(build_config(args), args, backend)
+
+    assert "fallback=fake" in caplog.records[-1].getMessage()
 
 
 def test_the_request_timeout_default_is_the_one_second_the_monitor_judges_on() -> None:
     from cane.bridge.backends import DEFAULT_BACKEND_TIMEOUT_S
     from cane.bridge.config import DEFAULT_REQUEST_TIMEOUT_S
 
-    assert DEFAULT_REQUEST_TIMEOUT_S == DEFAULT_BACKEND_TIMEOUT_S == 1.0
+    # One number, not two that happen to agree today (F8).
+    assert DEFAULT_REQUEST_TIMEOUT_S is DEFAULT_BACKEND_TIMEOUT_S
+    assert DEFAULT_REQUEST_TIMEOUT_S == 1.0
     config = build_config(parse_args(["--inference-url", INFERENCE_URL]))
     assert config.request_timeout_s == 1.0
 

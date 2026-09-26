@@ -59,6 +59,13 @@ FRESHNESS_RETRY_TIMEOUT_S = 0.04
 # One line per reason per interval: a skip that repeats every tick must not
 # drown the 5-second stats line that carries the actual counts.
 SKIP_LOG_INTERVAL_S = 5.0
+# A busy slot for one tick is the one-in-flight rule working as designed. A
+# busy slot for four ticks in a row is a backend that has stopped answering
+# while still holding the slot, and every frame in between is dropped with
+# nothing in the log naming the culprit. Counting alone is not enough here:
+# `dropped_busy` looks identical whether the uplink is merely slow or one
+# request has wedged.
+BUSY_WATCHDOG_TICKS = 3
 # A 30 fps camera means the frame sitting in the slot is on average half a
 # frame period (17 ms) old, and up to 33 ms old, before we have done any work.
 # When the one already there is staler than this, wait for the next arrival
@@ -155,6 +162,8 @@ class BridgePipeline:
         self._events_undelivered = 0
         self._unsynced_log = LogThrottle(SKIP_LOG_INTERVAL_S)
         self._deadline_log = LogThrottle(SKIP_LOG_INTERVAL_S)
+        self._busy_log = LogThrottle(SKIP_LOG_INTERVAL_S)
+        self._busy_ticks = 0
         self._logged_windows = 0
 
     async def run(self, duration_s: float | None = None) -> PipelineStats:
@@ -196,7 +205,11 @@ class BridgePipeline:
         # there is no point spending 6 remaps and 6 JPEG encodes on it.
         if self._sender.busy:
             self._dropped_busy += 1
+            self._busy_ticks += 1
+            if self._busy_ticks > BUSY_WATCHDOG_TICKS:
+                self._log_busy()
             return
+        self._busy_ticks = 0
         # One hop into a worker thread for the whole cv2 half of the tick:
         # every extra round-trip through the event loop is milliseconds added
         # to frame age at send, which is the number this step is judged on.
@@ -280,6 +293,25 @@ class BridgePipeline:
             "Connect the phone, or run with --allow-unsynced.",
             self._skipped_unsynced,
         )
+
+    def _log_busy(self) -> None:
+        """Which backend is holding the slot, at most once per interval."""
+        if not self._busy_log.allow():
+            return
+        logger.warning(
+            "the uplink slot has been busy for %d consecutive ticks (backend %s); "
+            "%d frame(s) dropped so far -- the request in flight is not returning.",
+            self._busy_ticks,
+            self._backend_in_flight(),
+            self._dropped_busy,
+        )
+
+    def _backend_in_flight(self) -> str:
+        """The monitor's current mode names the backend the pending request
+        went to: the sender holds one request at a time, and a mode change
+        is decided by that same request's own outcome.
+        """
+        return "cloud" if self._monitor is None else str(self._monitor.mode)
 
     def _log_deadline(self) -> None:
         """Same cadence, same reason: a per-tick drop must not spam the log."""
