@@ -28,7 +28,7 @@ from typing import Callable, Final
 from cane.bridge.backends import BackendError, BackendTimeout, SwitchingBackend
 from cane.bridge.config import BridgeConfig
 from cane.bridge.health import Error, HealthMonitor, Ok, Timeout
-from cane.bridge.rungs import Rung, rung_by_index
+from cane.bridge.rungs import Rung
 from cane.cloud.api_models import InferenceMeta, InferenceRequest
 from cane.contracts.awareness_event import Source
 from cane.transport.wall_clock import now_ms
@@ -150,8 +150,3 @@ class MonitoredUplink:
 
     async def aclose(self) -> None:
         await self._backend.aclose()
-
-
-def rung_for(index: int) -> Rung:
-    """Re-exported so callers need only this module to talk about rungs."""
-    return rung_by_index(index)

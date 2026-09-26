@@ -29,6 +29,8 @@ import httpx
 import numpy as np
 from numpy.typing import NDArray
 
+# The step-6 uplink face, defined once where the sender declares it.
+from cane.bridge.sender import InferenceTransport
 from cane.bridge.transport_http import CloudResponseError
 from cane.cloud.api_models import (
     SESSION_ID_PATTERN,
@@ -93,14 +95,6 @@ class InferenceBackend(Protocol):
     async def infer(
         self, meta: InferenceMeta, jpegs: tuple[bytes, ...]
     ) -> InferenceResponse: ...
-
-    async def aclose(self) -> None: ...
-
-
-class InferenceTransport(Protocol):
-    """The step-6 uplink face (`transport_http.HttpInferenceTransport`)."""
-
-    async def post_crops(self, request: InferenceRequest) -> bytes: ...
 
     async def aclose(self) -> None: ...
 
