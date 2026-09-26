@@ -67,9 +67,7 @@ public struct AwarenessEvent: Codable, Equatable, Sendable {
 
         try require(.schemaVersion)
         let schemaVersion = try decodeField(Int.self, forKey: .schemaVersion)
-        guard schemaVersion == 1 else {
-            throw AwarenessEventError.outOfRange(field: "schema")
-        }
+        try AwarenessEventFieldChecks.schemaVersion(schemaVersion)
         self.schemaVersion = schemaVersion
 
         try require(.source)
@@ -77,32 +75,17 @@ public struct AwarenessEvent: Codable, Equatable, Sendable {
 
         try require(.trackId)
         let trackId = try decodeField(String.self, forKey: .trackId)
-        guard
-            trackId.count >= AwarenessEventBounds.trackIdMinLength,
-            trackId.count <= AwarenessEventBounds.trackIdMaxLength
-        else {
-            throw AwarenessEventError.outOfRange(field: "track_id")
-        }
+        try AwarenessEventFieldChecks.trackId(trackId)
         self.trackId = trackId
 
         try require(.tCaptureMs)
         let tCaptureMs = try decodeField(Int.self, forKey: .tCaptureMs)
-        guard
-            tCaptureMs >= AwarenessEventBounds.tCaptureMsMin,
-            tCaptureMs <= AwarenessEventBounds.tCaptureMsMax
-        else {
-            throw AwarenessEventError.outOfRange(field: "t_capture_ms")
-        }
+        try AwarenessEventFieldChecks.tCaptureMs(tCaptureMs)
         self.tCaptureMs = tCaptureMs
 
         try require(.ttlMs)
         let ttlMs = try decodeField(Int.self, forKey: .ttlMs)
-        guard
-            ttlMs >= AwarenessEventBounds.ttlMsMin,
-            ttlMs <= AwarenessEventBounds.ttlMsMax
-        else {
-            throw AwarenessEventError.outOfRange(field: "ttl_ms")
-        }
+        try AwarenessEventFieldChecks.ttlMs(ttlMs)
         self.ttlMs = ttlMs
 
         try require(.cls)
@@ -110,39 +93,19 @@ public struct AwarenessEvent: Codable, Equatable, Sendable {
 
         try require(.confidence)
         let confidence = try decodeField(Double.self, forKey: .confidence)
-        guard
-            confidence.isFinite,
-            confidence >= AwarenessEventBounds.confidenceMin,
-            confidence <= AwarenessEventBounds.confidenceMax
-        else {
-            throw AwarenessEventError.outOfRange(field: "confidence")
-        }
+        try AwarenessEventFieldChecks.confidence(confidence)
         self.confidence = confidence
 
         try require(.bearingDeg)
         let bearingDeg = try decodeField(Double.self, forKey: .bearingDeg)
-        guard
-            bearingDeg.isFinite,
-            bearingDeg > AwarenessEventBounds.bearingDegMinExclusive,
-            bearingDeg <= AwarenessEventBounds.bearingDegMax
-        else {
-            throw AwarenessEventError.outOfRange(field: "bearing_deg")
-        }
+        try AwarenessEventFieldChecks.bearingDeg(bearingDeg)
         self.bearingDeg = bearingDeg
 
         // Nullable fields: decode as an Optional so a *missing* key throws
         // (via `require` above) but an explicit `null` decodes to nil.
         try require(.rangeM)
         let rangeM = try decodeField(Double?.self, forKey: .rangeM)
-        if let rangeM {
-            guard
-                rangeM.isFinite,
-                rangeM >= AwarenessEventBounds.rangeMMin,
-                rangeM <= AwarenessEventBounds.rangeMMax
-            else {
-                throw AwarenessEventError.outOfRange(field: "range_m")
-            }
-        }
+        try AwarenessEventFieldChecks.rangeM(rangeM)
         self.rangeM = rangeM
 
         try require(.rangeBand)
@@ -150,20 +113,61 @@ public struct AwarenessEvent: Codable, Equatable, Sendable {
 
         try require(.closingMps)
         let closingMps = try decodeField(Double?.self, forKey: .closingMps)
-        if let closingMps {
-            guard
-                closingMps.isFinite,
-                closingMps >= AwarenessEventBounds.closingMpsMin,
-                closingMps <= AwarenessEventBounds.closingMpsMax
-            else {
-                throw AwarenessEventError.outOfRange(field: "closing_mps")
-            }
-        }
+        try AwarenessEventFieldChecks.closingMps(closingMps)
         self.closingMps = closingMps
 
-        guard self.source == .phone || self.rangeM == nil else {
-            throw AwarenessEventError.x4StatedMetres
+        try AwarenessEventFieldChecks.metricRangeOwnership(
+            source: self.source,
+            rangeM: self.rangeM
+        )
+    }
+
+    /// Builds an event in memory, running exactly the bound and conditional
+    /// checks `init(from decoder:)` runs (`AwarenessEventFieldChecks`), so a
+    /// producer or a test can never hand the rest of the system an event the
+    /// wire would have rejected.
+    ///
+    /// `tCaptureMs` is taken as `Int64` because the phone clock is milliseconds
+    /// since the epoch; it is range-checked before narrowing to the stored
+    /// `Int`, so the conversion cannot trap.
+    public init(
+        schema: Int = AwarenessEventBounds.supportedSchemaVersion,
+        source: Source,
+        trackId: String,
+        tCaptureMs: Int64,
+        ttlMs: Int,
+        cls: ObjectClass,
+        confidence: Double,
+        bearingDeg: Double,
+        rangeM: Double?,
+        rangeBand: RangeBand?,
+        closingMps: Double?
+    ) throws {
+        guard let captureMs = Int(exactly: tCaptureMs) else {
+            throw AwarenessEventError.outOfRange(field: "t_capture_ms")
         }
+        try AwarenessEventFieldChecks.all(
+            schemaVersion: schema,
+            source: source,
+            trackId: trackId,
+            tCaptureMs: captureMs,
+            ttlMs: ttlMs,
+            confidence: confidence,
+            bearingDeg: bearingDeg,
+            rangeM: rangeM,
+            closingMps: closingMps
+        )
+        self.schemaVersion = schema
+        self.source = source
+        self.trackId = trackId
+        self.tCaptureMs = captureMs
+        self.ttlMs = ttlMs
+        self.cls = cls
+        self.confidence = confidence
+        self.bearingDeg = bearingDeg
+        self.rangeM = rangeM
+        self.rangeBand = rangeBand
+        self.closingMps = closingMps
     }
 
     /// Hand-written, not synthesized: the synthesized `Encodable` would use
