@@ -41,11 +41,14 @@ LOST_TRACK_BUFFER: Final = int(LOST_TRACK_S * SUPERVISION_REFERENCE_FPS)
 MATCH_THRESHOLD: Final = 0.9
 MIN_CONSECUTIVE_FRAMES: Final = 1
 DEFAULT_ACTIVATION_THRESHOLD: Final = 0.35
-# Emergent, not chosen: supervision's *new track* floor is
-# `track_activation_threshold + NEW_TRACK_SCORE_MARGIN`, so with A8's
-# activation = conf_emit = 0.35 a box that never rises above 0.45 can join an
-# existing track but never start one. Pinned by a test, raised as an open
-# concern rather than "fixed" here, because A8 fixes the activation value.
+# supervision derives its *new track* floor as `track_activation_threshold +
+# NEW_TRACK_SCORE_MARGIN`, so handing it the emit threshold directly would put
+# the floor at 0.45 and a cyclist detected at 0.40 would join a track but
+# never start one -- never announced, no error. Ruling R-A8: build ByteTrack
+# at `emit - NEW_TRACK_SCORE_MARGIN` so a track can start at the emit
+# threshold. The emit filter in `service.py` is unchanged and still decides
+# what reaches the wire; float32 confidences make the boundary itself fuzzy by
+# ~1e-8, which is why no test asserts equality at exactly 0.35.
 NEW_TRACK_SCORE_MARGIN: Final = 0.1
 
 TRACK_IDLE_EVICT_MS: Final = 5000
@@ -92,10 +95,14 @@ class CropTracker:
         self._crop_index = crop_index
         self._gen = gen
         self._prefix = f"{crop_index}:{gen}:"
+        # `activation_threshold` is the *emit* threshold the caller wants a
+        # track to be able to start at; supervision adds the margin back on
+        # internally to get its new-track floor (R-A8).
+        new_track_floor = max(activation_threshold - NEW_TRACK_SCORE_MARGIN, 0.0)
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message=_DEPRECATION_MESSAGE)
             self._tracker = sv.ByteTrack(
-                track_activation_threshold=activation_threshold,
+                track_activation_threshold=new_track_floor,
                 lost_track_buffer=LOST_TRACK_BUFFER,
                 minimum_matching_threshold=match_threshold,
                 frame_rate=fps,

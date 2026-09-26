@@ -100,6 +100,37 @@ def test_the_default_match_threshold_would_lose_the_fast_box() -> None:
     assert ids.count(None) == FRAMES - 1
 
 
+def test_a_box_at_0_40_starts_a_track_on_its_first_frame() -> None:
+    """R-A8. supervision derives its new-track floor as
+    `track_activation_threshold + 0.1`, so the tracker must be constructed
+    0.1 *below* the emit threshold. Built at the emit threshold instead, the
+    first frame of a 0.40 cyclist starts no track and is never announced.
+    """
+    tracker = _new_tracker()
+    tracked = tracker.update(_boxes(20.0), _conf(1, 0.40), _classes(1))
+    assert len(tracked) == 1
+
+
+def test_a_box_at_0_30_never_starts_a_track() -> None:
+    """The floor still bites below the emit threshold: 0.30 is association
+    fodder only, so nothing under `conf_emit` can appear out of nowhere.
+    """
+    tracker = _new_tracker()
+    for step in range(3):
+        assert tracker.update(_boxes(20.0 + 2.0 * step), _conf(1, 0.30), _classes(1)) == ()
+
+
+def test_a_box_at_0_20_keeps_an_existing_track_alive() -> None:
+    """The BYTE half: a 0.20 box cannot start a track, but it is matched to a
+    live one *on that frame* -- proved by the id coming back, not by the track
+    merely surviving in the lost buffer.
+    """
+    tracker = _new_tracker()
+    first = tracker.update(_boxes(20.0), _conf(1), _classes(1))[0].track_id
+    low = tracker.update(_boxes(22.0), _conf(1, 0.20), _classes(1))
+    assert [box.track_id for box in low] == [first]
+
+
 def test_two_crops_have_independent_ids() -> None:
     left, right = _new_tracker(crop_index=0), _new_tracker(crop_index=3)
     left_id = left.update(_boxes(20.0), _conf(1), _classes(1))[0].track_id

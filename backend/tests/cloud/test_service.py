@@ -19,11 +19,7 @@ from cane.cloud.detector.fake import ScriptedDetector
 from cane.cloud.motion import MIN_BOX_H_PX
 from cane.cloud.service import MAX_DETECTIONS_PER_CROP, InferenceService
 from cane.cloud.settings import CloudSettings
-from cane.cloud.tracker import (
-    DEFAULT_ACTIVATION_THRESHOLD,
-    NEW_TRACK_SCORE_MARGIN,
-    TrackerRegistry,
-)
+from cane.cloud.tracker import TrackerRegistry
 from cane.contracts.awareness_event import ObjectClass, RangeBand
 
 T0 = 1_790_000_000_000
@@ -76,14 +72,36 @@ def test_unmapped_coco_names_are_dropped() -> None:
     assert [d.cls for d in response.detections] == [ObjectClass.PERSON]
 
 
-def test_low_confidence_detections_are_tracked_but_never_emitted() -> None:
-    """The BYTE half of ByteTrack: a 0.15-0.35 box cannot start a track and
-    never reaches the wire, but it keeps an existing track alive through the
-    blurry frame -- which is exactly where an overtaking cyclist's id churns.
+def test_a_detection_at_0_40_is_announced_on_its_first_frame() -> None:
+    """R-A8. supervision's new-track floor is `track_activation_threshold +
+    NEW_TRACK_SCORE_MARGIN`, so the tracker is built at `conf_emit - 0.1` and
+    a box above the emit threshold starts a track the moment it is seen.
+    Built at `conf_emit`, a 0.40 cyclist would never be announced at all.
+    """
+    service = build(frame(person(200.0, 400.0, conf=0.40)))
+    detections = service.infer(meta(), images()).detections
+    assert len(detections) == 1
+    assert detections[0].confidence == pytest.approx(0.40)
+
+
+def test_a_detection_at_0_30_never_starts_a_track_and_is_never_emitted() -> None:
+    """Lowering the activation threshold must not lower what reaches the
+    wire: the emit filter (`confidence < conf_emit`) is unchanged.
+    """
+    service = build(*[frame(person(200.0 + 4 * i, 400.0 + 4 * i, conf=0.30))
+                      for i in range(3)])
+    for index in range(3):
+        assert service.infer(meta(T0 + 333 * index), images()).detections == ()
+
+
+def test_a_0_20_detection_keeps_a_track_alive_but_is_never_emitted() -> None:
+    """The BYTE half of ByteTrack: a 0.20 box cannot start a track and never
+    reaches the wire, but it keeps an existing track alive through the blurry
+    frame -- which is exactly where an overtaking cyclist's id churns.
     """
     service = build(
         frame(person(200.0, 400.0, conf=0.90)),
-        frame(person(204.0, 404.0, conf=0.25)),
+        frame(person(204.0, 404.0, conf=0.20)),
         frame(person(208.0, 408.0, conf=0.90)),
     )
     first = service.infer(meta(), images()).detections
@@ -91,20 +109,6 @@ def test_low_confidence_detections_are_tracked_but_never_emitted() -> None:
     recovered = service.infer(meta(T0 + 666), images()).detections
     assert len(first) == 1 and blurry == () and len(recovered) == 1
     assert recovered[0].track_id == first[0].track_id
-
-
-def test_a_detection_below_the_new_track_floor_is_never_announced() -> None:
-    """Pinned, not endorsed: supervision derives its new-track score floor as
-    `track_activation_threshold + NEW_TRACK_SCORE_MARGIN`, so with A8's
-    activation = conf_emit = 0.35 a box that lives its whole life at 0.40 can
-    join an existing track but can never start one. See the open concern in
-    the step-7 report; the one-line fix is to pass `conf_emit - 0.1`.
-    """
-    dead_band = DEFAULT_ACTIVATION_THRESHOLD + NEW_TRACK_SCORE_MARGIN / 2.0
-    service = build(*[frame(person(200.0 + 4 * i, 400.0 + 4 * i, conf=dead_band))
-                      for i in range(3)])
-    for index in range(3):
-        assert service.infer(meta(T0 + 333 * index), images()).detections == ()
 
 
 def test_boxes_are_normalised_by_the_decoded_shape() -> None:
