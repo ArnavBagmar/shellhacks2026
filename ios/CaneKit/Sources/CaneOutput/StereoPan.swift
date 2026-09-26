@@ -1,37 +1,78 @@
 import Foundation
 
-/// Panning is a bonus, never load-bearing (step-10 design Amendment 4):
-/// haptics and the spoken sector words carry direction unconditionally. Pan
-/// is capped so a listener with one bud in -- either side -- loses at most
-/// ~4.4 dB, is zero on any route that is not real stereo headphones, and is
-/// applied to a 40 ms earcon, never to speech.
+/// The output routes on which panning is allowed to be non-zero.
+///
+/// `.builtInSpeaker` and `.builtInReceiver` are absent on purpose: the
+/// speakers are ~15 cm apart at 30 cm from the chest, and a phone mounted
+/// upside-down in the strap **swaps L and R**, which would point the cue at
+/// the wrong side.
+public enum PanRoute: Equatable, Sendable {
+    case headphones
+    case bluetoothA2DP
+    case bluetoothLE
+    case usbAudio
+    case airPlay
+    case builtInSpeaker
+    case builtInReceiver
+    case other
+
+    public var allowsPanning: Bool {
+        switch self {
+        case .headphones, .bluetoothA2DP, .bluetoothLE, .usbAudio, .airPlay:
+            return true
+        case .builtInSpeaker, .builtInReceiver, .other:
+            return false
+        }
+    }
+}
+
+/// Amendment 4 -- panning is a bonus that must never be load-bearing and
+/// must never reduce audibility.
+///
+/// Haptics carry direction unconditionally. The spoken sector words carry
+/// direction unconditionally. With one AirPod in, a hard pan is an 8-20 dB
+/// attenuator or, on a wired bud, silence -- so an uncapped pan can make a
+/// hazard announcement *inaudible*, or point the spatial cue opposite the
+/// words.
+///
+/// Pure and fully tested either way the controller rules on Amendment 4's
+/// open question (panned earcon, the shipping default, versus panned
+/// speech): nothing here touches AVFoundation.
 public enum StereoPan {
+    /// Caps the pan so the quieter channel keeps at least `minChannelGain`.
     public static let panCap = 0.4
-    public static let minChannelGain = 0.6
 
-    /// `sin(bearing) x 0.4`: -0.4 hard-ish left, +0.4 right, 0 ahead and
-    /// directly behind (front/back is the haptic's and the words' job).
-    public static func pan(bearingDeg: Double, stereoRoute: Bool) -> Double {
-        guard stereoRoute, bearingDeg.isFinite else { return 0 }
-        let raw = sin(bearingDeg * .pi / 180)
-        return min(max(raw, -1), 1) * panCap
+    /// Linear pan law: the quieter channel's gain is `1 - |pan|`, so the cap
+    /// above guarantees >= 0.6 (about -4.4 dB).
+    public static let minChannelGainFloor = 0.6
+
+    /// `clamp(sin(bearing), -1, 1) * PAN_CAP`. Negative is the user's left,
+    /// matching `BearingSector`'s convention.
+    ///
+    /// `pan(0) == pan(180) == 0`: the front/back collapse is accepted, and
+    /// the haptic and the words separate them.
+    public static func pan(bearingDeg: Double) -> Double {
+        let radians = bearingDeg * .pi / 180
+        let value = min(max(sin(radians), -1.0), 1.0) * panCap
+        // sin(180 degrees) is ~1.2e-16, not 0, in binary floating point.
+        return abs(value) < 1e-9 ? 0 : value
     }
 
-    /// Linear pan law: the far channel is attenuated to `1 - |pan|`.
-    public static func channelGains(pan: Double) -> (left: Double, right: Double) {
-        (left: 1 - max(pan, 0), right: 1 + min(pan, 0))
+    /// Applies the route gate. Must be recomputed on every route change and
+    /// never cached across one, because buds go in and out mid-walk.
+    ///
+    /// iOS downmixes to mono for a single AirPod, and the route API gives no
+    /// way to detect that -- which is exactly why the cap exists.
+    public static func pan(bearingDeg: Double, route: PanRoute, channelCount: Int) -> Double {
+        guard route.allowsPanning, channelCount >= 2 else { return 0 }
+        return pan(bearingDeg: bearingDeg)
     }
 
-    /// Port types that are real stereo to the ears. The built-in speaker is
-    /// excluded on purpose: a phone upside-down in the strap swaps L and R.
-    public static let stereoPortTypes: Set<String> = [
-        "Headphones", "BluetoothA2DPOutput", "BluetoothLE", "USBAudio", "AirPlay",
-    ]
-
-    /// Pan only when there is exactly one output, of a stereo type, with at
-    /// least two channels. Recompute on every route change.
-    public static func isStereoRoute(outputs: [(portType: String, channels: Int)]) -> Bool {
-        guard outputs.count == 1, let only = outputs.first else { return false }
-        return stereoPortTypes.contains(only.portType) && only.channels >= 2
+    /// Gain of the quieter channel. The invariant asserted in tests is
+    /// `minChannelGain(pan(b)) >= 0.6` for every bearing, so a listener with
+    /// one bud in -- on either side -- loses at most 4.4 dB of the panned
+    /// component.
+    public static func minChannelGain(_ pan: Double) -> Double {
+        1 - abs(pan)
     }
 }

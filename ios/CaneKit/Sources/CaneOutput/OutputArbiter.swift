@@ -26,7 +26,7 @@ public enum OutputChannel: Int, Comparable, Sendable {
 /// synchronous (the `AnnouncementSink` contract), and the renderers' `stop()`
 /// is what makes an in-flight presentation return.
 public final class OutputArbiter: @unchecked Sendable {
-    public static let speechLeadMs = 120
+    public static let speechLeadMs = SpeechSettings.speechLeadMs
     public static let hazardSpeechGapMs: Int64 = 1_800
     static let waitPollMs = 50
 

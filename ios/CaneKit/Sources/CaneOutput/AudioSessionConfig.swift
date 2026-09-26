@@ -54,12 +54,24 @@ public enum AudioSessionConfig {
         configure()
     }
 
-    /// Whether the current route is real stereo headphones (panning gate).
-    public static func isStereoRoute() -> Bool {
-        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs.map {
-            (portType: $0.portType.rawValue, channels: $0.channels?.count ?? 1)
+    /// The current output route for `StereoPan`'s gate. Recompute every
+    /// time: buds go in and out mid-walk. More than one output is `.other`
+    /// (never panned).
+    public static func panRoute() -> (route: PanRoute, channels: Int) {
+        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+        guard outputs.count == 1, let only = outputs.first else { return (.other, 1) }
+        let route: PanRoute
+        switch only.portType {
+        case .headphones: route = .headphones
+        case .bluetoothA2DP: route = .bluetoothA2DP
+        case .bluetoothLE: route = .bluetoothLE
+        case .usbAudio: route = .usbAudio
+        case .airPlay: route = .airPlay
+        case .builtInSpeaker: route = .builtInSpeaker
+        case .builtInReceiver: route = .builtInReceiver
+        default: route = .other
         }
-        return StereoPan.isStereoRoute(outputs: outputs)
+        return (route, only.channels?.count ?? 1)
     }
 
     /// Phone call / Siri / alarm. `began(true)` on start, `began(false)` on

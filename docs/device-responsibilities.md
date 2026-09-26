@@ -70,7 +70,7 @@ with three people.
 | Neural Engine | YOLO + Depth Anything V2 Small, interleaved |
 | Core Haptics | Directional haptic patterns — the primary output channel |
 | Speakers / AirPods (A2DP out) | TTS and audio beacons |
-| Microphone (**iPhone's, not AirPods'**) | Voice commands |
+| Microphone (**iPhone's, not AirPods'**) | Voice commands. **Ratified 2026-09-26** (build-plan.md §6 conflict #1): never `.allowBluetooth`, so output stays on A2DP |
 | CoreLocation | GPS + true heading — **navigation only**, never the awareness path |
 | ~~LiDAR~~ | **Not used.** Dropped — see sync doc §2.1 |
 | ~~ARKit~~ | **Not used.** No LiDAR means no reason to pay ARKit's cost |

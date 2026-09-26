@@ -1,3 +1,4 @@
+import CaneFeedback
 import CaneOutput
 import SwiftUI
 
@@ -93,7 +94,8 @@ enum HapticReference {
             await speech.speak(SpokenPhrase(text: name))
             try? await Task.sleep(for: .milliseconds(250))
             for _ in 0..<2 {
-                await haptics.play(HapticScript.hazard(symbol: symbol, urgency: symbol == .alarm ? 3 : 2, userGain: gain))
+                await haptics.play(HapticScript.hazard(symbol, level: symbol == .alarm ? .immediate : .actSoon,
+                                                       userGain: Double(gain)))
                 try? await Task.sleep(for: .milliseconds(500))
             }
         }

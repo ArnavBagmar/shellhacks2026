@@ -499,7 +499,7 @@ The PDF is still correct about pitch framing, tracks, and timeline. These items 
 **BOM additions:** shoulder/chest mount for the X4, short USB-C cable chest → backpack.
 
 **BOM removals:** AirPods head tracking is not needed — that was only required by the hat-mounted
-variant, so the AirPods mic is fine for voice input. (Trap avoided: `AVAudioSession`'s
+variant, so the AirPods mic is fine for voice input. **[SUPERSEDED 2026-09-26 — the mic is the iPhone's; see build-plan.md §6 conflict #1 and step-10-design.md Amendment 5. AirPods remain the preferred *output*.]** (Trap avoided: `AVAudioSession`'s
 `.allowBluetooth` option silently stops `CMHeadphoneMotionManager` updates.)
 
 ---

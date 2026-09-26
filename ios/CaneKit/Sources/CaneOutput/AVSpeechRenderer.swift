@@ -12,10 +12,10 @@ import os
 /// - one pinned voice for the session, primed at startup so the first real
 ///   hazard does not pay the voice-asset load.
 public final class AVSpeechRenderer: NSObject, SpeechRenderer, AVSpeechSynthesizerDelegate, @unchecked Sendable {
-    public static let defaultRate: Float = 0.55
-    public static let rateRange: ClosedRange<Float> = 0.45...0.70
+    public static let defaultRate = SpeechSettings.defaultRate
+    public static let rateRange = SpeechSettings.rateRange
     /// No `didStart` within this long -> give up on the utterance.
-    static let startWatchdogMs = 1_500
+    static let startWatchdogMs = SpeechSettings.speechWatchdogMs
     /// Hard cap on one utterance, whatever its length.
     static let maxUtteranceMs = 12_000
 
@@ -41,9 +41,9 @@ public final class AVSpeechRenderer: NSObject, SpeechRenderer, AVSpeechSynthesiz
         utterance.voice = voice
         utterance.rate = min(max(rate(), Self.rateRange.lowerBound), Self.rateRange.upperBound)
         utterance.pitchMultiplier = phrase.pitchMultiplier
-        utterance.volume = 1.0
-        utterance.preUtteranceDelay = 0
-        utterance.postUtteranceDelay = 0
+        utterance.volume = SpeechSettings.volume
+        utterance.preUtteranceDelay = SpeechSettings.preUtteranceDelay
+        utterance.postUtteranceDelay = SpeechSettings.postUtteranceDelay
         await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 lock.withLock {

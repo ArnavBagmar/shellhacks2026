@@ -1,15 +1,55 @@
 # Cloud L4 deployment
 
-> **UNVERIFIED as of 2026-09-26: no GPU, no gcloud, no GCP project. Nothing in
-> this directory, in `../docker/`, or in `cane/cloud/export_engine.py` has been
-> executed.** It is written from the design, not from a run. The two acceptance
-> criteria "the engine loads on a fresh L4 boot" and "inference under 25 ms" are
-> **deferred** and are only verifiable by `python -m cane.cloud.smoke` once a VM
-> exists. What *has* run, on a MacBook Pro M2 Pro against a real Insta360 X4, is
-> the same service with `CANE_DETECTOR=ultralytics CANE_DEVICE=mps`: 177 frames
-> at rung 1, `inference_ms` p50 178 ms / p95 369 ms, 2-5 detections per frame,
-> one `track_id` stable across 164 consecutive frames. See
-> `docs/steps/assets/step-07-live-detections.jpg`.
+> **Verified on the L4, 2026-09-26.** The image was built and served on
+> `l4-infer` (`g2-standard-4` + 1× NVIDIA L4, `us-east1-d`, Deep Learning VM
+> image with driver 580). Measured from the venue network with the real X4
+> bridge: **round trip p50 72 ms / p95 85–93 ms at 3 fps, zero failures**, in
+> TensorRT mode; the model runs in **12 ms at 640 and 20 ms at 512** (warm
+> `/warmup`), and the service's decode-inclusive `inference_ms` is ~30 ms.
+> PyTorch-on-CUDA mode (no engine) measured 42 ms model / ~59 ms service and
+> round trip p50 91 ms. `create_l4_vm.sh` and `startup.sh` were **not executed**
+> — the VM pre-existed and the steps below were run by hand.
+
+## What was actually done on 2026-09-26 (repeatable)
+
+1. VM `l4-infer` already existed (created in the console). Attached a 50 GB
+   `pd-balanced` disk `cane-models` as device `models`, tagged the VM
+   `cane-inference`, and created firewall rule `cane-inference` (tcp:8000 from
+   the demo laptop's public /32 only). The external IP is ephemeral: it changes
+   on stop/start unless you reserve it.
+2. On the VM (no Docker on the DLVM image): `apt-get install docker.io`,
+   `nvidia-ctk runtime configure --runtime=docker`, `systemctl restart docker`;
+   `mkfs.ext4` the disk, mount at `/mnt/models`, add an `fstab` line.
+3. Copied `backend/` (plus one test image) to the VM and built the image **on
+   the VM** (amd64): `docker build -f backend/docker/Dockerfile -t cane-cloud:v3 backend`
+   (~25 min the first time: 11 GB base pull + pip + weights bake).
+4. Two findings that are now baked into the Dockerfile: **`numpy<2` and
+   `opencv-python<5`** (the NGC torch is built against NumPy 1.x; NumPy 2 made
+   `predict` fail with "Numpy is not available" and destabilised the TensorRT
+   build), and a **14 GiB builder workspace**. The dynamic export still failed
+   on TensorRT 10.13 ("could not find any implementation" for the attention
+   block), so `export_engine.py` now falls back to a **static batch-6 640
+   engine** (built in 323 s), which ultralytics letterboxes 512 crops into —
+   both rung sizes work.
+5. Production container (the exact command; `--restart always` survives reboots):
+
+```sh
+sudo docker run -d --restart always --gpus all -p 8000:8000 -v /mnt/models:/models \
+  -e CANE_DETECTOR=tensorrt -e CANE_DEVICE=0 \
+  -e CANE_ENGINE_PATH=/models/yolo11s_b12dyn_fp16.engine \
+  --name cane cane-cloud:v3
+```
+
+   With the engine + sidecar on the disk the entrypoint reuses the cache and
+   serves within ~20 s. On a fresh disk it exports (dynamic attempt, then the
+   static fallback: ~9 min) once. Then `curl http://<ip>:8000/warmup` twice
+   (first call ≈ 2–5 s per shape) and keep `deploy/warmup_loop.sh` running.
+
+6. Day-to-day: `gcloud compute instances start|stop l4-infer --zone us-east1-d`
+   (~$0.7–1/h while running — stop it when not testing); the engine cache and
+   the container survive a stop/start; check
+   `curl http://<new-ip>:8000/healthz`, then point the bridge at
+   `--inference-url http://<new-ip>:8000/infer`.
 
 ## Build and push (us-east1)
 

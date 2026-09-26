@@ -13,7 +13,7 @@ final class OutputArbiterTests: XCTestCase {
         let arbiter = OutputArbiter(haptics: haptics, speech: speech)
 
         let ms = await elapsedMs {
-            await arbiter.presentHazard(haptic: HapticScript.hazard(symbol: .left, urgency: 2),
+            await arbiter.presentHazard(haptic: HapticScript.hazard(.left, level: .actSoon),
                                         phrase: SpokenPhrase(text: "To your left, cyclist"), pan: 0)
         }
 
@@ -28,7 +28,7 @@ final class OutputArbiterTests: XCTestCase {
         let speech = FakeSpeech()
         let arbiter = OutputArbiter(haptics: FakeHaptics(), speech: speech)
 
-        await arbiter.presentHazard(haptic: HapticScript.hazard(symbol: .ahead, urgency: 1), phrase: nil, pan: 0)
+        await arbiter.presentHazard(haptic: HapticScript.hazard(.ahead, level: .aware), phrase: nil, pan: 0)
 
         XCTAssertTrue(speech.spoken.isEmpty)
         XCTAssertFalse(arbiter.isSpeaking)
@@ -37,7 +37,7 @@ final class OutputArbiterTests: XCTestCase {
     func testCancelHazardReturnsWithinFiftyMilliseconds() async throws {
         let arbiter = OutputArbiter(haptics: FakeHaptics(durationMs: 60_000), speech: FakeSpeech(durationMs: 60_000))
         let presenting = Task {
-            await arbiter.presentHazard(haptic: HapticScript.alarm(), phrase: SpokenPhrase(text: "Stop!"), pan: 0)
+            await arbiter.presentHazard(haptic: HapticScript.hazard(.alarm, level: .immediate), phrase: SpokenPhrase(text: "Stop!"), pan: 0)
         }
         try await Task.sleep(for: .milliseconds(200))
 
@@ -51,7 +51,7 @@ final class OutputArbiterTests: XCTestCase {
     func testCancellingTheCallerCancelsThePresentation() async throws {
         let arbiter = OutputArbiter(haptics: FakeHaptics(durationMs: 60_000), speech: FakeSpeech(durationMs: 60_000))
         let presenting = Task {
-            await arbiter.presentHazard(haptic: HapticScript.alarm(), phrase: SpokenPhrase(text: "Stop!"), pan: 0)
+            await arbiter.presentHazard(haptic: HapticScript.hazard(.alarm, level: .immediate), phrase: SpokenPhrase(text: "Stop!"), pan: 0)
         }
         try await Task.sleep(for: .milliseconds(100))
 
@@ -65,10 +65,10 @@ final class OutputArbiterTests: XCTestCase {
     func testANewHazardStopsTheOldOneFirst() async throws {
         let haptics = FakeHaptics(durationMs: 60_000)
         let arbiter = OutputArbiter(haptics: haptics, speech: FakeSpeech(durationMs: 60_000))
-        let first = Task { await arbiter.presentHazard(haptic: HapticScript.alarm(), phrase: nil, pan: 0) }
+        let first = Task { await arbiter.presentHazard(haptic: HapticScript.hazard(.alarm, level: .immediate), phrase: nil, pan: 0) }
         try await Task.sleep(for: .milliseconds(50))
         let second = Task {
-            await arbiter.presentHazard(haptic: HapticScript.hazard(symbol: .left, urgency: 2), phrase: nil, pan: 0)
+            await arbiter.presentHazard(haptic: HapticScript.hazard(.left, level: .actSoon), phrase: nil, pan: 0)
         }
 
         let ms = await elapsedMs { await first.value }
@@ -84,7 +84,7 @@ final class OutputArbiterTests: XCTestCase {
         let answer = Task { await arbiter.say(SpokenPhrase(text: "To your right, restroom sign"), on: .answer) }
         try await Task.sleep(for: .milliseconds(100))
 
-        await arbiter.presentHazard(haptic: HapticScript.alarm(), phrase: nil, pan: 0)
+        await arbiter.presentHazard(haptic: HapticScript.hazard(.alarm, level: .immediate), phrase: nil, pan: 0)
 
         let finished = await answer.value
         XCTAssertFalse(finished)
@@ -164,17 +164,27 @@ final class OutputArbiterTests: XCTestCase {
 final class OutputSinkTests: XCTestCase {
     func testUrgencyThreeIsTheAlarmPlusTheLocativeWord() throws {
         let plan = OutputSink.plan(for: try Make.announcement(level: .immediate, cls: .cyclist, bearingDeg: 178),
-                                   hapticsAvailable: true, userGain: 1, stereoRoute: true)
+                                   hapticsAvailable: true, userGain: 1, route: .bluetoothA2DP, channels: 2)
         XCTAssertEqual(plan.haptic?.symbol, .alarm)
         XCTAssertEqual(plan.phrase?.text, "Behind you!")
     }
 
     func testDegradedHapticsSpeakEveryUrgencyAndPlayNothing() throws {
         let plan = OutputSink.plan(for: try Make.announcement(level: .aware, bearingDeg: 45),
-                                   hapticsAvailable: false, userGain: 1, stereoRoute: true)
+                                   hapticsAvailable: false, userGain: 1, route: .bluetoothA2DP, channels: 2)
         XCTAssertNil(plan.haptic)
         XCTAssertEqual(plan.phrase?.text, "Ahead to the right, person")
         XCTAssertEqual(plan.pan, 0)
+    }
+
+    func test_negativeBearingIsTheUsersLeftAllTheWayToThePlan() throws {
+        let a = try Make.announcement(level: .actSoon, cls: .car, bearingDeg: -90)
+        let onBuds = OutputSink.plan(for: a, hapticsAvailable: true, userGain: 1, route: .bluetoothA2DP, channels: 2)
+        XCTAssertEqual(onBuds.haptic?.symbol, .left)
+        XCTAssertEqual(onBuds.phrase?.text, "To your left, car")
+        XCTAssertLessThan(onBuds.pan, 0)
+        let onSpeaker = OutputSink.plan(for: a, hapticsAvailable: true, userGain: 1, route: .builtInSpeaker, channels: 2)
+        XCTAssertEqual(onSpeaker.pan, 0)
     }
 
     func testAnExpiredAnnouncementPresentsNothing() async throws {

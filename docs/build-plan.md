@@ -413,11 +413,16 @@ because imminent hazards never leave the device.**
 
 ## 6. Conflicts and open questions needing a team decision
 
-**Conflict #1 — which microphone?** `device-responsibilities.md` says "Microphone (**iPhone's, not
-AirPods'**)". `camera-sync-design.md` §5 says "the AirPods mic is fine for voice input." These
-contradict. The `CMHeadphoneMotionManager` reason for avoiding the AirPods mic is gone (head
-tracking is cut), but `.allowBluetooth` still changes the audio session category, which affects TTS
-routing. **Pick one and write it down.**
+**Conflict #1 — which microphone? RESOLVED 2026-09-26: the iPhone's own microphone.**
+`device-responsibilities.md` was right; `camera-sync-design.md` §5's "the AirPods mic is fine for
+voice input" is superseded and annotated there. Binding configuration is `step-10-design.md`
+Amendment 5: `.playAndRecord` + `.spokenAudio` with
+`[.duckOthers, .allowBluetoothA2DP, .allowAirPlay, .defaultToSpeaker]` — **never `.allowBluetooth`**.
+
+*Why this way round:* taking mic input from the AirPods forces the HFP profile, which drops output
+to call-grade audio for the whole walk. Keeping the mic on the phone leaves output on A2DP, so
+speech stays high quality through AirPods when they are worn, and `.defaultToSpeaker` sends it to
+the phone's own speaker when they are not. One ruling buys good audio in both cases.
 
 **Conflict #2 — does the RTX laptop have a role?** A local TensorRT bridge cuts the uplink hop
 entirely but loses the cloud story and the measured cloud-vs-local benchmark. Only relevant if

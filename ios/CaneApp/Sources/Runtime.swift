@@ -65,7 +65,7 @@ final class Runtime {
             inner: OutputSink(
                 arbiter: arbiter,
                 userGain: { settings.current.hapticGain },
-                stereoRoute: { AudioSessionConfig.isStereoRoute() },
+                panRoute: { AudioSessionConfig.panRoute() },
                 clock: Self.now
             ),
             onPresent: callbacks.onHazard

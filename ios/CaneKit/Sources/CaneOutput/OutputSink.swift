@@ -10,19 +10,19 @@ import os
 public final class OutputSink: AnnouncementSink, @unchecked Sendable {
     private let arbiter: OutputArbiter
     private let userGain: @Sendable () -> Float
-    private let stereoRoute: @Sendable () -> Bool
+    private let panRoute: @Sendable () -> (route: PanRoute, channels: Int)
     private let clock: @Sendable () -> Int64
     private let logger = Logger(subsystem: "cane", category: "output")
 
     public init(
         arbiter: OutputArbiter,
         userGain: @escaping @Sendable () -> Float = { 1.0 },
-        stereoRoute: @escaping @Sendable () -> Bool = { false },
+        panRoute: @escaping @Sendable () -> (route: PanRoute, channels: Int) = { (.builtInSpeaker, 1) },
         clock: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }
     ) {
         self.arbiter = arbiter
         self.userGain = userGain
-        self.stereoRoute = stereoRoute
+        self.panRoute = panRoute
         self.clock = clock
     }
 
@@ -30,8 +30,9 @@ public final class OutputSink: AnnouncementSink, @unchecked Sendable {
         guard !Task.isCancelled else { return }
         // Belt and braces: step 9 already re-gates at dequeue.
         guard clock() < a.expiresAtMs else { return }
+        let route = panRoute()
         let plan = Self.plan(for: a, hapticsAvailable: arbiter.haptics.isAvailable,
-                             userGain: userGain(), stereoRoute: stereoRoute())
+                             userGain: userGain(), route: route.route, channels: route.channels)
         logger.info("""
             present id=\(a.id) u=\(a.urgency) \(a.cls.rawValue, privacy: .public) \
             b=\(a.bearingDeg, format: .fixed(precision: 0)) \
@@ -53,17 +54,20 @@ public final class OutputSink: AnnouncementSink, @unchecked Sendable {
     }
 
     public static func plan(
-        for a: Announcement, hapticsAvailable: Bool, userGain: Float, stereoRoute: Bool
+        for a: Announcement, hapticsAvailable: Bool, userGain: Float,
+        route: PanRoute, channels: Int
     ) -> Plan {
-        let sector = Sector(bearingDeg: a.bearingDeg)
-        let symbol: HapticSymbol = a.haptic == .burst ? .alarm : HapticSymbol(sector: sector)
+        let level = AnnouncementLevel(rawValue: a.urgency) ?? .aware
+        let symbol = a.haptic == .burst
+            ? HapticSymbol.alarm
+            : HapticSymbol.symbol(level: level, sector: BearingSector.sector(a.bearingDeg))
         let haptic = hapticsAvailable
-            ? HapticScript.hazard(symbol: symbol, urgency: a.urgency, userGain: userGain)
+            ? HapticScript.hazard(symbol, level: level, userGain: Double(userGain))
             : nil
         return Plan(
             haptic: haptic,
             phrase: HazardPhrasing.phrase(for: a, hapticsDegraded: !hapticsAvailable),
-            pan: haptic == nil ? 0 : StereoPan.pan(bearingDeg: a.bearingDeg, stereoRoute: stereoRoute)
+            pan: haptic == nil ? 0 : StereoPan.pan(bearingDeg: a.bearingDeg, route: route, channelCount: channels)
         )
     }
 }

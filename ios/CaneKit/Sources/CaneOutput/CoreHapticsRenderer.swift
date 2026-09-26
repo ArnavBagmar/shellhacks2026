@@ -101,15 +101,17 @@ public final class CoreHapticsRenderer: HapticRenderer, @unchecked Sendable {
     private static func event(_ element: HapticElement) -> CHHapticEvent {
         let seconds = TimeInterval(element.onsetMs) / 1000
         var parameters = [
-            CHHapticEventParameter(parameterID: .hapticIntensity, value: element.intensity),
-            CHHapticEventParameter(parameterID: .hapticSharpness, value: element.sharpness),
+            // Scripts reaching the renderer come from `HapticScript.hazard` /
+            // `.navigation`, whose `baseIntensity` is already the played value.
+            CHHapticEventParameter(parameterID: .hapticIntensity, value: Float(element.baseIntensity)),
+            CHHapticEventParameter(parameterID: .hapticSharpness, value: Float(element.sharpness)),
         ]
         switch element.kind {
-        case .tap:
+        case .transient:
             return CHHapticEvent(eventType: .hapticTransient, parameters: parameters, relativeTime: seconds)
-        case .buzz(let durationMs):
-            parameters.append(CHHapticEventParameter(parameterID: .attackTime, value: element.attack))
-            parameters.append(CHHapticEventParameter(parameterID: .releaseTime, value: element.release))
+        case .continuous(let durationMs):
+            parameters.append(CHHapticEventParameter(parameterID: .attackTime, value: Float(element.attack)))
+            parameters.append(CHHapticEventParameter(parameterID: .releaseTime, value: Float(element.release)))
             return CHHapticEvent(
                 eventType: .hapticContinuous, parameters: parameters,
                 relativeTime: seconds, duration: TimeInterval(durationMs) / 1000

@@ -7,6 +7,13 @@ __pycache__/
 *.xcuserstate
 .swiftpm/
 
+# perception benchmarks: run artifacts, model weights and vendored sources
+benchmark_runs/
+*.pt
+*.ts
+backend/third_party/
+backend/checkpoints/
+
 # step 7: local YOLO env, weights and TensorRT engines are never committed
 .venv-yolo/
 *.engine

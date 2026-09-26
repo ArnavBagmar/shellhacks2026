@@ -33,9 +33,12 @@ def make_equirect_frame(width: int, height: int, counter_ms: int) -> np.ndarray:
     image = np.repeat(gradient[None, :, None], height, axis=0)
     image = np.repeat(image, 3, axis=2).copy()
     origin = (int(width * _COUNTER_ORIGIN_FRACTION[0]), int(height * _COUNTER_ORIGIN_FRACTION[1]))
+    # Last six digits only: the full 13-digit epoch-ms counter runs off the
+    # right edge of a small frame under OpenCV 4.x, clipping exactly the
+    # digits that change from frame to frame.
     cv2.putText(
         image,
-        str(counter_ms),
+        f"{counter_ms % 1_000_000:06d}",
         origin,
         cv2.FONT_HERSHEY_SIMPLEX,
         max(width * _COUNTER_SCALE_PER_PX, 0.3),

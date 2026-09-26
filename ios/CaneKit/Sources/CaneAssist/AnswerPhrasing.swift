@@ -23,7 +23,7 @@ public enum AnswerPhrasing {
             guard let bearing = answer.bearingDeg else {
                 return capitalized("\(maybe)\(subject) nearby, direction unclear\(detail).")
             }
-            let sector = Sector(bearingDeg: bearing).words
+            let sector = BearingSector.phrase(bearing)
             let lead = maybe.isEmpty ? capitalized(sector) : "\(maybe)\(sector)"
             return "\(lead), \(subject)\(detail)."
         case .notFound:
@@ -40,7 +40,7 @@ public enum AnswerPhrasing {
     /// symbol), `nil` when there is no bearing.
     public static func side(for answer: SceneAnswer) -> Side? {
         guard answer.status == .found, let bearing = answer.bearingDeg else { return nil }
-        return Sector(bearingDeg: bearing).side
+        return BearingSector.sector(bearing).side
     }
 
     static func article(for noun: String) -> String {

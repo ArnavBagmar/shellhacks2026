@@ -1,16 +1,13 @@
 import Foundation
 
-/// The one file that turns a bearing into a side (step-10 design,
-/// Amendment 6). Everything else -- phrases, haptic symbols, panning --
-/// consumes `Sector`/`Side` and never re-derives from the sign.
-///
-/// Convention (docs/insta360feed.md, verbatim):
-/// `bearing = yaw_view + (c_x - 0.5) * FOV`, **0 is straight ahead and
-/// negative is the user's left**. Bearings are torso-relative, in
-/// `(-180, 180]`.
+/// Which side of the body a hazard is on. `.center` is a real answer, not a
+/// missing one: straight ahead and directly behind carry no left/right
+/// information, and panning them to the middle is correct.
 public enum Side: Equatable, Sendable {
-    case left, center, right
+    case left, right, center
 
+    /// Swapping left and right must be total, so the mirror property test
+    /// can run over every bearing without special-casing the poles.
     public var mirrored: Side {
         switch self {
         case .left: return .right
@@ -20,52 +17,74 @@ public enum Side: Equatable, Sendable {
     }
 }
 
-public enum Sector: Equatable, Sendable, CaseIterable {
-    case ahead, aheadLeft, aheadRight, left, right, behindLeft, behindRight, behind
-
-    /// §C thresholds: |b| < 15 ahead; 15-60 ahead to a side; 60-120 to a
-    /// side; 120-165 behind to a side; >= 165 directly behind.
-    public init(bearingDeg: Double) {
-        let wrapped = Self.normalize(bearingDeg)
-        let magnitude = abs(wrapped)
-        let isLeft = wrapped < 0
-        switch magnitude {
-        case ..<15: self = .ahead
-        case ..<60: self = isLeft ? .aheadLeft : .aheadRight
-        case ..<120: self = isLeft ? .left : .right
-        case ..<165: self = isLeft ? .behindLeft : .behindRight
-        default: self = .behind
-        }
-    }
+/// The five sectors the user is ever told about. Five, not nine: this matches
+/// the Amendment 1 haptic alphabet one-for-one, so the buzz and the words can
+/// never describe different things.
+public enum Sector: Equatable, Sendable {
+    /// Under 15 degrees.
+    case ahead
+    /// 15 up to 60 degrees.
+    case aheadQuarter(Side)
+    /// 60 up to 120 degrees.
+    case lateral(Side)
+    /// 120 up to and including 165 degrees.
+    case behindQuarter(Side)
+    /// Over 165 degrees.
+    case behind
 
     public var side: Side {
         switch self {
-        case .aheadLeft, .left, .behindLeft: return .left
-        case .aheadRight, .right, .behindRight: return .right
-        case .ahead, .behind: return .center
+        case .ahead, .behind:
+            return .center
+        case .aheadQuarter(let side), .lateral(let side), .behindQuarter(let side):
+            return side
+        }
+    }
+}
+
+/// Amendment 6 -- the ONLY place a bearing becomes a side.
+///
+/// Convention, verbatim from step-10-brief §C:
+/// `bearing = yaw_view + (c_x - 0.5) * FOV`, wrapped to [-180, 180).
+/// **0 is straight ahead and negative is the user's left.**
+///
+/// A sign inversion here mirrors every announcement the product will ever
+/// make and still passes every magnitude test, so `HapticScript` and
+/// `StereoPan` consume `Sector`/`Side` from here rather than re-deriving
+/// from the sign themselves. Two derivations could disagree, and a buzz on
+/// the left with a voice saying "right" is worse than either alone.
+public enum BearingSector {
+    /// Boundary ownership is deliberate and tested: a magnitude of exactly
+    /// 15, 60 or 120 belongs to the *wider* sector, and exactly 165 is still
+    /// `behindQuarter` because the spec says "over 165" is directly behind.
+    public static func sector(_ bearingDeg: Double) -> Sector {
+        let magnitude = abs(bearingDeg)
+
+        // Resolved once, here, and nowhere else in the whole output layer.
+        let side: Side = bearingDeg < 0 ? .left : .right
+
+        switch magnitude {
+        case ..<15: return .ahead
+        case ..<60: return .aheadQuarter(side)
+        case ..<120: return .lateral(side)
+        case ...165: return .behindQuarter(side)
+        default: return .behind
         }
     }
 
-    /// The five-band speech vocabulary, verbatim from §C.
-    public var words: String {
-        switch self {
+    /// Direction first, always. Step 12's turn cues must match this word
+    /// order (WCAG 3.2.4) or the user is learning two vocabularies for one
+    /// device.
+    public static func phrase(_ bearingDeg: Double) -> String {
+        switch sector(bearingDeg) {
         case .ahead: return "straight ahead"
-        case .aheadLeft: return "ahead to the left"
-        case .aheadRight: return "ahead to the right"
-        case .left: return "to your left"
-        case .right: return "to your right"
-        case .behindLeft: return "behind you to the left"
-        case .behindRight: return "behind you to the right"
+        case .aheadQuarter(.left): return "ahead to the left"
+        case .aheadQuarter: return "ahead to the right"
+        case .lateral(.left): return "to your left"
+        case .lateral: return "to your right"
+        case .behindQuarter(.left): return "behind you to the left"
+        case .behindQuarter: return "behind you to the right"
         case .behind: return "directly behind you"
         }
-    }
-
-    /// Into `(-180, 180]`, so a caller passing 270 still gets "to your left".
-    static func normalize(_ deg: Double) -> Double {
-        guard deg.isFinite else { return 0 }
-        var wrapped = deg.truncatingRemainder(dividingBy: 360)
-        if wrapped <= -180 { wrapped += 360 }
-        if wrapped > 180 { wrapped -= 360 }
-        return wrapped
     }
 }

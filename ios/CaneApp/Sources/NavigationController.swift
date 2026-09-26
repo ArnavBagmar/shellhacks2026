@@ -69,7 +69,7 @@ final class NavigationController {
         case .ahead: .center
         case .none: nil
         }
-        let haptic = HapticScript.navigation(side: side, userGain: gain)
+        let haptic = HapticScript.navigation(side: side, userGain: Double(gain))
         let phrase = SpokenPhrase(text: cue.phrase)
         if await arbiter.say(phrase, on: .navigation, haptic: haptic) { return }
         guard retriedKinds.contains(cue.kind) else { return }

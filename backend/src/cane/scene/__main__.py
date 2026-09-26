@@ -77,7 +77,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ws-port", type=int, default=DEFAULT_WS_PORT)
     parser.add_argument("--log-level", default="INFO")
     parser.add_argument(
-        "--log-dir", type=Path, default=Path("logs"),
+        "--log-dir", default="logs",
         help="also write laptop-YYYYMMDD.log and the phone's phone-YYYYMMDD.jsonl here ('' to disable)",
     )
     args = parser.parse_args(argv)
@@ -147,8 +147,8 @@ async def serve(service: SceneQueryService, vlm: VisionLanguageModel, host: str,
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     logging.basicConfig(level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    if str(args.log_dir):
-        laptop_log, phone_log = configure_file_logging(args.log_dir)
+    if args.log_dir:
+        laptop_log, phone_log = configure_file_logging(Path(args.log_dir))
         logger.info("logging to %s and %s", laptop_log, phone_log)
     try:
         vlm = build_vlm(args.fake)

@@ -111,7 +111,7 @@ public actor QueryCoordinator {
         timeoutTask?.cancel()
         setState(.answering)
         let text = AnswerPhrasing.phrase(for: answer, target: target)
-        let haptic = HapticScript.navigation(side: AnswerPhrasing.side(for: answer), userGain: userGain())
+        let haptic = HapticScript.navigation(side: AnswerPhrasing.side(for: answer), userGain: Double(userGain()))
         logger.info("answer \(answer.queryId, privacy: .public) \(answer.status.rawValue, privacy: .public) in \(answer.latencyMs) ms: \(text, privacy: .public)")
         speaker.cancel(upTo: .prompt)
         _ = await speaker.say(SpokenPhrase(text: text), on: .answer, haptic: haptic, pan: 0, maxWaitMs: Self.answerMaxWaitMs)
