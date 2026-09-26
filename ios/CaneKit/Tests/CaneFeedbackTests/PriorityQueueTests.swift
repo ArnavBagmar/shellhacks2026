@@ -59,6 +59,18 @@ final class PriorityQueueTests: XCTestCase {
         XCTAssertEqual(queue.first?.urgency, 3)
     }
 
+    func testNewerButLowerUrgencyRepeatDoesNotDisplaceAPendingStop() throws {
+        // A jittery read on the next frame for the same key must never
+        // silently swallow a queued Stop (review finding, step 9).
+        let stop = try item(trackId: "a", level: .immediate, tCaptureMs: Make.t0)
+        let jitter = try item(trackId: "a", level: .aware, tCaptureMs: Make.t0 + 300)
+        var queue = AnnouncementQueue.inserting(stop, into: []).queue
+        queue = AnnouncementQueue.inserting(jitter, into: queue).queue
+        XCTAssertEqual(queue.count, 1)
+        XCTAssertEqual(queue.first?.urgency, 3)
+        XCTAssertEqual(queue.first?.tCaptureMs, Make.t0)
+    }
+
     func testOverflowEvictsTheLowestUrgencyOldestItem() throws {
         var queue: [QueuedItem] = []
         for index in 0..<AnnouncementQueue.maxDepth {

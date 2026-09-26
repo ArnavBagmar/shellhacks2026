@@ -48,7 +48,11 @@ public enum AnnouncementQueue {
         var working = queue
         if let existingIndex = working.firstIndex(where: { $0.key == item.key }) {
             let existing = working[existingIndex]
-            let better = item.urgency > existing.urgency || item.tCaptureMs > existing.tCaptureMs
+            // Replace only when more urgent, or equally urgent and newer. A newer
+            // but LOWER-urgency read for the same key (a jittery TTC or band on the
+            // next frame) must never displace a pending Stop.
+            let better = item.urgency > existing.urgency
+                || (item.urgency == existing.urgency && item.tCaptureMs > existing.tCaptureMs)
             guard better else { return (sorted(working), false) }
             working.remove(at: existingIndex)
         }
