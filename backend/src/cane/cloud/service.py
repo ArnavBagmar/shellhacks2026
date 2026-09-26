@@ -20,8 +20,15 @@ from typing import Final, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from cane.cloud.api_models import SCHEMA_VERSION, Detection, InferenceMeta, InferenceResponse
+from cane.cloud.api_models import (
+    SCHEMA_VERSION,
+    Detection,
+    GapProfile,
+    InferenceMeta,
+    InferenceResponse,
+)
 from cane.cloud.class_map import height_m, map_coco
+from cane.cloud.depth.head import DepthHead
 from cane.cloud.detector.base import FrameDetector, RawDetection
 from cane.cloud.motion import (
     EDGE_EPS_PX,
@@ -71,15 +78,27 @@ class InferenceService:
     """
 
     def __init__(
-        self, detector: FrameDetector, registry: TrackerRegistry, settings: CloudSettings
+        self,
+        detector: FrameDetector,
+        registry: TrackerRegistry,
+        settings: CloudSettings,
+        depth: DepthHead | None = None,
     ) -> None:
         self._detector = detector
         self._registry = registry
         self._settings = settings
+        # Optional and last: step 8's local fallback constructs this class
+        # positionally with three arguments and has no depth model at all, so
+        # `x4_local` simply carries no gap profiles (plan Sec 4.2).
+        self._depth = depth
 
     @property
     def detector(self) -> FrameDetector:
         return self._detector
+
+    @property
+    def depth(self) -> DepthHead | None:
+        return self._depth
 
     @property
     def registry(self) -> TrackerRegistry:
@@ -104,17 +123,41 @@ class InferenceService:
             detections.extend(self._for_crop(meta, crop_index, images[crop_index], raws))
         self._registry.sweep(meta.t_capture_ms)
 
+        # Depth runs *after* the detections are built: they are the
+        # safety-critical half of this response, and steering is never allowed
+        # to take them down with it.
+        gap_profiles, depth_ms = self._gap_profiles(images)
+
         inference_ms = decode_ms + (time.perf_counter() - started) * MS_PER_S
         logger.debug(
-            "decode %.1f ms, detect %.1f ms, total %.1f ms, %d detections",
-            decode_ms, detect_ms, inference_ms, len(detections),
+            "decode %.1f ms, detect %.1f ms, depth %.1f ms, total %.1f ms, %d detections, %d profiles",
+            decode_ms, detect_ms, depth_ms, inference_ms, len(detections), len(gap_profiles),
         )
         return InferenceResponse(
             schema=SCHEMA_VERSION,
             t_capture_ms=meta.t_capture_ms,
             inference_ms=inference_ms,
             detections=tuple(detections),
+            gap_profiles=gap_profiles,
         )
+
+    def _gap_profiles(
+        self, images: Sequence[NDArray[np.uint8]]
+    ) -> tuple[tuple[GapProfile, ...], float]:
+        """The depth head already swallows its own failures; this is the belt.
+
+        An unexpected escape -- a CUDA OOM, a driver fault -- must cost the
+        frame its profiles and nothing else, so `/infer` still answers 200 with
+        the detections the wearer's safety actually depends on.
+        """
+        if self._depth is None:
+            return (), 0.0
+        try:
+            result = self._depth.profiles(images)
+        except Exception:  # noqa: BLE001 - never at the cost of the detections
+            logger.exception("the depth head failed; this response carries no gap profiles")
+            return (), 0.0
+        return result.profiles, result.depth_ms
 
     def _for_crop(
         self,

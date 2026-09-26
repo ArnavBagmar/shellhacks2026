@@ -30,6 +30,10 @@ public actor EventLinkClient {
     /// Step 20: the laptop's replies to `send(_:)`, matched by `queryId`.
     /// Same lifetime rules as `events`.
     public nonisolated let answers: AsyncStream<SceneAnswer>
+    /// Step 24: the laptop's continuous steering commands. Same lifetime rules
+    /// as `events`; see `InboundSinks.steerBuffer` for why only the newest is
+    /// kept.
+    public nonisolated let steerCommands: AsyncStream<SteerCommand>
     let sinks: InboundSinks
     let url: URL
     let session: URLSession
@@ -50,9 +54,15 @@ public actor EventLinkClient {
         self.now = now
         let (events, eventContinuation) = AsyncStream<AwarenessEvent>.makeStream()
         let (answers, answerContinuation) = AsyncStream<SceneAnswer>.makeStream(bufferingPolicy: .bufferingNewest(4))
+        let (steers, steerContinuation) = AsyncStream<SteerCommand>.makeStream(
+            bufferingPolicy: .bufferingNewest(InboundSinks.steerBuffer)
+        )
         self.events = events
         self.answers = answers
-        self.sinks = InboundSinks(events: eventContinuation, answers: answerContinuation)
+        self.steerCommands = steers
+        self.sinks = InboundSinks(
+            events: eventContinuation, answers: answerContinuation, steers: steerContinuation
+        )
     }
 
     /// Sends one `query` frame on the live connection. Throws
@@ -129,13 +139,39 @@ public actor EventLinkClient {
     }
 }
 
-/// Where decoded inbound frames go. Both streams outlive any one connection.
+/// Where decoded inbound frames go. Every stream outlives any one connection.
 struct InboundSinks: Sendable {
+    /// A steering command is only worth acting on if it is the newest one: an
+    /// older one has been superseded and is inside 400 ms of being stale
+    /// anyway (plan §3's `STEER_TTL_MS`). So the stream keeps exactly one, and
+    /// a consumer that fell behind resumes on the current command instead of
+    /// walking a queue of commands about a corridor it has already left.
+    static let steerBuffer = 1
+
     let events: AsyncStream<AwarenessEvent>.Continuation
     let answers: AsyncStream<SceneAnswer>.Continuation
+    let steers: AsyncStream<SteerCommand>.Continuation
+
+    /// Routes one decoded frame to its stream. `ping` is not here: answering
+    /// it needs the socket, so the run loop keeps that case. Anything with no
+    /// stream (an unknown `type`) is ignored, which is the property plan §4.1
+    /// requires of an old phone against a new laptop.
+    func deliver(_ message: InboundMessage) {
+        switch message {
+        case .event(let event):
+            events.yield(event)
+        case .answer(let answer):
+            answers.yield(answer)
+        case .steer(let command):
+            steers.yield(command)
+        case .ping, .unknown:
+            break
+        }
+    }
 
     func finish() {
         events.finish()
         answers.finish()
+        steers.finish()
     }
 }

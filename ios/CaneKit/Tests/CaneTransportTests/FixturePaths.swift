@@ -26,20 +26,35 @@ enum FixturePaths {
         repoRoot.appendingPathComponent("contracts/fixtures/transport_query_answer.golden.json")
     }
 
+    /// Step 21's `steer` frames: `{name, expect, frame}` cases.
+    static var steerFixtureURL: URL {
+        repoRoot.appendingPathComponent("contracts/fixtures/transport_steer.golden.json")
+    }
+
     static func queryAnswerCases() throws -> [(name: String, valid: Bool, frame: [String: Any])] {
-        let data = try Data(contentsOf: queryAnswerFixtureURL)
+        try frameCases(at: queryAnswerFixtureURL)
+    }
+
+    static func steerCases() throws -> [(name: String, valid: Bool, frame: [String: Any])] {
+        try frameCases(at: steerFixtureURL)
+    }
+
+    /// Both transport fixtures carry the same `{fixture_version, cases: [{name,
+    /// expect, frame}]}` shape, so they are read by one function.
+    private static func frameCases(at url: URL) throws -> [(name: String, valid: Bool, frame: [String: Any])] {
+        let data = try Data(contentsOf: url)
         guard
             let fixture = try JSONSerialization.jsonObject(with: data) as? [String: Any],
             let cases = fixture["cases"] as? [[String: Any]]
         else {
-            throw FixturePathsError.malformedFixture(path: queryAnswerFixtureURL.path)
+            throw FixturePathsError.malformedFixture(path: url.path)
         }
         return try cases.map { item in
             guard let name = item["name"] as? String,
                   let expect = item["expect"] as? String,
                   let frame = item["frame"] as? [String: Any]
             else {
-                throw FixturePathsError.malformedFixture(path: queryAnswerFixtureURL.path)
+                throw FixturePathsError.malformedFixture(path: url.path)
             }
             return (name, expect == "valid", frame)
         }

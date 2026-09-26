@@ -274,6 +274,16 @@ struct StrictObject {
         return value
     }
 
+    /// JSON's `true`/`false` and nothing else: `1` is a number, not a flag,
+    /// and a producer that sends one has a bug the phone must not paper over
+    /// (step 21's `blocked` / `proximity_anchored`).
+    func boolean(_ key: String) throws -> Bool {
+        guard let number = object[key] as? NSNumber, Self.isBool(number) else {
+            throw TransportError.invalidFrame(key)
+        }
+        return number.boolValue
+    }
+
     func double(_ key: String) throws -> Double {
         let value = try number(key).doubleValue
         guard value.isFinite else { throw TransportError.invalidFrame(key) }

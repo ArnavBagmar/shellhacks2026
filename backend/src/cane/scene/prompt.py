@@ -5,9 +5,19 @@ Direction never comes back as words: the model names an image and a
 horizontal position inside it, and ``service.py`` computes the bearing with
 the same geometry the detector events use. The phone then speaks that
 bearing in the vocabulary the wearer already knows from hazard warnings.
+
+Step 26 sends one fact *in* the same way. The depth ring's clearest way
+through is a bearing, and a bearing is exactly what ``View.bearing_at``
+turns an (image, x) pair into -- so it is run backwards and the model is
+told which image and which horizontal position to trust, never which side.
+That keeps the principle above symmetric: no direction word crosses the
+boundary in either direction, and the wearer's side word is still computed
+from geometry rather than echoed back from a model.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from cane.transport.messages import SceneQuery
 
@@ -64,8 +74,65 @@ _DESCRIBE = (
     "Do not guess at things you cannot see."
 )
 
+#: Step 26's whole prompt growth, in four short pieces, appended *after* the
+#: step-20 prompt so that prompt is byte-identical whenever there is no ring.
+#: Trailing, because "trust this over your own guess" is an instruction and
+#: instructions are followed best last.
+_GAP_PREFIX = "A depth sensor saw the same scene: "
+_GAP_AT_IMAGE = (
+    "the clearest way through is in image {index} at horizontal position {x:.2f} "
+    "(0 left edge, 1 right edge)"
+)
+#: The forward ring spans +-90 while a describe_front with a phone photo sends
+#: only its ~70 degree view, so the gap can legitimately be off every image.
+#: Saying so costs nothing and beats pointing at a pixel that is not there.
+_GAP_OFF_IMAGE = "the clearest way through is outside these images"
+_GAP_BLOCKED = ", and there is no clear path ahead"
+_GAP_SUFFIX = (
+    ". Trust that over your own guess about which way is clear, and state no "
+    "distances. "
+)
+#: Asserted by a test rather than trusted. The point of the bound is the
+#: latency budget: the ring reaches the model as one bearing expressed as an
+#: image and an x, not as 48 floats, so the prompt grows by a sentence while
+#: the request stays dominated by its six JPEGs.
+MAX_GAP_CLAUSE_CHARS = 256
+#: The image index, the x, and the two edge-convention digits. Nothing else.
+MAX_GAP_CLAUSE_NUMBERS = 4
 
-def build_prompt(query: SceneQuery) -> str:
+
+@dataclass(frozen=True, slots=True)
+class GapHint:
+    """The depth ring's clearest way, in the prompt's own vocabulary.
+
+    ``image_index`` and ``x_center`` are both set or both ``None``: a
+    position without an image to read it in is meaningless, and letting them
+    drift apart is how a prompt ends up saying "image None".
+    """
+
+    image_index: int | None
+    x_center: float | None
+    blocked: bool
+
+    def __post_init__(self) -> None:
+        if (self.image_index is None) != (self.x_center is None):
+            raise ValueError(
+                "a gap hint needs an image index and an x position together, "
+                f"got {self.image_index!r} and {self.x_center!r}"
+            )
+
+
+def gap_clause(hint: GapHint) -> str:
+    """One sentence of depth evidence, or where to look for it."""
+    if hint.image_index is None or hint.x_center is None:
+        where = _GAP_OFF_IMAGE
+    else:
+        where = _GAP_AT_IMAGE.format(index=hint.image_index, x=hint.x_center)
+    blocked = _GAP_BLOCKED if hint.blocked else ""
+    return _GAP_PREFIX + where + blocked + _GAP_SUFFIX
+
+
+def build_prompt(query: SceneQuery, gap: GapHint | None = None) -> str:
     utterance = query.utterance.replace('"', "'")
     if query.kind == "find":
         body = _FIND.format(
@@ -77,4 +144,5 @@ def build_prompt(query: SceneQuery) -> str:
     else:
         scope = "what is all around them" if query.kind == "describe_around" else "what is in front of them"
         body = _DESCRIBE.format(utterance=utterance, scope=scope, words=MAX_DESCRIPTION_WORDS)
-    return _PREAMBLE + body
+    tail = "" if gap is None else gap_clause(gap)
+    return _PREAMBLE + body + tail

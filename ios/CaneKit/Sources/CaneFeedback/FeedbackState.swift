@@ -27,6 +27,9 @@ public struct FeedbackState: Equatable, Sendable {
     /// announcements do not move it.
     public var lastSpeechAtMs: Int64?
     public var nextAnnouncementId: UInt64 = 1
+    /// Step 24 (Shepherd's stages 6, 8, 9). Shares the actor and the 100 ms
+    /// tick with the announcement gauntlet and touches none of its state.
+    public var steering = SteeringState()
 
     public init() {}
 

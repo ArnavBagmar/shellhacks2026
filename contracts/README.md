@@ -79,7 +79,7 @@ rebuilt iOS app; treat it as re-running this step, not a patch.
 
 ## Transport envelope
 
-`transport_envelope.schema.json` (draft 2020-12) documents the six
+`transport_envelope.schema.json` (draft 2020-12) documents the eight
 WebSocket frame shapes the laptop (server) and phone (client) exchange —
 see `docs/camera-sync-design.md` §4.2 and §4.4 and `cane.transport.messages`
 / `CaneTransport`'s `Envelope.swift` for the code. Every frame is a JSON text
@@ -140,6 +140,29 @@ object with a `type` string:
   `fixtures/transport_query_answer.golden.json` holds valid and invalid
   frames; the Python decoder, the Swift decoder and the schema itself are
   all tested against it.
+- `steer` (laptop → phone) is step 21's steering command, one per sensing
+  tick (`docs/shepherd-steering-plan.md`). It is the pipeline's most
+  perishable frame: `ttl_ms` is always **400** (`STEER_TTL_MS`), and once
+  it expires the phone decays its cue to neutral over 500 ms instead of
+  holding the last lean. In local-fallback mode the laptop sends **no**
+  `steer` at all — a zero steer would be a silent fake of having looked.
+
+  ```json
+  {"type": "steer", "t_capture_ms": 1790000000000, "ttl_ms": 400, "steer": 0.42,
+   "proximity": 0.61, "gap_bearing_deg": 37.5, "blocked": false,
+   "proximity_anchored": true, "source": "x4_cloud"}
+  ```
+
+  `steer` is −1…+1 with **positive = right**; `proximity` is 0 (clear) … 1
+  (at the stopping distance); `gap_bearing_deg` uses the same half-open
+  `(-180, 180]` torso-relative convention as events, so exactly `-180.0`
+  is rejected here too. Two fields exist so the phone never has to guess:
+  `proximity_anchored` is false when the ground-plane scale fit was
+  rejected, and proximity is then a band rather than a number; `blocked`
+  means no gap was wide enough to walk through, which is *not* the same as
+  `steer == 0.0` (a clear corridor also steers 0.0).
+  `fixtures/transport_steer.golden.json` holds valid and invalid frames and
+  is run by the Python decoder, the Swift decoder and the schema.
 
 Both language test suites do not validate against
 `transport_envelope.schema.json` directly; it is documentation, checked by

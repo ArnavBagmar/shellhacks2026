@@ -16,6 +16,11 @@ useful when the venue's uplink is known-bad before the walk begins.
 Step 20 adds ``--scene``: the phone's spoken questions ("Hey Cane, is there a
 bathroom around?") are answered by Gemini over the freshest X4 frame, on the
 same WebSocket. Needs the ``scene`` extra and ``GEMINI_API_KEY``.
+
+Step 26 feeds the steering evidence into that answer: with ``--scene`` the
+``steer`` stream also passes through ``SteerTap``, so "what is in front of me"
+names the side the haptic cue is steering toward, and ``blocked`` -- which the
+haptic alphabet has no room to say -- gets spoken.
 """
 
 from __future__ import annotations
@@ -47,13 +52,20 @@ from cane.bridge.config import (
     BridgeConfig,
 )
 from cane.bridge.health import HealthMonitor, Mode
-from cane.bridge.pipeline import BridgePipeline, CaptureClock, LaptopClock, format_stats_line
+from cane.bridge.pipeline import (
+    BridgePipeline,
+    CaptureClock,
+    LaptopClock,
+    SteerSink,
+    format_stats_line,
+)
 from cane.bridge.probe import CloudProbe, HttpHealthz, healthz_url_for
 from cane.bridge.rungs import RUNGS, rung_by_index
 from cane.bridge.sender import OneInFlightSender
 from cane.bridge.transport_http import HttpInferenceTransport
 from cane.bridge.uplink import MonitoredUplink
 from cane.scene.frames import GrabProvider
+from cane.scene.gap import LatestClearWay, SteerTap
 from cane.scene.service import SceneQueryService
 from cane.scene.vlm import GeminiVLM, VlmUnavailableError
 from cane.transport.file_logging import configure_file_logging
@@ -203,6 +215,21 @@ def build_uplink(
     return MonitoredUplink(switching, monitor), CloudProbe(healthz, monitor)
 
 
+def build_steer_sink(
+    server: EventLinkServer, clear_ways: LatestClearWay | None
+) -> SteerSink:
+    """The phone's steer stream, tapped for the voice layer when it is on.
+
+    Without ``--scene`` this is the server itself and the steer path is
+    byte-for-byte step 23's. With it, every frame still reaches the phone
+    unchanged and a copy of its decision is kept for the next spoken question
+    (step 26) -- so the words and the cue can only ever come from one number.
+    """
+    if clear_ways is None:
+        return server
+    return SteerTap(server, clear_ways)
+
+
 def open_source(spec: str) -> FrameSource:
     """Resolve a ``--source`` string into a live :class:`FrameSource`."""
     if spec == SOURCE_SYNTHETIC:
@@ -236,9 +263,21 @@ async def run_bridge(
     sender = OneInFlightSender(uplink)
     health_hook = PhoneHealthHook(monitor)
     scene_hook = None
+    # Step 26: the voice layer answers "what is in front of me" from the same
+    # ring the steering cue was rendered from. The scene service runs in this
+    # process, so the live evidence is reachable by decorating the steer sink
+    # below -- no IPC, and nothing in the steering modules changes. Left as
+    # None without --scene, which keeps the default run byte-identical.
+    clear_ways: LatestClearWay | None = None
     if scene_vlm is not None:
+        clear_ways = LatestClearWay()
         scene_hook = SceneHook(
-            SceneQueryService(scene_vlm, GrabProvider(grab), delta_deg=config.delta_deg)
+            SceneQueryService(
+                scene_vlm,
+                GrabProvider(grab),
+                clear_ways=clear_ways,
+                delta_deg=config.delta_deg,
+            )
         )
     async with EventLinkServer(
         config.ws_host, config.ws_port,
@@ -255,6 +294,10 @@ async def run_bridge(
         pipeline = BridgePipeline(
             config=config, grab=grab, sender=sender,
             clock_provider=_clock_provider(config, server), event_sink=server,
+            # The same object twice: `EventLinkServer` satisfies both sinks,
+            # and step 23's `steer` frames ride the socket the events already
+            # hold open.
+            steer_sink=build_steer_sink(server, clear_ways),
             monitor=monitor, source_provider=lambda: uplink.last_source,
             local_detector=local.detector_name,
             frames_ignored=lambda: server.frames_ignored,

@@ -14,11 +14,20 @@ import json
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    ValidationError,
+    model_validator,
+)
 
 from cane.contracts.awareness_event import (
     T_CAPTURE_MS_MAX,
     T_CAPTURE_MS_MIN,
+    TTL_MS_MAX,
+    TTL_MS_MIN,
     AwarenessEvent,
     AwarenessEventError,
     parse_awareness_event,
@@ -181,11 +190,90 @@ class PhoneDiagnostic(BaseModel):
         return self
 
 
+#: Shepherd's stage-5 command, clamped. + = right (plan Sec 0 row 7).
+STEER_MIN = -1.0
+STEER_MAX = 1.0
+#: Shepherd's proximityFactor: 0 clear, 1 at the stopping distance.
+PROXIMITY_MIN = 0.0
+PROXIMITY_MAX = 1.0
+#: Plan Sec 3: the most perishable row of the Sec 4.4 staleness table. Step 23
+#: sends exactly this and step 24 gates staleness on it; a steer command ages
+#: like a car, so it is far below ``TTL_MS_MAX``.
+STEER_TTL_MS = 400
+
+#: Closed today because depth only runs in the cloud (plan Sec 2.1). A local
+#: depth path adds ``"x4_local"`` here and in the schema, and nowhere else --
+#: which is the point of an enum rather than a free string.
+SteerSource = Literal["x4_cloud"]
+
+
+def _wire_number(value: Any) -> Any:
+    """Widen a JSON integer literal to ``float`` before strict validation.
+
+    JSON has one number type and the schema calls these fields ``number``:
+    a producer that computed ``0.0`` may well emit ``0`` (Swift's
+    ``JSONSerialization`` does exactly that), and rejecting it would make
+    the Python decoder stricter than the schema it is documented by -- the
+    same leniency ``InferenceMeta.yaws_deg`` already grants. ``bool`` is a
+    subclass of ``int`` in Python and is deliberately *not* widened here, so
+    ``true`` still fails the strict float below rather than arriving as 1.0.
+    """
+    return float(value) if type(value) is int else value
+
+
+class Steer(BaseModel):
+    """``steer`` frame, laptop -> phone (plan step 21): one continuous
+    steering command per sensing tick.
+
+    This is Shepherd's stage 7 -- their 12-byte BLE packet to a motor --
+    carried on the WebSocket we already hold open, because steering rides
+    the frame we already send. The laptop owns the geometry and the clock
+    and does all of the arithmetic; the frame carries only the result, so
+    the phone can act on it without knowing about crops or ground planes.
+
+    Two fields exist to stop the phone guessing. ``proximity_anchored``
+    says whether ``proximity`` came from an accepted ground-plane scale fit
+    (Sec 2.3) or is only a band -- without it the phone would have to treat
+    a geometric metre and a guess identically. ``blocked`` says there was no
+    gap at all, which is *not* the same as ``steer == 0.0``: a clear
+    corridor also steers 0.0, and the wearer needs those told apart.
+
+    There is no "neutral" frame: in local-fallback mode the laptop stops
+    sending entirely (Sec 4.2, no silent fakes) and the phone decays its own
+    cue over ``FAILSAFE_DECAY_MS``.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    t_capture_ms: Annotated[int, Field(ge=T_CAPTURE_MS_MIN, le=T_CAPTURE_MS_MAX)]
+    ttl_ms: Annotated[int, Field(ge=TTL_MS_MIN, le=TTL_MS_MAX)]
+    steer: Annotated[
+        float,
+        BeforeValidator(_wire_number),
+        Field(ge=STEER_MIN, le=STEER_MAX, allow_inf_nan=False),
+    ]
+    proximity: Annotated[
+        float,
+        BeforeValidator(_wire_number),
+        Field(ge=PROXIMITY_MIN, le=PROXIMITY_MAX, allow_inf_nan=False),
+    ]
+    gap_bearing_deg: Annotated[
+        float,
+        BeforeValidator(_wire_number),
+        Field(gt=BEARING_MIN_EXCLUSIVE, le=BEARING_MAX, allow_inf_nan=False),
+    ]
+    blocked: bool
+    proximity_anchored: bool
+    source: SteerSource
+
+
 @dataclass(frozen=True)
 class Unknown:
     """A frame whose ``type`` is not one of ``ping``/``pong``/``event``/
     ``health`` (e.g. the reserved ``location``). Logged and ignored by
-    callers, per D2 -- never an error.
+    callers, per D2 -- never an error. This is the property that lets an old
+    phone survive a new laptop (plan Sec 4.1), so it survives every frame
+    shape added after it.
     """
 
     type: str
@@ -195,10 +283,19 @@ HEALTH_TYPE = "health"
 DIAG_TYPE = "diag"
 QUERY_TYPE = "query"
 ANSWER_TYPE = "answer"
+STEER_TYPE = "steer"
 
-OutboundMessage = Ping | Pong | EventMessage | SceneAnswer
+OutboundMessage = Ping | Pong | EventMessage | SceneAnswer | Steer
 InboundMessage = (
-    Ping | Pong | EventMessage | PhoneHealth | SceneQuery | SceneAnswer | PhoneDiagnostic | Unknown
+    Ping
+    | Pong
+    | EventMessage
+    | PhoneHealth
+    | SceneQuery
+    | SceneAnswer
+    | PhoneDiagnostic
+    | Steer
+    | Unknown
 )
 
 
@@ -210,7 +307,9 @@ def to_wire_dict(event: AwarenessEvent) -> dict[str, Any]:
 
 
 def encode(msg: OutboundMessage) -> str:
-    """Serialize a ``Ping``, ``Pong``, ``EventMessage`` or ``SceneAnswer`` to wire JSON."""
+    """Serialize a ``Ping``, ``Pong``, ``EventMessage``, ``SceneAnswer`` or
+    ``Steer`` to wire JSON.
+    """
     if isinstance(msg, Ping):
         payload: dict[str, Any] = {"type": "ping", "t1": msg.t1}
     elif isinstance(msg, Pong):
@@ -219,6 +318,8 @@ def encode(msg: OutboundMessage) -> str:
         payload = {"type": "event", "event": to_wire_dict(msg.event)}
     elif isinstance(msg, SceneAnswer):
         payload = {"type": ANSWER_TYPE, **msg.model_dump()}
+    elif isinstance(msg, Steer):
+        payload = {"type": STEER_TYPE, **msg.model_dump()}
     else:
         raise TypeError(f"unencodable message: {msg!r}")
     return json.dumps(payload)
@@ -307,6 +408,8 @@ def decode(text: str) -> InboundMessage:
         return _decode_model(data, PhoneDiagnostic, DIAG_TYPE)
     if msg_type == ANSWER_TYPE:
         return _decode_model(data, SceneAnswer, ANSWER_TYPE)
+    if msg_type == STEER_TYPE:
+        return _decode_model(data, Steer, STEER_TYPE)
     if isinstance(msg_type, str):
         return Unknown(type=msg_type)
     raise MalformedMessageError(f"'type' must be a string, got {msg_type!r}")

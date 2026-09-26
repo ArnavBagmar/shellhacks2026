@@ -7,14 +7,17 @@ public enum InboundMessage: Equatable, Sendable {
     case ping(t1: Int64)
     case event(AwarenessEvent)
     case answer(SceneAnswer)
+    case steer(SteerCommand)
     case unknown(type: String)
 
     /// Decodes one wire frame. Throws `TransportError.malformed` for bad
     /// JSON or a missing/malformed field, `TransportError.invalidEvent`
     /// when an `event` frame's nested payload fails contract validation,
-    /// `TransportError.invalidFrame` for a bad `answer` frame (step 20).
-    /// An unrecognised (but well-formed) `type` -- including the reserved
-    /// `health`/`location` -- decodes to `.unknown` rather than throwing.
+    /// `TransportError.invalidFrame` for a bad `answer` (step 20) or `steer`
+    /// (step 21) frame. An unrecognised (but well-formed) `type` -- including
+    /// the reserved `health`/`location` -- decodes to `.unknown` rather than
+    /// throwing, which is what lets this phone keep working against a laptop
+    /// that has learned a frame shape it has not (plan §4.1).
     public static func decode(_ data: Data) throws -> InboundMessage {
         guard
             let raw = try? JSONSerialization.jsonObject(with: data),
@@ -31,6 +34,8 @@ public enum InboundMessage: Equatable, Sendable {
             return try decodeEvent(object)
         case "answer":
             return .answer(try SceneAnswer.decode(object))
+        case "steer":
+            return .steer(try SteerCommand.decode(object))
         default:
             return .unknown(type: type)
         }

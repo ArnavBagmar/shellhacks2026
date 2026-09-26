@@ -32,5 +32,27 @@ public struct FeedbackCounters: Equatable, Sendable {
     public var queueExpired = 0
     public var sinkTimeouts = 0
 
+    // MARK: - Step 24: the steering path
+    //
+    // Kept apart from the awareness-event tallies above on purpose. H4 is
+    // explicit that only `staleDrops` feeds the §3.4 transport fallback, and a
+    // late `steer` frame is a steering problem, not a detector problem: summing
+    // it in would flip the phone to local inference over a depth head that is
+    // merely slow.
+
+    /// Every `steer` frame handed to `ingest`, gated or not.
+    public var steerReceived = 0
+    /// Arrived already past its TTL (plan §3's `STEER_TTL_MS`).
+    public var steerStaleDrops = 0
+    /// Arrived older than the command already held: reordered on the wire.
+    public var steerOutOfOrder = 0
+    /// Was held, then aged out before the next frame came -- the analogue of
+    /// `queueExpired`, not of `staleDrops`.
+    public var steerExpired = 0
+    /// Decays to neutral started, for any reason (staleness or link loss).
+    public var steerFailsafes = 0
+    /// Pulses actually handed to the renderer.
+    public var steerPulses = 0
+
     public init() {}
 }

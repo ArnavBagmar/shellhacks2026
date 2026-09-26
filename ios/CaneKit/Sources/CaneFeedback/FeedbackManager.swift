@@ -1,4 +1,5 @@
 import CaneContracts
+import CaneTransport
 import Foundation
 
 /// The consumer (A13, A16). An `actor`: the gauntlet's state is mutated
@@ -17,6 +18,7 @@ public actor FeedbackManager {
     private var state: FeedbackState
     private let sink: AnnouncementSink
     private let ambientSink: AmbientSink
+    private let steerSink: SteerCueSink
     private let clock: @Sendable () -> Int64
     private let presentTimeoutMs: Int64
 
@@ -27,12 +29,14 @@ public actor FeedbackManager {
     public init(
         sink: AnnouncementSink,
         ambientSink: AmbientSink = NoAmbientSink(),
+        steerSink: SteerCueSink = NoSteerCueSink(),
         presentTimeoutMs: Int64 = FeedbackManager.defaultPresentTimeoutMs,
         state: FeedbackState = FeedbackState(),
         clock: @escaping @Sendable () -> Int64
     ) {
         self.sink = sink
         self.ambientSink = ambientSink
+        self.steerSink = steerSink
         self.presentTimeoutMs = presentTimeoutMs
         self.state = state
         self.clock = clock
@@ -60,8 +64,53 @@ public actor FeedbackManager {
 
     /// Runs the pump without an event: releases an item held by the speech
     /// throttle, and discards items that have gone stale in the queue.
+    ///
+    /// Also the loop Shepherd's stage 8 rides (step 24): the steering
+    /// integrator is advanced here, so a 3 Hz `steer` renders as a continuous
+    /// cue and a `steer` that has stopped arriving decays to neutral. The two
+    /// halves share only the clock -- neither reads the other's state.
     public func tick(now: Int64) async {
+        advanceSteering(now: now)
         await pump(now: now)
+    }
+
+    // MARK: - Steering (step 24: Shepherd's stages 6, 8, 9)
+
+    /// One `steer` frame from the laptop. Gated on `STEER_TTL_MS` by
+    /// `StalenessGate`; nothing is rendered until the next tick.
+    public func ingest(_ command: SteerCommand, now: Int64) {
+        state = Steering.accept(command, into: state, now: now)
+    }
+
+    /// The link's state, from whatever watches the socket. `false` starts the
+    /// failsafe decay on the next tick without waiting out the TTL.
+    public func setLinkUp(_ up: Bool) {
+        state = Steering.setLink(up: up, in: state)
+    }
+
+    /// The current navigation turn cue's lateral pull, -1 (left) to +1
+    /// (right). Scaled by `(1 - proximityFactor)` in the mix, so obstacles
+    /// always win; it expires on its own after
+    /// `SteerPolicy.navigationBiasTtlMs`.
+    ///
+    /// This is the *steering* mix only. Navigation **speech** arbitration is
+    /// unchanged: `OutputArbiter` still drops a spoken turn cue that lands
+    /// under a hazard announcement.
+    public func setNavigationBias(lateral: Double, now: Int64) {
+        state = Steering.bias(lateral: lateral, in: state, now: now)
+    }
+
+    private func advanceSteering(now: Int64) {
+        let (next, effect) = Steering.advance(state, now: now)
+        state = next
+        switch effect {
+        case .quiet:
+            break
+        case .pulse(let cue):
+            steerSink.pulse(cue)
+        case .silence:
+            steerSink.silence()
+        }
     }
 
     /// Waits until nothing is being presented. Used by tests and by an

@@ -14,7 +14,8 @@ import pytest
 
 import cane.cloud as cloud_package
 
-# `smoke.py` and `export_engine.py` are operator tools, not the request path.
+# `smoke.py`, `export_engine.py` and `depth/export_depth_engine.py` are
+# operator tools, not the request path.
 REQUEST_PATH_MODULES = (
     "api_models",
     "app",
@@ -28,7 +29,24 @@ REQUEST_PATH_MODULES = (
     "detector/fake",
     "detector/factory",
     "detector/ultralytics_yolo",
+    # Step 22's depth head. Plan Sec 4.4 extends the timeless rule to it
+    # verbatim: "no clock reads in the depth path, proven the way step 7's AST
+    # test proves it for detections."
+    "depth/base",
+    "depth/constants",
+    "depth/factory",
+    "depth/fake",
+    "depth/geometry",
+    "depth/head",
+    "depth/preprocess",
+    "depth/profile",
+    "depth/torch_depth",
+    "depth/trt_depth",
 )
+# Modules outside `cane.cloud` that the depth path calls into every frame. The
+# import walk below only follows `cane.cloud.*`, so these two are named: the
+# geometry the band filter borrows, and the loader step 22 reuses.
+EXTERNAL_REQUEST_PATH_MODULES = ("bridge/dewarp", "benchmarks/depth_model")
 FORBIDDEN_ATTRIBUTES = frozenset(
     {"time", "time_ns", "clock_gettime", "clock_gettime_ns", "now", "utcnow",
      "today", "fromtimestamp", "utcfromtimestamp"}
@@ -36,11 +54,12 @@ FORBIDDEN_ATTRIBUTES = frozenset(
 ALLOWED_TIME_ATTRIBUTES = frozenset({"perf_counter", "perf_counter_ns", "monotonic", "monotonic_ns", "sleep"})
 FORBIDDEN_MODULES = frozenset({"datetime", "calendar", "cane.transport.wall_clock"})
 CLOUD_ROOT = pathlib.Path(cloud_package.__file__).parent
+CANE_ROOT = CLOUD_ROOT.parent
 
 
-def _source(relative: str) -> tuple[pathlib.Path, str]:
-    path = CLOUD_ROOT / f"{relative}.py"
-    assert path.is_file(), f"{path} is listed in REQUEST_PATH_MODULES but does not exist"
+def _source(relative: str, root: pathlib.Path | None = None) -> tuple[pathlib.Path, str]:
+    path = (root or CLOUD_ROOT) / f"{relative}.py"
+    assert path.is_file(), f"{path} is listed as a request-path module but does not exist"
     return path, path.read_text(encoding="utf-8")
 
 
@@ -68,9 +87,37 @@ def test_request_path_modules_contain_no_wall_clock_reads(relative: str) -> None
     assert not offences, f"{path.name} reads a wall clock: {offences}"
 
 
+@pytest.mark.parametrize("relative", EXTERNAL_REQUEST_PATH_MODULES)
+def test_the_modules_the_depth_path_borrows_are_clock_free_too(relative: str) -> None:
+    """`dewarp.focal_px` is the band filter's pinhole geometry and
+    `benchmarks.depth_model` is the loader step 22 reuses: both run inside
+    `/infer` now, so both owe the same guarantee as the cloud's own modules.
+    """
+    path, source = _source(relative, root=CANE_ROOT)
+    offences = _offences(ast.parse(source, filename=str(path)))
+    assert not offences, f"{relative} reads a wall clock: {offences}"
+
+
+def test_only_a_gpu_barrier_crosses_over_from_the_benchmark_cli() -> None:
+    """`benchmarks/depth_model.py` imports from `benchmarks/yolo.py`, which is
+    a CLI and *does* read a wall clock (`datetime.now` for its run directory).
+    That module cannot be guarded, so the boundary is: the only symbol crossing
+    it is `synchronize`, a torch device barrier with no clock in it. If anyone
+    ever imports more, this fails and the guarantee is re-examined.
+    """
+    _, source = _source("benchmarks/depth_model", root=CANE_ROOT)
+    crossed = {
+        alias.name
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("yolo")
+        for alias in node.names
+    }
+    assert crossed == {"synchronize"}
+
+
 ENTRY_MODULE = "app"
 # Operator tools, reachable only from a shell, never from a request.
-EXEMPT_MODULES = frozenset({"smoke", "export_engine"})
+EXEMPT_MODULES = frozenset({"smoke", "export_engine", "depth/export_depth_engine"})
 
 
 def _cloud_imports(relative: str) -> set[str]:

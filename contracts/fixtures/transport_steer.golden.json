@@ -1,0 +1,318 @@
+{
+  "fixture_version": 1,
+  "note": "steer frames, laptop -> phone (docs/shepherd-steering-plan.md step 21). Both suites run every case: valid decodes, invalid is rejected, never crashes. ttl_ms is 400 (STEER_TTL_MS) on every valid case -- a steer command ages like a car.",
+  "cases": [
+    {
+      "name": "steer_right_anchored",
+      "expect": "valid",
+      "note": "the canonical frame: a wall on the left, the gap 37.5 deg to the right, the scale anchor accepted",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000000000,
+        "ttl_ms": 400,
+        "steer": 0.42,
+        "proximity": 0.61,
+        "gap_bearing_deg": 37.5,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_neutral_clear_corridor",
+      "expect": "valid",
+      "note": "nothing near: proximity 0 makes steer 0 by the plan Sec 2.3 ramp, and the cue goes quiet",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000001000,
+        "ttl_ms": 400,
+        "steer": 0.0,
+        "proximity": 0.0,
+        "gap_bearing_deg": 0.0,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_hard_left_unanchored",
+      "expect": "valid",
+      "note": "both bounds at once: steer -1.0 and proximity 1.0 are inclusive. The ground fit was rejected, so the phone treats proximity as a band, not a number",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000002000,
+        "ttl_ms": 400,
+        "steer": -1.0,
+        "proximity": 1.0,
+        "gap_bearing_deg": -89.5,
+        "blocked": false,
+        "proximity_anchored": false,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_blocked",
+      "expect": "valid",
+      "note": "no run was BODY_WIDTH_M wide. The bearing is still carried -- every key is always present -- and points at the least-bad column",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000003000,
+        "ttl_ms": 400,
+        "steer": 0.0,
+        "proximity": 1.0,
+        "gap_bearing_deg": 3.75,
+        "blocked": true,
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_bearing_at_positive_180",
+      "expect": "valid",
+      "note": "the (-180, 180] interval is inclusive at +180, exactly as AwarenessEvent.bearing_deg is",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000004000,
+        "ttl_ms": 400,
+        "steer": 1.0,
+        "proximity": 0.5,
+        "gap_bearing_deg": 180.0,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_above_max",
+      "expect": "invalid",
+      "note": "steer is clamped to [-1, 1] by the steering law; 1.5 is a producer bug",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000005000,
+        "ttl_ms": 400,
+        "steer": 1.5,
+        "proximity": 0.61,
+        "gap_bearing_deg": 37.5,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_below_min",
+      "expect": "invalid",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000006000,
+        "ttl_ms": 400,
+        "steer": -1.5,
+        "proximity": 0.61,
+        "gap_bearing_deg": -37.5,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_missing_ttl_ms",
+      "expect": "invalid",
+      "note": "a command with no TTL cannot be failsafed; all keys always present",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000007000,
+        "steer": 0.42,
+        "proximity": 0.61,
+        "gap_bearing_deg": 37.5,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_ttl_ms_zero",
+      "expect": "invalid",
+      "note": "ttl_ms >= 1, the same bound AwarenessEvent.ttl_ms carries",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000008000,
+        "ttl_ms": 0,
+        "steer": 0.42,
+        "proximity": 0.61,
+        "gap_bearing_deg": 37.5,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_ttl_ms_above_max",
+      "expect": "invalid",
+      "note": "ttl_ms <= 15000",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000009000,
+        "ttl_ms": 15001,
+        "steer": 0.42,
+        "proximity": 0.61,
+        "gap_bearing_deg": 37.5,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_ttl_ms_not_an_integer",
+      "expect": "invalid",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000010000,
+        "ttl_ms": 400.5,
+        "steer": 0.42,
+        "proximity": 0.61,
+        "gap_bearing_deg": 37.5,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_bearing_minus_180",
+      "expect": "invalid",
+      "note": "contract range is (-180, 180]; a producer must normalize -180 by adding 360",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000011000,
+        "ttl_ms": 400,
+        "steer": 0.42,
+        "proximity": 0.61,
+        "gap_bearing_deg": -180.0,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_bearing_above_max",
+      "expect": "invalid",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000012000,
+        "ttl_ms": 400,
+        "steer": 0.42,
+        "proximity": 0.61,
+        "gap_bearing_deg": 180.1,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_proximity_below_min",
+      "expect": "invalid",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000013000,
+        "ttl_ms": 400,
+        "steer": 0.42,
+        "proximity": -0.01,
+        "gap_bearing_deg": 37.5,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_proximity_above_max",
+      "expect": "invalid",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000014000,
+        "ttl_ms": 400,
+        "steer": 0.42,
+        "proximity": 1.01,
+        "gap_bearing_deg": 37.5,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_t_capture_ms_before_contract_window",
+      "expect": "invalid",
+      "note": "same window as AwarenessEvent.t_capture_ms",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1000000000000,
+        "ttl_ms": 400,
+        "steer": 0.42,
+        "proximity": 0.61,
+        "gap_bearing_deg": 37.5,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_blocked_is_not_a_bool",
+      "expect": "invalid",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000015000,
+        "ttl_ms": 400,
+        "steer": 0.42,
+        "proximity": 0.61,
+        "gap_bearing_deg": 37.5,
+        "blocked": "true",
+        "proximity_anchored": true,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_missing_proximity_anchored",
+      "expect": "invalid",
+      "note": "the phone must never have to guess whether proximity is a metre or a band",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000016000,
+        "ttl_ms": 400,
+        "steer": 0.42,
+        "proximity": 0.61,
+        "gap_bearing_deg": 37.5,
+        "blocked": false,
+        "source": "x4_cloud"
+      }
+    },
+    {
+      "name": "steer_unknown_source",
+      "expect": "invalid",
+      "note": "the source enum is closed at x4_cloud today; a local depth path is a one-line contract change, not a free string",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000017000,
+        "ttl_ms": 400,
+        "steer": 0.42,
+        "proximity": 0.61,
+        "gap_bearing_deg": 37.5,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_local"
+      }
+    },
+    {
+      "name": "steer_extra_key",
+      "expect": "invalid",
+      "frame": {
+        "type": "steer",
+        "t_capture_ms": 1790000018000,
+        "ttl_ms": 400,
+        "steer": 0.42,
+        "proximity": 0.61,
+        "gap_bearing_deg": 37.5,
+        "blocked": false,
+        "proximity_anchored": true,
+        "source": "x4_cloud",
+        "columns": [0.1, 0.2]
+      }
+    }
+  ]
+}

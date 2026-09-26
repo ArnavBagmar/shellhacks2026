@@ -31,6 +31,8 @@ from cane.cloud.api_models import (
     InferenceResponse,
 )
 from cane.cloud.debug_dump import maybe_write_sheet
+from cane.cloud.depth.factory import build_depth_head
+from cane.cloud.depth.head import DepthHead
 from cane.cloud.detector.base import FrameDetector
 from cane.cloud.detector.factory import build_detector
 from cane.cloud.service import MS_PER_S, InferenceService
@@ -66,12 +68,19 @@ class AppState:
     frames_seen: int = 0
 
 
-def build_state(settings: CloudSettings, detector: FrameDetector) -> AppState:
+def build_state(
+    settings: CloudSettings, detector: FrameDetector, depth: DepthHead | None = None
+) -> AppState:
+    """`depth=None` means "whatever the settings say", which in the default
+    posture is no depth head at all (see `depth/factory.py`).
+    """
     registry = TrackerRegistry(
         max_sessions=settings.max_sessions, activation_threshold=settings.conf_emit
     )
     return AppState(
-        service=InferenceService(detector, registry, settings),
+        service=InferenceService(
+            detector, registry, settings, depth=depth or build_depth_head(settings)
+        ),
         settings=settings,
         # An attribute, never a module global: a module-level asyncio.Lock
         # shared across event loops is a latent hang.
@@ -157,14 +166,25 @@ def _decode_and_infer(
     return response
 
 
-def _warm(state: AppState, shapes: Sequence[int]) -> list[dict[str, float | int]]:
-    """Inference on zeros, bypassing the tracker: no session state is made."""
-    warmed: list[dict[str, float | int]] = []
+def _warm(state: AppState, shapes: Sequence[int]) -> list[dict[str, float | int | None]]:
+    """Inference on zeros, bypassing the tracker: no session state is made.
+
+    The depth model is warmed on the same shapes and in the same call: its
+    first MPS inference compiles graphs for seconds too, and the bridge's first
+    real frame must not pay for either model's cold start.
+    """
+    depth = state.service.depth
+    warmed: list[dict[str, float | int | None]] = []
     for size in shapes:
         blank = np.zeros((size, size, CHANNELS), dtype=np.uint8)
         started = time.perf_counter()
         state.service.detector.detect([blank] * CROP_COUNT)
-        warmed.append({"crop_px": size, "inference_ms": (time.perf_counter() - started) * MS_PER_S})
+        detect_ms = (time.perf_counter() - started) * MS_PER_S
+        warmed.append({
+            "crop_px": size,
+            "inference_ms": detect_ms,
+            "depth_ms": None if depth is None else depth.warm(size),
+        })
     return warmed
 
 
@@ -228,4 +248,14 @@ async def warmup(state: State, crop_px: Annotated[int | None, Query()] = None,
         if not CROP_PX_MIN <= size <= CROP_PX_MAX or size % CROP_PX_MULTIPLE_OF:
             raise HTTPException(HTTP_UNPROCESSABLE, detail=f"crop_px {size} is not a valid shape")
     warmed = await _guarded(state, _warm, shapes)
-    return {"engine_ready": state.service.detector.engine_ready, "warmed": warmed}
+    depth = state.service.depth
+    # `/healthz` deliberately keeps exactly its step-7 shape (step 8's monitor
+    # asserts on it), so depth readiness is reported here instead.
+    return {
+        "engine_ready": state.service.detector.engine_ready,
+        "warmed": warmed,
+        "depth": {
+            "backend": None if depth is None else depth.label,
+            "ready": depth is not None and depth.ready,
+        },
+    }

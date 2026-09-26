@@ -30,6 +30,7 @@ from cane.transport.messages import (
     Pong,
     SceneAnswer,
     SceneQuery,
+    Steer,
     Unknown,
     decode,
     encode,
@@ -166,6 +167,21 @@ class EventLinkServer:
             logger.warning("send_answer: no phone connected; answer %s dropped", answer.query_id)
             return False
         return await self._send_on(connection, encode(answer), "send_answer")
+
+    async def send_steer(self, steer: Steer) -> bool:
+        """Send one ``steer`` frame to the connected phone (step 23 D).
+
+        The same route and the same never-raises contract as
+        :meth:`send_event`. Not counted or warned about per frame: steering
+        rides every tick at rung fps, and the bridge already counts what it
+        could not deliver -- a second throttled warning here would only
+        duplicate the one :meth:`send_event` is already printing about the
+        same missing phone.
+        """
+        connection = self._connection
+        if connection is None:
+            return False
+        return await self._send_on(connection, encode(steer), "send_steer")
 
     async def _send_on(self, connection: ServerConnection, text: str, what: str) -> bool:
         try:

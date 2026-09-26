@@ -1,8 +1,15 @@
 import Foundation
 
 /// Who is allowed to talk. One synthesizer and one Taptic Engine are shared
-/// by four producers, in this priority order.
+/// by five producers, in this priority order.
 public enum OutputChannel: Int, Comparable, Sendable {
+    /// Step 24's continuous steering cue: a panned tick and a haptic pulse,
+    /// never speech. The lowest thing in the house -- it is dropped whenever
+    /// anything above it is playing, and it never preempts anything. Adding it
+    /// below `navigation` changes no existing decision: the speech channels
+    /// keep their order and their rules exactly as step 10 and the runbook's
+    /// "Demo decisions" #2 set them.
+    case steering
     /// Turn-by-turn cues. Dropped, never queued, while anything above talks:
     /// a late turn cue is a wrong cue (runbook "Demo decisions" #2).
     case navigation
@@ -117,6 +124,8 @@ public final class OutputArbiter: @unchecked Sendable {
         maxWaitMs: Int = 0
     ) async -> Bool {
         precondition(channel != .hazard, "hazards go through presentHazard")
+        // `.steering` passes `maxWaitMs: 0`, so it takes the same
+        // drop-immediately path `.navigation` does.
         let deadline = clock() + Int64(maxWaitMs)
         while true {
             if Task.isCancelled { return false }

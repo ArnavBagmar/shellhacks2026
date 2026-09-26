@@ -35,6 +35,28 @@ final class IntentParserTests: XCTestCase {
         XCTAssertEqual(IntentParser.parse("stop"), .cancel)
     }
 
+    /// Step 26 gave the voice layer the gap ring, so "which way is clear" is now a
+    /// question the system can actually answer from the same number the steering cue
+    /// is rendered from -- but the parser returned nil for it, so the wearer heard
+    /// "Sorry, I didn't catch that". These are the phrasings a person reaches for
+    /// when they want the ring, and they all route to `describeFront`.
+    func testAskingWhichWayIsClearReachesTheFrontDescription() {
+        let cases = [
+            "which way is clear",
+            "which way is clearer",
+            "which way should I go",
+            "is the way clear",
+            "is it clear ahead",
+            "where can I walk",
+        ]
+        for utterance in cases {
+            XCTAssertEqual(
+                IntentParser.parse(utterance), .describeFront,
+                "\(utterance) should ask about the way ahead"
+            )
+        }
+    }
+
     func testNaturalSentencesThatFailedLive() {
         let cases: [(String, VoiceIntent)] = [
             ("can you tell me if there's a bathroom around", .find("bathroom")),

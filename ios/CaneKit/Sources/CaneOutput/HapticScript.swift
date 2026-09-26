@@ -57,8 +57,19 @@ public struct HapticElement: Equatable, Sendable {
 /// two clicks wide apart is left, three quick clicks is right; smooth is
 /// front or back -- a short bump is in front, a long swell is behind; a long
 /// hard rattle that doesn't stop means act now.*
+///
+/// **Step 24 adds a sixth case, `steerTick`, which is not a sixth message.**
+/// Amendment 1's five-symbol limit is about messages the wearer has to
+/// *decode*; the steering tick is a continuous state signal whose information
+/// is entirely in its repetition rate and its stereo side, like a reversing
+/// sensor. It is never selected by `symbol(level:sector:)` and so can never
+/// stand in for a hazard, and `HapticAlphabet.validate()` covers it, which is
+/// how its distinctness from the five letters is proven rather than asserted.
 public enum HapticSymbol: String, CaseIterable, Equatable, Sendable {
     case ahead, left, right, behind, alarm
+    /// Step 24 (`docs/shepherd-steering-plan.md`, Shepherd's stage 8): one
+    /// pulse of the continuous steering cue.
+    case steerTick
 
     /// Amendment 1's **coarse 4-way reduction**, deliberately distinct from
     /// the five-band §C speech vocabulary: the haptic answers "which way do
@@ -179,6 +190,18 @@ public enum HapticAlphabet {
                 HapticElement(kind: .transient, onsetMs: $0, sharpness: 1.00)
             }
             return HapticScript(symbol: .alarm, elements: [bed] + taps)
+
+        // Step 24. Exactly one element, so it cannot be counted against
+        // `.left` (two clicks) or `.right` (three); a dull thud at sharpness
+        // 0.20 rather than the 0.55 click the lateral letters use, so it does
+        // not feel like a hazard even once; and the shortest thing in the
+        // alphabet, so it is never occupying the actuator when a warning
+        // arrives. What it means is carried by how often it repeats
+        // (`SteerPolicy.pulseIntervalMs`) and which side it is panned to.
+        case .steerTick:
+            return HapticScript(symbol: .steerTick, elements: [
+                HapticElement(kind: .transient, onsetMs: 0, sharpness: 0.20),
+            ])
         }
     }
 

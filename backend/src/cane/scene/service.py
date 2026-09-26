@@ -31,7 +31,9 @@ from typing import Callable, Sequence, get_args
 from cane.bridge.dewarp import CROP_FOV_DEG, dewarp_equirect, encode_jpeg
 from cane.bridge.events import normalize_bearing_deg
 from cane.scene.frames import EquirectProvider
-from cane.scene.prompt import build_prompt, crop_label, phone_label
+from cane.scene.gap import ClearWay, ClearWayProvider
+from cane.scene.gap_speech import clear_way_fragment, clear_way_sentence
+from cane.scene.prompt import GapHint, build_prompt, crop_label, phone_label
 from cane.scene.vlm import LabeledImage, VisionLanguageModel, VlmReply
 from cane.transport.messages import Confidence, SceneAnswer, SceneQuery
 
@@ -45,6 +47,15 @@ MAX_SUBJECT_CHARS = 80
 MAX_DETAIL_CHARS = 240
 #: describe_front without a phone photo falls back to the three forward crops.
 FRONT_CROP_INDICES = (5, 0, 1)
+#: An x of exactly 0 or 1 is a legitimate edge, and inverting a bearing that
+#: was rounded to a tenth of a degree can land a hair outside it. A pixel's
+#: worth of slack keeps the edge columns of a crop usable instead of silently
+#: declaring the ring's own boundary off-image.
+X_EDGE_TOLERANCE = 1e-6
+#: How a ``found`` answer carries the ``blocked`` message: the phone inlines a
+#: found answer's detail after a comma, so the safety fragment leads and the
+#: model's route hint follows it.
+FOUND_DETAIL_JOIN = "; "
 _CONFIDENCES: tuple[str, ...] = get_args(Confidence)
 
 
@@ -64,6 +75,45 @@ class View:
         # just keeps the wire and the logs readable.
         return round(normalize_bearing_deg(self.centre_deg + (x - 0.5) * self.fov_deg), 1)
 
+    def x_for_bearing(self, bearing_deg: float) -> float | None:
+        """:meth:`bearing_at` run backwards, or ``None`` if this view cannot
+        see that bearing at all.
+
+        Step 26 points the model at the depth ring's gap. Doing it by
+        inverting the *same* expression is what guarantees the model is looking
+        where our own geometry says the gap is, and ``normalize_bearing_deg``
+        on the difference is what makes a rear view's seam behave (a bearing
+        of -170 is 10 degrees inside a view centred on 180).
+        """
+        offset = normalize_bearing_deg(bearing_deg - self.centre_deg)
+        x = 0.5 + offset / self.fov_deg
+        if -X_EDGE_TOLERANCE <= x <= 1.0 + X_EDGE_TOLERANCE:
+            return min(1.0, max(0.0, x))
+        return None
+
+
+def gap_hint_for(way: ClearWay | None, views: Sequence[View]) -> GapHint | None:
+    """Which image, and where in it, the depth ring's clearest way falls.
+
+    The most *central* view wins when several can see the gap: an x near an
+    edge is the one a model is least able to use, and a crop's centre is where
+    the dewarp is least stretched.
+    """
+    if way is None:
+        return None
+    best: tuple[int, float] | None = None
+    for index, view in enumerate(views):
+        x = view.x_for_bearing(way.bearing_deg)
+        if x is None:
+            continue
+        if best is None or abs(x - 0.5) < abs(best[1] - 0.5):
+            best = (index, x)
+    if best is None:
+        return GapHint(image_index=None, x_center=None, blocked=way.blocked)
+    return GapHint(
+        image_index=best[0], x_center=round(best[1], 2), blocked=way.blocked
+    )
+
 
 class SceneQueryService:
     def __init__(
@@ -71,6 +121,7 @@ class SceneQueryService:
         vlm: VisionLanguageModel,
         frames: EquirectProvider | None,
         *,
+        clear_ways: ClearWayProvider | None = None,
         delta_deg: float = 0.0,
         settle_s: float = DEFAULT_SETTLE_S,
         vlm_timeout_s: float = DEFAULT_VLM_TIMEOUT_S,
@@ -82,6 +133,7 @@ class SceneQueryService:
         self._dump_dir = dump_dir
         self._vlm = vlm
         self._frames = frames
+        self._clear_ways = clear_ways
         self._delta_deg = delta_deg
         self._settle_s = settle_s
         self._vlm_timeout_s = vlm_timeout_s
@@ -116,9 +168,14 @@ class SceneQueryService:
         if not views:
             logger.warning("query %s: no X4 frame and no phone photo", query.query_id)
             return self._unavailable(query, started)
+        # Read once: the fact in the prompt and the fact the wearer is told
+        # must be the same tick, or the two halves of this step could disagree
+        # across a 1-3 s model call.
+        way = None if self._clear_ways is None else self._clear_ways.latest_clear_way()
+        prompt = build_prompt(query, gap_hint_for(way, views))
         try:
             reply = await asyncio.wait_for(
-                self._vlm.ask(build_prompt(query), [v.image for v in views]),
+                self._vlm.ask(prompt, [v.image for v in views]),
                 timeout=self._vlm_timeout_s,
             )
         except TimeoutError:
@@ -129,9 +186,9 @@ class SceneQueryService:
         except Exception as exc:  # noqa: BLE001 - a broken VLM is "unavailable", not a crash
             logger.warning("query %s: %s failed: %s", query.query_id, self._vlm.name, exc)
             return self._unavailable(query, started)
-        answer = self._to_answer(query, reply, views, started)
+        answer = self._to_answer(query, reply, views, started, way)
         if self._dump_dir is not None:
-            await asyncio.to_thread(self._dump, query, views, reply, answer)
+            await asyncio.to_thread(self._dump, query, views, reply, answer, prompt)
         logger.info(
             "query %s -> %s %r bearing=%s in %d ms",
             query.query_id, answer.status, answer.subject or answer.detail,
@@ -191,7 +248,14 @@ class SceneQueryService:
             fov_deg=frame.hfov_deg,
         )
 
-    def _dump(self, query: SceneQuery, views: list[View], reply: VlmReply, answer: SceneAnswer) -> None:
+    def _dump(
+        self,
+        query: SceneQuery,
+        views: list[View],
+        reply: VlmReply,
+        answer: SceneAnswer,
+        prompt: str,
+    ) -> None:
         """Debug: exactly what the model saw and said, one folder per query."""
         folder = self._dump_dir / query.query_id  # type: ignore[operator]
         try:
@@ -201,7 +265,9 @@ class SceneQueryService:
             summary = {
                 "query": query.model_dump(exclude={"phone_frame"}),
                 "labels": [v.image.label for v in views],
-                "prompt": build_prompt(query),
+                # The prompt that was actually sent, passed in rather than
+                # rebuilt: it now depends on a ring reading that has moved on.
+                "prompt": prompt,
                 "model_reply": reply.model_dump(),
                 "answer": answer.model_dump(),
             }
@@ -213,14 +279,24 @@ class SceneQueryService:
     # ---------------------------------------------------------------- mapping
 
     def _to_answer(
-        self, query: SceneQuery, reply: VlmReply, views: list[View], started: float
+        self,
+        query: SceneQuery,
+        reply: VlmReply,
+        views: list[View],
+        started: float,
+        way: ClearWay | None = None,
     ) -> SceneAnswer:
         status = (reply.status or "").strip().lower()
         detail = _clean(reply.detail, MAX_DETAIL_CHARS)
         if query.kind != "find":
             if detail is None:
+                # A ring is not a description. Dressing one up as "described"
+                # because the model failed would tell the wearer their question
+                # was answered when it was not; "unavailable" is the truth.
                 return self._unavailable(query, started)
-            return self._build(query, started, status="described", detail=detail)
+            return self._build(
+                query, started, status="described", detail=_described_detail(way, detail)
+            )
         if status != "found":
             return self._build(query, started, status="not_found")
         bearing = None
@@ -234,7 +310,7 @@ class SceneQueryService:
             status="found",
             subject=_clean(reply.subject, MAX_SUBJECT_CHARS) or query.target,
             bearing_deg=bearing,
-            detail=detail,
+            detail=_found_detail(way, detail),
             confidence=confidence if confidence in _CONFIDENCES else None,
         )
 
@@ -253,6 +329,35 @@ class SceneQueryService:
         }
         values.update(fields)
         return SceneAnswer.model_validate(values)
+
+
+def _described_detail(way: ClearWay | None, detail: str) -> str:
+    """A description, led by what the depth ring found (step 26 A and B).
+
+    The ring's sentence comes **first** and the model's prose is what the
+    240-character contract cap eats into, so the one thing the wearer cannot
+    learn anywhere else is the one thing that cannot be truncated away.
+    """
+    if way is None:
+        return detail
+    return f"{clear_way_sentence(way)} {detail}"[:MAX_DETAIL_CHARS]
+
+
+def _found_detail(way: ClearWay | None, detail: str | None) -> str | None:
+    """A found answer's hint, with the ``blocked`` message if there is one.
+
+    Only when ``blocked``. A found answer already carries a direction in
+    ``bearing_deg``, and adding "most open to your right" beside "to your
+    right, restroom sign" puts two unrelated directions in one breath --
+    which is the confusion this step exists to prevent, wearing a different
+    hat. ``blocked`` is the exception because plan Sec 3.2 ruling 4 leaves it
+    nowhere else to go.
+    """
+    if way is None or not way.blocked:
+        return detail
+    fragment = clear_way_fragment(way)
+    joined = fragment if detail is None else fragment + FOUND_DETAIL_JOIN + detail
+    return joined[:MAX_DETAIL_CHARS]
 
 
 def _clean(text: str | None, max_chars: int) -> str | None:

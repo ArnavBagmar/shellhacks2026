@@ -83,19 +83,23 @@ class Harness:
 
 @asynccontextmanager
 async def cloud_harness(
-    detector: FrameDetector | None = None, **settings_overrides: object
+    detector: FrameDetector | None = None,
+    depth: object | None = None,
+    **settings_overrides: object,
 ) -> AsyncIterator[Harness]:
-    """Build the real app around an injected detector.
+    """Build the real app around an injected detector, and optionally an
+    injected depth head (step 22).
 
     The state goes in through `dependency_overrides`, never a lifespan
     handler: `httpx.ASGITransport` does not run lifespan, so a lifespan-built
-    detector would be `None` in every test.
+    detector would be `None` in every test. `depth=None` means "whatever the
+    settings say", which in the default posture is no depth head at all.
     """
     from cane.cloud.app import AppState, app, build_state, get_app_state
 
     settings = CloudSettings(**settings_overrides)  # type: ignore[arg-type]
     chosen = detector if detector is not None else ScriptedDetector()
-    state: AppState = build_state(settings, chosen)
+    state: AppState = build_state(settings, chosen, depth=depth)  # type: ignore[arg-type]
     app.dependency_overrides[get_app_state] = lambda: state
     transport = httpx.ASGITransport(app=app)
     try:

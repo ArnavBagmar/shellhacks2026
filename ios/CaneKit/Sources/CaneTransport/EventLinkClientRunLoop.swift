@@ -117,12 +117,12 @@ extension EventLinkClient {
             switch try InboundMessage.decode(data) {
             case .ping:
                 await respondToPing(data, on: webSocketTask, now: now, logger: logger)
-            case .event(let event):
-                sinks.events.yield(event)
-            case .answer(let answer):
-                sinks.answers.yield(answer)
             case .unknown(let type):
                 logger.debug("ignoring unknown frame type: \(type, privacy: .public)")
+            case let message:
+                // Step 21 defined the `steer` frame and left it unconsumed;
+                // step 24 is what acts on it, from `steerCommands`.
+                sinks.deliver(message)
             }
         } catch {
             logger.warning("dropping malformed frame: \(String(describing: error), privacy: .public)")

@@ -32,6 +32,7 @@ from cane.bridge.deadline import FRAME_DEADLINE_MS, past_deadline
 from cane.bridge.dewarp import CROP_YAWS_DEG, CropSet, encode_cropset, dewarp_equirect
 from cane.bridge.events import events_from_response
 from cane.bridge.health import HealthMonitor
+from cane.bridge.steer_frame import steer_from_response
 from cane.transport.log_throttle import LogThrottle
 from cane.bridge.sender import OneInFlightSender, SendOutcome
 # Re-exported for callers that imported them from here before step 8 split
@@ -46,6 +47,7 @@ from cane.cloud.api_models import (
 )
 from cane.contracts.awareness_event import AwarenessEvent, Source
 from cane.transport.clock_sync import ClockNotSyncedError
+from cane.transport.messages import Steer
 from cane.transport.wall_clock import now_ms
 
 logger = logging.getLogger(__name__)
@@ -110,6 +112,18 @@ class EventSink(Protocol):
     async def send_event(self, event: AwarenessEvent) -> bool: ...
 
 
+class SteerSink(Protocol):
+    """Step 23's second stream, kept separate from :class:`EventSink`.
+
+    ``EventLinkServer`` satisfies both, so the CLI passes the same object
+    twice. They are two protocols rather than one because a pre-step-23
+    caller's sink has no ``send_steer``, and the detection path must keep
+    working -- byte-identically -- against it.
+    """
+
+    async def send_steer(self, steer: Steer) -> bool: ...
+
+
 @dataclass(frozen=True)
 class LaptopClock:
     """``--allow-unsynced``: stamp with the laptop clock, offset 0.
@@ -135,6 +149,7 @@ class BridgePipeline:
         sender: OneInFlightSender,
         clock_provider: Callable[[], CaptureClock],
         event_sink: EventSink | None = None,
+        steer_sink: SteerSink | None = None,
         crop_px: int | None = None,
         stats_hook: Callable[[PipelineStats], None] | None = None,
         monitor: HealthMonitor | None = None,
@@ -147,6 +162,7 @@ class BridgePipeline:
         self._sender = sender
         self._clock_provider = clock_provider
         self._event_sink = event_sink
+        self._steer_sink = steer_sink
         self._monitor = monitor
         self._planner = RungPlanner(config, monitor, crop_px)
         # Which backend answered the response now being handled. Constant
@@ -166,6 +182,8 @@ class BridgePipeline:
         self._skipped_deadline = 0
         self._events_delivered = 0
         self._events_undelivered = 0
+        self._steer_sent = 0
+        self._steer_undelivered = 0
         self._unsynced_log = LogThrottle(SKIP_LOG_INTERVAL_S)
         self._deadline_log = LogThrottle(SKIP_LOG_INTERVAL_S)
         self._busy_log = LogThrottle(SKIP_LOG_INTERVAL_S)
@@ -361,18 +379,56 @@ class BridgePipeline:
             session_id=self._config.session_id,
         )
 
+    @property
+    def steer_sent(self) -> int:
+        """``steer`` frames the phone acknowledged (step 23 D).
+
+        Deliberately a property rather than a ``PipelineStats`` field: the
+        5-second stats line is a format other tools parse, and step 23 is
+        additive. Step 25 can put it on the line once there is a live number
+        worth printing.
+        """
+        return self._steer_sent
+
+    @property
+    def steer_undelivered(self) -> int:
+        """Frames computed with nowhere to go, or refused by the link."""
+        return self._steer_undelivered
+
     async def _handle_response(self, response: InferenceResponse) -> None:
+        source = self._source()
         events = events_from_response(
-            response, CROP_YAWS_DEG, self._config.delta_deg, self._source()
+            response, CROP_YAWS_DEG, self._config.delta_deg, source
         )
         if self._event_sink is None:
             self._events_undelivered += len(events)
+        else:
+            for event in events:
+                if await self._event_sink.send_event(event):
+                    self._events_delivered += 1
+                else:
+                    self._events_undelivered += 1
+        # After the events, always: a hazard warning is the older promise and
+        # steering is the advisory layer on top of it.
+        await self._send_steer(response, source)
+
+    async def _send_steer(self, response: InferenceResponse, source: Source) -> None:
+        """One ``steer`` frame per answered tick -- or none at all.
+
+        ``steer_from_response`` returns ``None`` for every case where there
+        is nothing honest to say (local fallback, no depth head, an empty
+        ring, a bearing outside the forward arc), so this method never has to
+        decide what a missing measurement should look like.
+        """
+        steer = steer_from_response(
+            response, CROP_YAWS_DEG, self._config.delta_deg, source
+        )
+        if steer is None:
             return
-        for event in events:
-            if await self._event_sink.send_event(event):
-                self._events_delivered += 1
-            else:
-                self._events_undelivered += 1
+        if self._steer_sink is None or not await self._steer_sink.send_steer(steer):
+            self._steer_undelivered += 1
+            return
+        self._steer_sent += 1
 
     def _source(self) -> Source:
         """Who answered *this* response. The sender holds one request at a

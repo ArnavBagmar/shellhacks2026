@@ -24,8 +24,14 @@ let package = Package(
         .target(name: "CaneTransport", dependencies: ["CaneContracts"]),
         .testTarget(name: "CaneTransportTests", dependencies: ["CaneTransport", "CaneContracts"]),
         // Step 9 — feedback manager gauntlet (consumes AwarenessEvent, emits Announcement).
-        .target(name: "CaneFeedback", dependencies: ["CaneContracts"]),
-        .testTarget(name: "CaneFeedbackTests", dependencies: ["CaneFeedback", "CaneContracts"]),
+        // Step 24 adds the steering path, which consumes CaneTransport's `steer`
+        // frame (SteerCommand/SteerLimits) rather than redefining it: the TTL that
+        // gates it must be the same constant the parser validates against.
+        .target(name: "CaneFeedback", dependencies: ["CaneContracts", "CaneTransport"]),
+        .testTarget(
+            name: "CaneFeedbackTests",
+            dependencies: ["CaneFeedback", "CaneContracts", "CaneTransport"]
+        ),
         // Step 10 — haptics, speech, earcon and the output arbiter. Pure policy
         // is Foundation-only; engine wrappers are iOS-only behind protocols.
         .target(name: "CaneOutput", dependencies: ["CaneContracts", "CaneFeedback"]),

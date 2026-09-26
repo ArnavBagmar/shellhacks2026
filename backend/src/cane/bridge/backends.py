@@ -67,6 +67,16 @@ HTTP_OK: Final = 200
 COREML_WEIGHTS: Final = Path("yolo11s.mlpackage")
 TORCH_WEIGHTS: Final = Path("yolo11s.pt")
 LOCAL_DEVICE: Final = "mps"
+#: The local fallback runs no depth head (step 23). Step 22 measured ~92 ms
+#: for the three forward crops on this laptop's MPS, and the depth factory's
+#: posture table turns depth *on* for the `ultralytics` detector -- which is
+#: exactly what this backend loads. But plan Sec 4.2 forbids sending a `steer`
+#: frame in local fallback at all, so that 92 ms would buy a `GapProfile`
+#: step 23 is required to discard, while pushing local inference from ~170 ms
+#: to ~260 ms and eating the cyclist class's 500 ms TTL margin. Declared in
+#: the settings as well as by passing no head, so a future caller that routes
+#: this through `build_depth_head` cannot quietly turn it on.
+LOCAL_DEPTH_ENABLED: Final = False
 LOCAL_DETECTOR_ENV: Final = "CANE_LOCAL_DETECTOR"
 LOCAL_WEIGHTS_ENV: Final = "CANE_LOCAL_WEIGHTS"
 LOCAL_DETECTOR_NAMES: Final = ("fake", "ultralytics")
@@ -257,7 +267,12 @@ class LocalBackend:
         chosen = detector if detector is not None else build_detector(settings)
         if warm_up_px is not None:
             warm_up_detector(chosen, warm_up_px)
-        return cls(InferenceService(chosen, registry, settings), timeout_s=timeout_s)
+        # `depth=None`, explicitly: see LOCAL_DEPTH_ENABLED. The local path
+        # answers with detections and no gap profiles, which is the honest
+        # answer and also exactly what an older cloud returns.
+        return cls(
+            InferenceService(chosen, registry, settings, depth=None), timeout_s=timeout_s
+        )
 
     @property
     def service(self) -> InferenceService:
@@ -397,4 +412,9 @@ def local_settings(
     raw_weights = weights or os.environ.get(LOCAL_WEIGHTS_ENV)
     path = Path(raw_weights) if raw_weights else default_local_weights()
     name: DetectorName = "ultralytics" if chosen == "ultralytics" else "fake"
-    return CloudSettings(detector=name, weights_path=path, device=LOCAL_DEVICE)
+    return CloudSettings(
+        detector=name,
+        weights_path=path,
+        device=LOCAL_DEVICE,
+        depth_enabled=LOCAL_DEPTH_ENABLED,
+    )

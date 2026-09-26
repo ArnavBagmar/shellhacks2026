@@ -11,6 +11,7 @@ import os
 /// Everything that runs during a walk, wired once per walk:
 ///
 ///     laptop --events--> FeedbackManager --> OutputSink --> OutputArbiter --> haptics / speech
+///     laptop --steer---> FeedbackManager --> SteerCueOutput -^ (step 24)
 ///     laptop <--query--- QueryCoordinator <-- VoiceRouter <-- SpeechListener (open mic)
 ///     laptop --answer--> QueryCoordinator --> OutputArbiter
 ///
@@ -70,7 +71,18 @@ final class Runtime {
             ),
             onPresent: callbacks.onHazard
         )
-        feedback = FeedbackManager(sink: sink, clock: Self.now)
+        // Step 24: the steering cue shares the actuator and the 100 ms tick
+        // with the hazard path, and sits below everything on the arbiter.
+        let feedback = FeedbackManager(
+            sink: sink,
+            steerSink: SteerCueOutput(
+                arbiter: arbiter,
+                userGain: { settings.current.hapticGain },
+                panRoute: { AudioSessionConfig.panRoute() }
+            ),
+            clock: Self.now
+        )
+        self.feedback = feedback
 
         let camera = FrontCamera()
         self.camera = camera
@@ -84,7 +96,16 @@ final class Runtime {
             clock: Self.now,
             userGain: { settings.current.hapticGain }
         )
-        let navigation = NavigationController(arbiter: arbiter, userGain: { settings.current.hapticGain })
+        let navigation = NavigationController(
+            arbiter: arbiter,
+            userGain: { settings.current.hapticGain },
+            // Shepherd's stage 6: a turn cue that is happening *now* also leans
+            // the steering mix, scaled by (1 - proximityFactor) so obstacles
+            // win. The spoken cue's arbitration is unchanged.
+            steerBias: { lateral in
+                Task { await feedback.setNavigationBias(lateral: lateral, now: Self.now()) }
+            }
+        )
         self.navigation = navigation
         voice = VoiceRouter(
             arbiter: arbiter,
@@ -171,6 +192,13 @@ final class Runtime {
                 await feedback.ingest(event, now: Self.now())
             }
         })
+        // Step 24: one `steer` frame per sensing tick, gated on its own TTL
+        // inside the manager. The stream keeps only the newest.
+        tasks.append(Task {
+            for await command in client.steerCommands {
+                await feedback.ingest(command, now: Self.now())
+            }
+        })
         tasks.append(Task {
             for await answer in client.answers {
                 diagnostics.record("answer", [
@@ -199,7 +227,13 @@ final class Runtime {
             var last: Bool?
             while !Task.isCancelled {
                 let connected = await client.hasConnection
-                if connected != last { callbacks.onConnected(connected) }
+                if connected != last {
+                    callbacks.onConnected(connected)
+                    // Step 24's failsafe: a known-dead link decays the steering
+                    // cue to neutral without waiting out the 400 ms TTL. The
+                    // TTL still covers the case where frames simply stop.
+                    await feedback.setLinkUp(connected)
+                }
                 last = connected
                 try? await Task.sleep(for: .seconds(1))
             }

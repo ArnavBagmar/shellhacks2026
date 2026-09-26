@@ -77,7 +77,15 @@ public enum IntentParser {
         return text
     }
 
-    static let frontPhrases = ["in front of me", "ahead of me", "what is ahead", "what do you see", "what can you see"]
+    /// Step 26 wired the gap ring into the front description, so "which way is clear"
+    /// is answerable from the same bearing the steering cue is rendered from. It
+    /// parsed to nil before that, and the wearer heard "Sorry, I didn't catch that" --
+    /// the one question this system is now best placed to answer.
+    static let frontPhrases = [
+        "in front of me", "ahead of me", "what is ahead", "what do you see", "what can you see",
+        "which way is clear", "which way is clearer", "which way should i go",
+        "the way clear", "clear ahead", "where can i walk",
+    ]
     static let aroundPhrases = ["around me", "look around", "describe", "surroundings", "what is here", "where am i"]
     static let genericTargets = ["anything", "something", "stuff", "things"]
 

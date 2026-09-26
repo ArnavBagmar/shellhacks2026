@@ -12,6 +12,7 @@ import os
 final class NavigationController {
     private let arbiter: OutputArbiter
     private let userGain: @Sendable () -> Float
+    private let steerBias: @Sendable (Double) -> Void
     private lazy var sources = CoreLocationSources()
     private var engine: NavigationEngine?
     private var cueTask: Task<Void, Never>?
@@ -19,9 +20,20 @@ final class NavigationController {
 
     static let retriedKinds: Set<CueKind> = [.arrived, .offRoute, .gpsLost, .gpsRestored]
 
-    init(arbiter: OutputArbiter, userGain: @escaping @Sendable () -> Float) {
+    /// Step 24: the kinds that lean the *steering* mix as well as speaking.
+    /// A maneuver that is happening now, and a heading correction, are about
+    /// where to put the next step; "left in 30 metres" is not, and must not
+    /// pull the wearer sideways a block early.
+    static let biasingKinds: Set<CueKind> = [.now, .correctHeading]
+
+    init(
+        arbiter: OutputArbiter,
+        userGain: @escaping @Sendable () -> Float,
+        steerBias: @escaping @Sendable (Double) -> Void = { _ in }
+    ) {
         self.arbiter = arbiter
         self.userGain = userGain
+        self.steerBias = steerBias
     }
 
     func start(to place: String) async {
@@ -40,8 +52,10 @@ final class NavigationController {
         )
         self.engine = engine
         let arbiter = arbiter, gain = userGain
+        let steerBias = self.steerBias
         cueTask = Task {
             for await cue in engine.cues {
+                steerBias(Self.lateralBias(for: cue))
                 await Self.present(cue, arbiter: arbiter, gain: gain())
             }
         }
@@ -60,6 +74,17 @@ final class NavigationController {
             Task { await engine.stop() }
         }
         engine = nil
+    }
+
+    /// -1 left, +1 right, 0 for anything that is not a turn happening now.
+    /// The same sign convention as `SteerCommand.steer` and `BearingSector`.
+    static func lateralBias(for cue: TurnCue) -> Double {
+        guard biasingKinds.contains(cue.kind) else { return 0 }
+        switch cue.hapticHint {
+        case .leftTurn: return -1
+        case .rightTurn: return 1
+        case .ahead, .none: return 0
+        }
     }
 
     private static func present(_ cue: TurnCue, arbiter: OutputArbiter, gain: Float) async {
