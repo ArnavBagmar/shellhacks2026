@@ -21,6 +21,8 @@ from typing import Awaitable, Callable, Protocol
 
 from pydantic import ValidationError
 
+from cane.bridge.deadline import FRAME_DEADLINE_MS, frame_age_ms, past_deadline
+from cane.bridge.log_throttle import LogThrottle
 from cane.bridge.metrics import RollingWindow
 from cane.cloud.api_models import InferenceRequest, InferenceResponse
 from cane.transport.wall_clock import now_ms
@@ -37,6 +39,7 @@ class SendOutcome(StrEnum):
 
     SENT = "sent"
     DROPPED_BUSY = "dropped_busy"
+    DROPPED_DEADLINE = "dropped_deadline"
 
 
 class InferenceTransport(Protocol):
@@ -56,6 +59,7 @@ class SenderStats:
 
     sent: int
     dropped_busy: int
+    dropped_deadline: int
     succeeded: int
     failed: int
     rejected: int
@@ -83,6 +87,8 @@ class OneInFlightSender:
         self._rtt_ms = RollingWindow(window)
         self._sent = 0
         self._dropped_busy = 0
+        self._dropped_deadline = 0
+        self._deadline_log = LogThrottle()
         self._succeeded = 0
         self._failed = 0
         self._rejected = 0
@@ -105,6 +111,7 @@ class OneInFlightSender:
         return SenderStats(
             sent=self._sent,
             dropped_busy=self._dropped_busy,
+            dropped_deadline=self._dropped_deadline,
             succeeded=self._succeeded,
             failed=self._failed,
             rejected=self._rejected,
@@ -121,7 +128,9 @@ class OneInFlightSender:
         if self.busy:
             self._dropped_busy += 1
             return SendOutcome.DROPPED_BUSY
-        self._sent += 1
+        if past_deadline(t_arrival_laptop_ms):
+            self._count_deadline_drop(t_arrival_laptop_ms)
+            return SendOutcome.DROPPED_DEADLINE
         # Frame age is sampled inside the task, immediately before the wire:
         # this call only *creates* the task, and on a busy loop the body runs
         # a scheduling slot (or a whole tick) later. Sampling here would
@@ -147,7 +156,13 @@ class OneInFlightSender:
         await self._transport.aclose()
 
     async def _run(self, request: InferenceRequest, t_arrival_laptop_ms: int) -> None:
+        # The last gate before the wire: this task was created a scheduling
+        # slot (or a busy tick) ago, and the frame may have expired since.
+        if past_deadline(t_arrival_laptop_ms):
+            self._count_deadline_drop(t_arrival_laptop_ms)
+            return
         started_ms = now_ms()
+        self._sent += 1
         self._frame_age_ms.add(float(started_ms - t_arrival_laptop_ms))
         try:
             raw = await self._transport.post_crops(request)
@@ -174,6 +189,21 @@ class OneInFlightSender:
             raise
         except Exception:  # noqa: BLE001 - a handler fault must not kill the loop
             logger.exception("the inference response handler raised; continuing")
+
+    def _count_deadline_drop(self, t_arrival_laptop_ms: int) -> None:
+        """A frame that expired before the wire: counted always, logged at
+        the same once-per-interval cadence as the pipeline's other drops.
+        """
+        self._dropped_deadline += 1
+        if not self._deadline_log.allow():
+            return
+        logger.warning(
+            "dropped a frame %d ms old at the uplink (deadline %d ms, %d so far); "
+            "the laptop is not keeping up with the tick",
+            frame_age_ms(t_arrival_laptop_ms),
+            FRAME_DEADLINE_MS,
+            self._dropped_deadline,
+        )
 
     def _parse(self, raw: bytes, request: InferenceRequest) -> InferenceResponse | None:
         try:

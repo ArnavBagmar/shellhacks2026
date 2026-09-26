@@ -13,6 +13,7 @@ import time
 
 import pytest
 
+from cane.bridge.deadline import FRAME_DEADLINE_MS
 from cane.bridge.metrics import RollingWindow, percentile
 from cane.bridge.sender import STATS_WINDOW, OneInFlightSender, SendOutcome
 from cane.cloud.api_models import CROP_COUNT, InferenceMeta, InferenceRequest, InferenceResponse
@@ -27,6 +28,8 @@ MAX_FRAME_AGE_MS = 50
 LOOP_BLOCK_S = 0.03
 LOOP_BLOCK_MS = 30
 SAMPLING_SLACK_MS = 8
+# Old enough that the 30 ms block below pushes it past the deadline.
+NEARLY_EXPIRED_AGE_MS = FRAME_DEADLINE_MS - LOOP_BLOCK_MS + 10
 YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0)
 T_CAPTURE_MS = 1_790_000_000_000
 
@@ -193,6 +196,44 @@ async def test_frame_age_is_sampled_at_the_wire_not_at_try_send() -> None:
     assert recorded is not None
     assert recorded >= LOOP_BLOCK_MS, f"reported {recorded} ms, true age {age_at_wire_ms} ms"
     assert abs(recorded - age_at_wire_ms) <= SAMPLING_SLACK_MS
+
+
+async def test_a_frame_that_ages_past_the_deadline_before_the_wire_is_dropped() -> None:
+    """The last gate is inside the request task, not at try_send.
+
+    try_send only creates the task; if the loop then stalls, the frame can be
+    over the deadline by the time the body runs. Posting it anyway would ship
+    a warning the phone would treat as current.
+    """
+    transport = ClockRecordingTransport()
+    sender = OneInFlightSender(transport)
+
+    arrival_ms = now_ms() - NEARLY_EXPIRED_AGE_MS
+    assert sender.try_send(_request(), t_arrival_laptop_ms=arrival_ms) is SendOutcome.SENT
+    time.sleep(LOOP_BLOCK_S)
+    await sender.aclose()
+
+    assert transport.entered_at_ms == []
+    stats = sender.stats
+    assert stats.dropped_deadline == 1
+    assert stats.sent == 0
+    # A frame that never reached the wire must not pollute the age at send.
+    assert stats.frame_age_p50_ms is None
+
+
+async def test_a_frame_already_past_the_deadline_is_never_started() -> None:
+    transport = ClockRecordingTransport()
+    sender = OneInFlightSender(transport)
+
+    outcome = sender.try_send(
+        _request(), t_arrival_laptop_ms=now_ms() - FRAME_DEADLINE_MS - 50
+    )
+    await sender.aclose()
+
+    assert outcome is SendOutcome.DROPPED_DEADLINE
+    assert transport.entered_at_ms == []
+    assert sender.stats.dropped_deadline == 1
+    assert sender.in_flight == 0
 
 
 async def test_the_response_handler_receives_the_parsed_model() -> None:

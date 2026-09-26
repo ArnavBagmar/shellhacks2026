@@ -22,8 +22,10 @@ from typing import Callable, Protocol
 from cane.bridge.capture.base import Frame
 from cane.bridge.capture.grab_thread import GrabThread
 from cane.bridge.config import BridgeConfig
-from cane.bridge.dewarp import CROP_YAWS_DEG, encode_cropset, dewarp_equirect
+from cane.bridge.deadline import FRAME_DEADLINE_MS, past_deadline
+from cane.bridge.dewarp import CROP_YAWS_DEG, CropSet, encode_cropset, dewarp_equirect
 from cane.bridge.events import events_from_response
+from cane.bridge.log_throttle import LogThrottle
 from cane.bridge.sender import OneInFlightSender, SendOutcome
 from cane.cloud.api_models import InferenceMeta, InferenceRequest, InferenceResponse
 from cane.contracts.awareness_event import AwarenessEvent
@@ -38,7 +40,9 @@ FRAME_WAIT_TIMEOUT_S = 0.25
 # Reusing FRAME_WAIT_TIMEOUT_S here would stall a tick for 250 ms chasing a
 # frame that is not coming from a stalled camera.
 FRESHNESS_RETRY_TIMEOUT_S = 0.04
-UNSYNCED_LOG_INTERVAL_S = 5.0
+# One line per reason per interval: a skip that repeats every tick must not
+# drown the 5-second stats line that carries the actual counts.
+SKIP_LOG_INTERVAL_S = 5.0
 # A 30 fps camera means the frame sitting in the slot is on average half a
 # frame period (17 ms) old, and up to 33 ms old, before we have done any work.
 # When the one already there is staler than this, wait for the next arrival
@@ -46,18 +50,17 @@ UNSYNCED_LOG_INTERVAL_S = 5.0
 # instant of reality, which is strictly better for a warning system -- and it
 # is what keeps frame age at send well inside the 50 ms budget.
 MAX_FRAME_AGE_AT_PICKUP_MS = 10
-# If even after waiting there is nothing fresher than this, the camera has
-# stalled: skip the tick rather than ship a stale frame. Dropping beats
-# sending a warning about where a cyclist was a third of a second ago, and it
-# is the same trade as the one-request-in-flight rule, applied to capture.
-MAX_SENDABLE_FRAME_AGE_MS = 100
+# The ceiling on the whole tick is the frame's own age: see
+# ``deadline.FRAME_DEADLINE_MS``. It is re-checked at every stage boundary
+# below, so a slow dewarp or a stalled camera both end the same way -- the
+# frame is dropped and counted, never shipped late.
 
 
 class TickSkip(StrEnum):
     """Why a tick produced no request. Counted on the loop thread."""
 
     NO_FRAME = "no_frame"
-    STALE_FRAME = "stale_frame"
+    DEADLINE_EXCEEDED = "deadline_exceeded"
     UNSYNCED = "unsynced"
     ENCODE_FAILED = "encode_failed"
 
@@ -110,7 +113,7 @@ class PipelineStats:
     dropped_busy: int
     skipped_unsynced: int
     skipped_no_frame: int
-    skipped_stale: int
+    skipped_deadline: int
     succeeded: int
     failed: int
     rejected: int
@@ -145,7 +148,7 @@ def format_stats_line(stats: PipelineStats) -> str:
         f"in_flight_max {stats.max_in_flight} | events {stats.events_delivered} | "
         f"failed {stats.failed} rejected {stats.rejected} "
         f"unsynced {stats.skipped_unsynced} no_frame {stats.skipped_no_frame} "
-        f"stale {stats.skipped_stale}"
+        f"deadline {stats.skipped_deadline}"
     )
 
 
@@ -175,10 +178,11 @@ class BridgePipeline:
         self._dropped_busy = 0
         self._skipped_unsynced = 0
         self._skipped_no_frame = 0
-        self._skipped_stale = 0
+        self._skipped_deadline = 0
         self._events_delivered = 0
         self._events_undelivered = 0
-        self._last_unsynced_log = 0.0
+        self._unsynced_log = LogThrottle(SKIP_LOG_INTERVAL_S)
+        self._deadline_log = LogThrottle(SKIP_LOG_INTERVAL_S)
         self._logged_windows = 0
 
     async def run(self, duration_s: float | None = None) -> PipelineStats:
@@ -244,54 +248,91 @@ class BridgePipeline:
     def _count_skip(self, skip: TickSkip) -> None:
         if skip is TickSkip.NO_FRAME:
             self._skipped_no_frame += 1
-        elif skip is TickSkip.STALE_FRAME:
-            self._skipped_stale += 1
+        elif skip is TickSkip.DEADLINE_EXCEEDED:
+            self._skipped_deadline += 1
+            self._log_deadline()
         elif skip is TickSkip.UNSYNCED:
             self._skipped_unsynced += 1
             self._log_unsynced()
 
     def _take_and_build(self) -> TickWork:
-        """Worker thread: freshest frame -> stamp -> dewarp -> JPEG."""
+        """Worker thread: freshest frame -> stamp -> dewarp -> JPEG.
+
+        The deadline is re-checked after every stage, because those stages
+        are the only places in a tick where time passes. Each check is one
+        integer compare, so the ceiling costs nothing to enforce.
+        """
         frame = self._freshest_frame()
         if frame is None:
             return TickWork(skip=TickSkip.NO_FRAME)
-        age_ms = now_ms() - frame.t_arrival_laptop_ms
-        if age_ms > MAX_SENDABLE_FRAME_AGE_MS:
-            return TickWork(skip=TickSkip.STALE_FRAME, frame_seq=frame.seq)
+        if (expired := self._expired(frame)) is not None:
+            return expired
         try:
             t_capture_ms = self._clock_provider().capture_time_ms(frame.t_arrival_laptop_ms)
         except ClockNotSyncedError:
             return TickWork(skip=TickSkip.UNSYNCED, frame_seq=frame.seq)
-        request = self._build_request(frame, t_capture_ms)
-        if request is None:
+        cropset = self._dewarp(frame)
+        if cropset is None:
             return TickWork(skip=TickSkip.ENCODE_FAILED, frame_seq=frame.seq)
+        if (expired := self._expired(frame)) is not None:
+            return expired
+        crops = self._encode(cropset, frame.seq)
+        if crops is None:
+            return TickWork(skip=TickSkip.ENCODE_FAILED, frame_seq=frame.seq)
+        if (expired := self._expired(frame)) is not None:
+            return expired
         return TickWork(
             skip=None,
-            request=request,
+            request=InferenceRequest(meta=self._meta(t_capture_ms), crops=crops),
             frame_seq=frame.seq,
             t_arrival_laptop_ms=frame.t_arrival_laptop_ms,
         )
 
+    @staticmethod
+    def _expired(frame: Frame) -> TickWork | None:
+        """The one stage-boundary check: too old to be worth any more work."""
+        if not past_deadline(frame.t_arrival_laptop_ms):
+            return None
+        return TickWork(skip=TickSkip.DEADLINE_EXCEEDED, frame_seq=frame.seq)
+
     def _log_unsynced(self) -> None:
-        """At most one line per 5 s: this fires on every tick when it fires."""
-        now = time.monotonic()
-        if now - self._last_unsynced_log < UNSYNCED_LOG_INTERVAL_S:
+        """At most one line per interval: this fires on every tick when it fires."""
+        if not self._unsynced_log.allow():
             return
-        self._last_unsynced_log = now
         logger.warning(
             "phone clock not synced yet; skipping frames (%d so far). "
             "Connect the phone, or run with --allow-unsynced.",
             self._skipped_unsynced,
         )
 
-    def _build_request(self, frame: Frame, t_capture_ms: int) -> InferenceRequest | None:
-        """Dewarp + encode. Runs in a worker thread; never raises into the loop."""
+    def _log_deadline(self) -> None:
+        """Same cadence, same reason: a per-tick drop must not spam the log."""
+        if not self._deadline_log.allow():
+            return
+        logger.warning(
+            "dropped %d frame(s) older than the %d ms deadline; the camera has "
+            "stalled or the laptop is not keeping up with dewarp and encode.",
+            self._skipped_deadline,
+            FRAME_DEADLINE_MS,
+        )
+
+    def _dewarp(self, frame: Frame) -> CropSet | None:
+        """Six perspective crops. Worker thread; never raises into the loop."""
         try:
-            cropset = dewarp_equirect(frame.image, self._crop_px, frame.t_arrival_laptop_ms)
-            crops = encode_cropset(cropset, self._config.rung.jpeg_quality)
+            return dewarp_equirect(frame.image, self._crop_px, frame.t_arrival_laptop_ms)
         except (ValueError, RuntimeError) as exc:
-            logger.warning("dropping frame %d: %s", frame.seq, exc)
+            logger.warning("dropping frame %d in dewarp: %s", frame.seq, exc)
             return None
+
+    def _encode(self, cropset: CropSet, frame_seq: int) -> tuple[bytes, ...] | None:
+        """JPEG at the rung's quality. Worker thread; never raises."""
+        try:
+            return encode_cropset(cropset, self._config.rung.jpeg_quality)
+        except (ValueError, RuntimeError) as exc:
+            logger.warning("dropping frame %d in encode: %s", frame_seq, exc)
+            return None
+
+    def _meta(self, t_capture_ms: int) -> InferenceMeta:
         meta = InferenceMeta(
             schema=1,
             t_capture_ms=t_capture_ms,
@@ -300,7 +341,7 @@ class BridgePipeline:
             yaws_deg=CROP_YAWS_DEG,
             session_id=self._config.session_id,
         )
-        return InferenceRequest(meta=meta, crops=crops)
+        return meta
 
     async def _handle_response(self, response: InferenceResponse) -> None:
         events = events_from_response(response, CROP_YAWS_DEG, self._config.delta_deg)
@@ -336,7 +377,9 @@ class BridgePipeline:
             dropped_busy=self._dropped_busy + sender.dropped_busy,
             skipped_unsynced=self._skipped_unsynced,
             skipped_no_frame=self._skipped_no_frame,
-            skipped_stale=self._skipped_stale,
+            # Same shape as dropped_busy: the pipeline drops what it can
+            # see coming, the sender catches what expired after hand-off.
+            skipped_deadline=self._skipped_deadline + sender.dropped_deadline,
             succeeded=sender.succeeded,
             failed=sender.failed,
             rejected=sender.rejected,

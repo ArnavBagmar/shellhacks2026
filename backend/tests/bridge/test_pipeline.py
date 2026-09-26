@@ -15,6 +15,7 @@ import time
 import pytest
 import websockets
 
+from cane.bridge import pipeline as pipeline_module
 from cane.bridge.capture.base import Frame
 from cane.bridge.capture.grab_thread import GrabThread
 from cane.bridge.capture.synthetic_source import (
@@ -22,6 +23,7 @@ from cane.bridge.capture.synthetic_source import (
     make_equirect_frame,
 )
 from cane.bridge.config import BridgeConfig
+from cane.bridge.deadline import FRAME_DEADLINE_MS
 from cane.bridge.pipeline import (
     BridgePipeline,
     LaptopClock,
@@ -46,6 +48,9 @@ RUN_S = 1.2
 RECV_TIMEOUT_S = 3.0
 PHONE_OFFSET_MS = 250
 DETECTION_CX = 0.75
+# One stage slower than the whole frame deadline, and one comfortably inside it.
+SLOW_STAGE_S = 0.15
+FAST_STAGE_S = 0.005
 
 
 class EchoingFakeCloud:
@@ -134,14 +139,20 @@ async def test_phone_receives_an_x4_cloud_event_with_the_echoed_stamp() -> None:
                 transport, _config(), clock_provider=lambda: server.phone_clock, sink=server
             )
             grab.start()
-            run = asyncio.create_task(pipeline.run(duration_s=RUN_S))
+            try:
+                run = asyncio.create_task(pipeline.run(duration_s=RUN_S))
 
-            event_msg = None
-            while event_msg is None:
-                msg = decode(await asyncio.wait_for(phone.recv(), RECV_TIMEOUT_S))
-                if isinstance(msg, EventMessage):
-                    event_msg = msg
-            stats = await run
+                event_msg = None
+                while event_msg is None:
+                    msg = decode(await asyncio.wait_for(phone.recv(), RECV_TIMEOUT_S))
+                    if isinstance(msg, EventMessage):
+                        event_msg = msg
+                stats = await run
+            finally:
+                # A daemon grab thread left running keeps pushing 30 fps of
+                # synthetic frames for the rest of the session and skews every
+                # later timing test.
+                grab.stop()
 
     event = event_msg.event
     assert event.source is Source.X4_CLOUD
@@ -161,8 +172,10 @@ async def test_six_crops_of_the_rung_size_reach_the_cloud() -> None:
     transport = EchoingFakeCloud()
     pipeline, grab = _pipeline(transport, _config(), clock_provider=LaptopClock, sink=None)
     grab.start()
-
-    await pipeline.run(duration_s=RUN_S)
+    try:
+        await pipeline.run(duration_s=RUN_S)
+    finally:
+        grab.stop()
 
     assert transport.requests
     request = transport.requests[0]
@@ -178,8 +191,10 @@ async def test_frame_age_at_send_stays_under_50ms_with_a_slow_cloud() -> None:
     transport = EchoingFakeCloud(delay_s=0.8)
     pipeline, grab = _pipeline(transport, _config(), clock_provider=LaptopClock, sink=None)
     grab.start()
-
-    stats = await pipeline.run(duration_s=2.0)
+    try:
+        stats = await pipeline.run(duration_s=2.0)
+    finally:
+        grab.stop()
 
     assert stats.frame_age_p95_ms is not None
     assert stats.frame_age_p95_ms < 50
@@ -196,8 +211,10 @@ async def test_an_unsynced_clock_skips_frames_instead_of_crashing() -> None:
     transport = EchoingFakeCloud()
     pipeline, grab = _pipeline(transport, _config(), clock_provider=NeverSynced, sink=None)
     grab.start()
-
-    stats = await pipeline.run(duration_s=0.6)
+    try:
+        stats = await pipeline.run(duration_s=0.6)
+    finally:
+        grab.stop()
 
     assert transport.requests == []
     assert stats.skipped_unsynced > 0
@@ -237,7 +254,7 @@ async def test_a_stalled_camera_is_skipped_not_shipped_stale() -> None:
     stats = await pipeline.run(duration_s=0.5)
 
     assert transport.requests == []
-    assert stats.skipped_stale > 0
+    assert stats.skipped_deadline > 0
     assert stats.sent == 0
 
 
@@ -266,6 +283,58 @@ async def test_an_overrun_tick_still_yields_to_the_event_loop() -> None:
     await task
 
 
+def _slowed_dewarp(delay_s: float):
+    """The real dewarp, but made to cost ``delay_s`` of the frame's budget."""
+    real = pipeline_module.dewarp_equirect
+
+    def slow(image: object, crop_px: int, t_arrival_laptop_ms: int) -> object:
+        time.sleep(delay_s)
+        return real(image, crop_px, t_arrival_laptop_ms)
+
+    return slow
+
+
+async def test_a_frame_that_misses_the_deadline_mid_tick_is_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Per-tick compute has a ceiling, and the ceiling is the frame's age.
+
+    150 ms of dewarp means every frame is already older than the 100 ms
+    deadline by the time the crops exist, so nothing must reach the wire:
+    a warning about where a cyclist was is worse than no warning.
+    """
+    monkeypatch.setattr(pipeline_module, "dewarp_equirect", _slowed_dewarp(SLOW_STAGE_S))
+    transport = EchoingFakeCloud()
+    pipeline, grab = _pipeline(transport, _config(), clock_provider=LaptopClock, sink=None)
+    grab.start()
+    try:
+        stats = await pipeline.run(duration_s=RUN_S)
+    finally:
+        grab.stop()
+
+    assert SLOW_STAGE_S * 1000 > FRAME_DEADLINE_MS
+    assert transport.requests == []
+    assert stats.sent == 0
+    assert stats.skipped_deadline > 0
+
+
+async def test_a_frame_that_stays_inside_the_deadline_is_sent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pipeline_module, "dewarp_equirect", _slowed_dewarp(FAST_STAGE_S))
+    transport = EchoingFakeCloud()
+    pipeline, grab = _pipeline(transport, _config(), clock_provider=LaptopClock, sink=None)
+    grab.start()
+    try:
+        stats = await pipeline.run(duration_s=RUN_S)
+    finally:
+        grab.stop()
+
+    assert transport.requests
+    assert stats.sent > 0
+    assert stats.skipped_deadline == 0
+
+
 async def test_laptop_clock_applies_the_pipeline_delay_constant() -> None:
     clock = LaptopClock(pipeline_delay_d_ms=40)
     assert clock.capture_time_ms(1_790_000_000_000) == 1_790_000_000_000 - 40
@@ -281,7 +350,7 @@ def test_the_stats_line_names_every_acceptance_number() -> None:
             dropped_busy=0,
             skipped_unsynced=0,
             skipped_no_frame=0,
-            skipped_stale=0,
+            skipped_deadline=0,
             succeeded=15,
             failed=0,
             rejected=0,
@@ -295,5 +364,5 @@ def test_the_stats_line_names_every_acceptance_number() -> None:
         )
     )
 
-    for token in ("grab", "send", "dropped_busy", "frame_age", "rtt", "p50", "p95"):
+    for token in ("grab", "send", "dropped_busy", "frame_age", "rtt", "p50", "p95", "deadline"):
         assert token in line
