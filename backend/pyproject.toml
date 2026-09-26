@@ -52,6 +52,7 @@ cane-link = "cane.transport.__main__:main"
 cane-bench-yolo = "cane.benchmarks.yolo:main"
 cane-bench-depth = "cane.benchmarks.depth:main"
 cane-preview = "cane.benchmarks.fused:main"
+cane-preview-crops = "cane.benchmarks.crops:main"
 
 [dependency-groups]
 dev = [

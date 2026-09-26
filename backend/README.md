@@ -111,3 +111,31 @@ See [`docs/fused-preview.md`](../docs/fused-preview.md) for controls, the
 light-green-farther / dark-orange-nearer colour scale, the per-box depth median,
 and what the recorded timings do and do not mean. The two single-model runners
 above remain the per-model baselines.
+
+## The six crops the cloud actually sees
+
+`fused` reads a camera through OpenCV, which on macOS can only give the X4's raw
+**dual-fisheye** — an image no part of this system processes. To watch the real
+thing, use the crops preview: it takes the bridge's own path (AVFoundation
+2880x1440 equirect, then `cane.bridge.dewarp`) and shows the six 60-degree
+square crops laid out the way a wearer reads them.
+
+```bash
+UV_PROJECT_ENVIRONMENT=.venv-vision PYTHONPATH=src .venv-vision/bin/python \
+    -m cane.benchmarks.crops --source x4 --show
+```
+
+```
++---------+---------+---------+
+| Front-L |  Front  | Front-R |
++---------+---------+---------+
+| Rear-L  |  Rear   | Rear-R  |
++---------+---------+---------+
+```
+
+`--no-detection` checks the geometry without loading a model, `--source
+synthetic` needs no camera, and `--save-every N` writes tiled JPGs plus a
+`detections_NNNNNN.json` tagged with the direction each object was seen in.
+Running all six crops through YOLOE locally costs ~500 ms/frame — this is a
+debug view, not the pipeline, where the L4 does all six in ~12 ms.
+`cane.bridge.snapshot` remains the one-shot contact sheet for the docs.

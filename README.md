@@ -9,16 +9,16 @@ An assistive extension to the white cane. A chest-mounted iPhone detects front h
 | Path | What it is | Status |
 |---|---|---|
 | `contracts/` | The integration surface: `awareness_event.schema.json` (the 11-field contract, single source of truth), `transport_envelope.schema.json` (ping/pong/event frames), the golden fixture both test suites run, and a README with field semantics + the COCO→class mapping | **Done, frozen** — any change means re-running step 2 in both languages |
-| `backend/` | Python 3.12 `uv` project, package `cane`: `cane.contracts` (Pydantic model + parser), `cane.transport` (NTP offset estimator, WebSocket event-link server, CLI), `cane.bridge` (X4 capture, six-crop dewarp, one-in-flight sender, health monitor + local fallback, dev stub server), `cane.cloud` (inference service: YOLO11s + ByteTrack + closing speed, FastAPI; deployed on an L4 with TensorRT), `cane.benchmarks` (local YOLOE / Depth Anything V2 baselines and the fused objects+depth preview), `cane.scene` (spoken questions answered by Gemini over the dewarped 360 crops) | **Done** (steps 2, 3, 6, 7, 8, 20) |
-| `ios/CaneKit/` | SwiftPM package: `CaneContracts` (Codable model + validation), `CaneTransport` (WebSocket client, pong responder, reconnect, query/answer frames), `CaneFeedback` (feedback manager gauntlet), `CaneNavigation` (Routes/Places, route follower, turn cues) + `nav-cli`, `CaneOutput` (haptic alphabet, speech, earcon, output arbiter), `CaneVoice` (open mic, "Hey Cane" gate, intents), `CaneCamera` (shared front camera), `CaneAssist` (question → laptop → spoken answer) | **Done** (steps 2, 3, 9, 10, 12, 20) |
-| `ios/CaneApp/` | The iPhone app (XcodeGen `project.yml`): composition root, setup screen, outward-facing "reactor" chest display | **Built**, not yet run on a device (step 20) |
+| `backend/` | Python 3.12 `uv` project, package `cane`: `cane.contracts` (Pydantic model + parser), `cane.transport` (NTP offset estimator, WebSocket event-link server, CLI), `cane.bridge` (X4 capture, six-crop dewarp, one-in-flight sender, health monitor + local fallback, dev stub server), `cane.cloud` (inference service: YOLO11s + ByteTrack + closing speed, FastAPI; deployed on an L4 with TensorRT), `cane.benchmarks` (local YOLOE / Depth Anything V2 baselines, the fused objects+depth preview, and `crops` — the live six-crop view of exactly what the cloud receives), `cane.scene` (spoken questions answered by Gemini over the dewarped 360 crops) | **Done** (steps 2, 3, 6, 7, 8, 20) |
+| `ios/CaneKit/` | SwiftPM package: `CaneContracts` (Codable model + validation), `CaneTransport` (WebSocket client, pong responder, reconnect, query/answer frames), `CaneFeedback` (feedback manager gauntlet), `CaneNavigation` (Routes/Places, route follower, turn cues) + `nav-cli`, `CaneOutput` (step 10: bearing sectors, haptic alphabet, speech phrases, stereo panning, plus CoreHaptics/AVSpeech playback, earcon and output arbiter), `CaneVoice` (open mic, "Hey Cane" gate, intents), `CaneCamera` (shared front camera), `CaneAssist` (question → laptop → spoken answer) | **Done** (steps 2, 3, 9, 10, 12, 20) |
+| `ios/CaneApp/` | The iPhone app (XcodeGen `project.yml`): composition root, setup screen, outward-facing "reactor" chest display | **Built and running on a phone** (step 20) |
 | `docs/steps/` | Per-step build briefs and architect design reviews — far more detailed than the runbook; each is the binding spec for that step | Steps 2, 3, 6, 7, 8, 9, 10, 12 (see its README) |
 
 ## Quick start
 
 ```bash
 # Python (needs uv; CPython 3.12 is fetched automatically)
-cd backend && uv sync --extra mac && uv run pytest -q   # 677 tests (+1 live-X4 test behind CANE_LIVE_X4=1)
+cd backend && uv sync --extra mac && uv run pytest -q   # 693 tests (+1 live-X4 test behind CANE_LIVE_X4=1)
 
 # Swift (Xcode 26 / Swift 6.3; tests run on the Mac, no device needed)
 cd ios/CaneKit && swift test                       # 376 tests, includes real phone↔laptop event and query/answer round trips
