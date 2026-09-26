@@ -12,6 +12,10 @@ let package = Package(
             name: "CaneContracts",
             targets: ["CaneContracts"]
         ),
+        .library(
+            name: "CaneTransport",
+            targets: ["CaneTransport"]
+        ),
     ],
     targets: [
         .target(
@@ -20,6 +24,14 @@ let package = Package(
         .testTarget(
             name: "CaneContractsTests",
             dependencies: ["CaneContracts"]
+        ),
+        .target(
+            name: "CaneTransport",
+            dependencies: ["CaneContracts"]
+        ),
+        .testTarget(
+            name: "CaneTransportTests",
+            dependencies: ["CaneTransport", "CaneContracts"]
         ),
     ]
 )
