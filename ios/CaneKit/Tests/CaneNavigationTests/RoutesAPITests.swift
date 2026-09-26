@@ -207,6 +207,38 @@ final class RoutesAPITests: XCTestCase {
         }
     }
 
+    func testAMissingRoutePolylineIsADecodingError() async {
+        let subject = client(.alwaysOK(json: #"{"routes":[{"distanceMeters":12,"duration":"9s"}]}"#))
+
+        await assertThrowsNavigationError(subject: {
+            _ = try await subject.computeWalkingRoute(
+                origin: NavigationFixtures.origin, destination: .address("library")
+            )
+        }) { error in
+            guard case .decoding(let detail) = error else {
+                return XCTFail("expected .decoding, got \(error)")
+            }
+            XCTAssertTrue(detail.contains("encodedPolyline"), detail)
+        }
+    }
+
+    /// Durations are `"631s"`, never ISO-8601 (brief H1).
+    func testAnISO8601DurationIsADecodingError() async {
+        let json = #"{"routes":[{"distanceMeters":12,"duration":"PT10M","polyline":{"encodedPolyline":"sqf|CvmmhNsD?"},"legs":[]}]}"#
+        let subject = client(.alwaysOK(json: json))
+
+        await assertThrowsNavigationError(subject: {
+            _ = try await subject.computeWalkingRoute(
+                origin: NavigationFixtures.origin, destination: .address("library")
+            )
+        }) { error in
+            guard case .decoding(let detail) = error else {
+                return XCTFail("expected .decoding, got \(error)")
+            }
+            XCTAssertTrue(detail.contains("PT10M"), detail)
+        }
+    }
+
     /// The key is checked before the request is built, so a keyless
     /// build makes no network calls at all (brief F1).
     func testMissingKeyThrowsBeforeAnyTransportCall() async throws {
