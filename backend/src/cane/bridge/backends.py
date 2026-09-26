@@ -218,6 +218,13 @@ class LocalBackend:
     one-in-flight sender is what serialises it -- the same contract the
     cloud app states. No lock here, because a lock would *queue*, and a
     queued frame is the failure this whole step exists to avoid.
+
+    One sharp edge follows from `timeout_s` (below): a forward pass that
+    overran its budget is abandoned, not cancelled, so it can still be
+    inside `service.infer` when the next frame enters it. Only a detector
+    that is already failing its budget can reach that state, and the
+    consequence is a confused tracker rather than a crash -- but it is the
+    reason the budget is seconds, not milliseconds.
     """
 
     def __init__(
@@ -272,10 +279,11 @@ class LocalBackend:
 
         Bounded like the cloud call is. `asyncio.to_thread` cannot cancel
         the worker, so an overrunning forward pass keeps running to its end
-        in the background -- but the *slot* is freed, which is what the
-        next frame needs. The abandoned result is discarded, and because
-        the sender only ever has one request out, the next `service.infer`
-        starts after this one's thread has been handed its own arguments.
+        in the background and its result is discarded -- but the *slot* is
+        freed, which is what the next frame needs. Without this, a wedged
+        local model would hold the one-in-flight slot for the rest of the
+        walk and every frame after it would be dropped as `dropped_busy`:
+        the fallback's own version of the failure the fallback exists for.
         """
         try:
             async with asyncio.timeout(self._timeout_s):
