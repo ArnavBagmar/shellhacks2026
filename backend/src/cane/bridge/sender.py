@@ -27,7 +27,7 @@ from typing import Awaitable, Callable, Protocol
 from pydantic import ValidationError
 
 from cane.bridge.deadline import FRAME_DEADLINE_MS, frame_age_ms, past_deadline
-from cane.bridge.log_throttle import LogThrottle
+from cane.transport.log_throttle import LogThrottle
 from cane.bridge.metrics import RollingWindow
 from cane.cloud.api_models import InferenceRequest, InferenceResponse
 from cane.transport.wall_clock import now_ms

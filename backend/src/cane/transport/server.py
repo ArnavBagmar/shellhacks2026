@@ -20,6 +20,7 @@ from websockets.asyncio.server import Server, ServerConnection
 
 from cane.contracts.awareness_event import AwarenessEvent
 from cane.transport.clock_sync import PING_INTERVAL_S, NtpSample, OffsetEstimator, PhoneClock
+from cane.transport.log_throttle import LogThrottle
 from cane.transport.messages import (
     EventMessage,
     MalformedMessageError,
@@ -33,6 +34,11 @@ from cane.transport.messages import (
 from cane.transport.wall_clock import now_ms
 
 logger = logging.getLogger(__name__)
+
+#: Both of the events below fire once per frame when they fire at all -- a
+#: phone from another build, or a phone that is not there. One line per
+#: window each; the counters beside them stay exact.
+IGNORED_LOG_INTERVAL_S = 5.0
 
 
 class EventLinkServer:
@@ -60,6 +66,10 @@ class EventLinkServer:
         # anything that could stall the pong stream behind it.
         self._on_health = on_health
         self._estimator = OffsetEstimator()
+        self._frames_ignored = 0
+        self._events_dropped_no_phone = 0
+        self._ignored_log = LogThrottle(IGNORED_LOG_INTERVAL_S)
+        self._no_phone_log = LogThrottle(IGNORED_LOG_INTERVAL_S)
         self._connection: ServerConnection | None = None
         self._server: Server | None = None
         self._ping_task: asyncio.Task[None] | None = None
@@ -72,6 +82,22 @@ class EventLinkServer:
         if self._server is None:
             raise RuntimeError("EventLinkServer.port: server is not running (use 'async with')")
         return self._server.sockets[0].getsockname()[1]
+
+    @property
+    def frames_ignored(self) -> int:
+        """Inbound frames this build had no use for -- an unknown type, or
+        one that only flows the other way. Surfaced on the bridge's 5 s
+        stats line: a phone talking a protocol the laptop does not answer
+        otherwise looks exactly like a phone saying nothing.
+        """
+        return self._frames_ignored
+
+    @property
+    def events_dropped_no_phone(self) -> int:
+        """Events that had nowhere to go. The warning about them is
+        throttled; this number is not.
+        """
+        return self._events_dropped_no_phone
 
     @property
     def phone_clock(self) -> PhoneClock:
@@ -105,7 +131,7 @@ class EventLinkServer:
         """
         connection = self._connection
         if connection is None:
-            logger.warning("send_event: no phone connected")
+            self._count_no_phone()
             return False
         try:
             await connection.send(encode(EventMessage(event=event)))
@@ -120,6 +146,19 @@ class EventLinkServer:
                 self._connection = None
             return False
         return True
+
+    def _count_no_phone(self) -> None:
+        """One line per window, carrying the running total: at 3 fps a walk
+        with no phone attached would otherwise write hundreds of identical
+        warnings and hide everything else.
+        """
+        self._events_dropped_no_phone += 1
+        if not self._no_phone_log.allow():
+            return
+        logger.warning(
+            "send_event: no phone connected; %d event(s) dropped so far",
+            self._events_dropped_no_phone,
+        )
 
     async def _handle_connection(self, connection: ServerConnection) -> None:
         if self._connection is not None:
@@ -149,12 +188,26 @@ class EventLinkServer:
         elif isinstance(msg, PhoneHealth):
             self._apply_health(msg)
         elif isinstance(msg, Unknown):
-            logger.debug("ignoring unknown frame type from phone: %s", msg.type)
+            self._count_ignored(msg.type)
         else:
             # Ping/EventMessage from the phone is outside D1's protocol
             # (both flow laptop -> phone only); never worth dropping the
-            # connection over, so it is logged and ignored like Unknown.
-            logger.debug("ignoring unexpected %s frame from phone", type(msg).__name__)
+            # connection over, so it is counted and ignored like Unknown.
+            self._count_ignored(type(msg).__name__)
+
+    def _count_ignored(self, frame_type: str) -> None:
+        """A frame this build does not act on. INFO, not DEBUG: a phone
+        from a newer build talking past the laptop is a version skew the
+        operator needs to see, and at DEBUG nobody ever does.
+        """
+        self._frames_ignored += 1
+        if not self._ignored_log.allow():
+            return
+        logger.info(
+            "ignoring %r frame(s) from the phone: %d frame(s) not acted on so far",
+            frame_type,
+            self._frames_ignored,
+        )
 
     def _apply_health(self, health: PhoneHealth) -> None:
         """The phone's stale-drop signal (Sec 4.4). A hook that raises is a

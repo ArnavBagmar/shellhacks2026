@@ -51,6 +51,8 @@ HANG_S = 0.45
 WATCHDOG_RUN_S = 0.5
 SLOW_DETECT_S = 0.1
 LOCAL_BUDGET_S = 0.02
+LOCAL_DETECTOR = "fake"
+IGNORED_FRAMES = 2
 
 
 class FakeClock:
@@ -158,6 +160,8 @@ class Harness:
             crop_px=crop_px,
             monitor=self.monitor,
             source_provider=lambda: self.uplink.last_source,
+            local_detector=LOCAL_DETECTOR,
+            frames_ignored=lambda: IGNORED_FRAMES,
         )
 
     async def run(self, duration_s: float = RUN_S):
@@ -343,7 +347,15 @@ async def test_the_stats_line_reports_the_mode_and_the_health_counters() -> None
     assert stats.health.mode == "local"
     assert stats.health.flips_to_local == 1
     line = format_stats_line(stats)
-    for token in ("mode local", "flips_to_local 1", "steps_down", "probe"):
+    for token in (
+        "mode local",
+        "flips_to_local 1",
+        "steps_down",
+        "probe",
+        f"local={LOCAL_DETECTOR}",
+        f"frames_ignored {IGNORED_FRAMES}",
+        "undelivered",
+    ):
         assert token in line, line
 
 

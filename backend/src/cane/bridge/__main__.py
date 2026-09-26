@@ -215,6 +215,8 @@ async def run_bridge(
             config=config, grab=grab, sender=sender,
             clock_provider=_clock_provider(config, server), event_sink=server,
             monitor=monitor, source_provider=lambda: uplink.last_source,
+            local_detector=local.detector_name,
+            frames_ignored=lambda: server.frames_ignored,
         )
         grab.start()
         _log_banner(config, args, local)

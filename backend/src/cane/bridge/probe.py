@@ -21,7 +21,7 @@ import httpx
 
 from cane.bridge.backends import DEFAULT_BACKEND_TIMEOUT_S
 from cane.bridge.health import PROBE_INTERVAL_S, HealthMonitor
-from cane.bridge.log_throttle import LogThrottle
+from cane.transport.log_throttle import LogThrottle
 from cane.transport.wall_clock import now_ms
 
 logger = logging.getLogger(__name__)

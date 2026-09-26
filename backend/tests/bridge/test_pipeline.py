@@ -340,29 +340,52 @@ async def test_laptop_clock_applies_the_pipeline_delay_constant() -> None:
     assert clock.capture_time_ms(1_790_000_000_000) == 1_790_000_000_000 - 40
 
 
+def _stats(**patch: object) -> PipelineStats:
+    base: dict[str, object] = {
+        "elapsed_s": 5.0,
+        "grabbed": 150,
+        "ticks": 15,
+        "sent": 15,
+        "dropped_busy": 0,
+        "skipped_unsynced": 0,
+        "skipped_no_frame": 0,
+        "skipped_deadline": 0,
+        "succeeded": 15,
+        "failed": 0,
+        "rejected": 0,
+        "events_delivered": 3,
+        "events_undelivered": 0,
+        "max_in_flight": 1,
+        "frame_age_p50_ms": 20.0,
+        "frame_age_p95_ms": 31.0,
+        "rtt_p50_ms": 90.0,
+        "rtt_p95_ms": 120.0,
+    }
+    return PipelineStats(**{**base, **patch})  # type: ignore[arg-type]
+
+
 def test_the_stats_line_names_every_acceptance_number() -> None:
-    line = format_stats_line(
-        PipelineStats(
-            elapsed_s=5.0,
-            grabbed=150,
-            ticks=15,
-            sent=15,
-            dropped_busy=0,
-            skipped_unsynced=0,
-            skipped_no_frame=0,
-            skipped_deadline=0,
-            succeeded=15,
-            failed=0,
-            rejected=0,
-            events_delivered=3,
-            events_undelivered=0,
-            max_in_flight=1,
-            frame_age_p50_ms=20.0,
-            frame_age_p95_ms=31.0,
-            rtt_p50_ms=90.0,
-            rtt_p95_ms=120.0,
-        )
-    )
+    line = format_stats_line(_stats())
 
     for token in ("grab", "send", "dropped_busy", "frame_age", "rtt", "p50", "p95", "deadline"):
         assert token in line
+
+
+def test_the_stats_line_reports_what_never_reached_the_phone() -> None:
+    """An event produced and not delivered is the silent failure this line
+    exists for: `events 3` alone reads like success.
+    """
+    line = format_stats_line(_stats(events_delivered=3, events_undelivered=7))
+
+    assert "events 3 undelivered 7" in line
+
+
+def test_the_stats_line_names_the_local_detector_and_the_ignored_frames() -> None:
+    line = format_stats_line(_stats(local_detector="ultralytics", frames_ignored=4))
+
+    assert "local=ultralytics" in line
+    assert "frames_ignored 4" in line
+
+
+def test_a_run_with_no_local_detector_says_nothing_about_one() -> None:
+    assert "local=" not in format_stats_line(_stats())

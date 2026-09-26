@@ -52,6 +52,12 @@ class PipelineStats:
     #: `None` when the run has no health monitor (a bench run, or any
     #: caller from before step 8).
     health: HealthSnapshot | None = None
+    #: The detector the local fallback actually loaded, read off the built
+    #: backend -- never re-derived from the CLI flags. `None` when the run
+    #: has no local half at all.
+    local_detector: str | None = None
+    #: Inbound phone frames the transport did not act on.
+    frames_ignored: int = 0
 
     @property
     def grab_fps(self) -> float:
@@ -93,16 +99,30 @@ def _health_segment(health: HealthSnapshot) -> str:
     )
 
 
+def _link_segment(stats: PipelineStats) -> str:
+    """What the phone link did with what the pipeline produced."""
+    segment = f" | frames_ignored {stats.frames_ignored}"
+    if stats.local_detector is None:
+        return segment
+    return f"{segment} local={stats.local_detector}"
+
+
 def format_stats_line(stats: PipelineStats) -> str:
-    """The one-line 5-second summary (F5, extended by E2.7)."""
+    """The one-line 5-second summary (F5, extended by E2.7).
+
+    `events N undelivered M`: a delivered count on its own reads like
+    success even when every event was produced with no phone attached,
+    which is the silent failure this line exists to expose.
+    """
     line = (
         f"grab {stats.grab_fps:.1f} fps | send {stats.send_fps:.1f} fps | "
         f"dropped_busy {stats.dropped_busy} | "
         f"frame_age p50 {_ms(stats.frame_age_p50_ms)} p95 {_ms(stats.frame_age_p95_ms)} | "
         f"rtt p50 {_ms(stats.rtt_p50_ms)} p95 {_ms(stats.rtt_p95_ms)} | "
-        f"in_flight_max {stats.max_in_flight} | events {stats.events_delivered} | "
+        f"in_flight_max {stats.max_in_flight} | "
+        f"events {stats.events_delivered} undelivered {stats.events_undelivered} | "
         f"failed {stats.failed} rejected {stats.rejected} "
         f"unsynced {stats.skipped_unsynced} no_frame {stats.skipped_no_frame} "
         f"deadline {stats.skipped_deadline}"
-    )
+    ) + _link_segment(stats)
     return line if stats.health is None else line + _health_segment(stats.health)

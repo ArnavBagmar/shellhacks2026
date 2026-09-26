@@ -32,7 +32,7 @@ from cane.bridge.deadline import FRAME_DEADLINE_MS, past_deadline
 from cane.bridge.dewarp import CROP_YAWS_DEG, CropSet, encode_cropset, dewarp_equirect
 from cane.bridge.events import events_from_response
 from cane.bridge.health import HealthMonitor
-from cane.bridge.log_throttle import LogThrottle
+from cane.transport.log_throttle import LogThrottle
 from cane.bridge.sender import OneInFlightSender, SendOutcome
 # Re-exported for callers that imported them from here before step 8 split
 # the stats line out of this module.
@@ -139,6 +139,8 @@ class BridgePipeline:
         stats_hook: Callable[[PipelineStats], None] | None = None,
         monitor: HealthMonitor | None = None,
         source_provider: Callable[[], Source] | None = None,
+        local_detector: str | None = None,
+        frames_ignored: Callable[[], int] | None = None,
     ) -> None:
         self._config = config
         self._grab = grab
@@ -150,6 +152,10 @@ class BridgePipeline:
         # Which backend answered the response now being handled. Constant
         # for a run with no monitor, which is every pre-step-8 caller.
         self._source_provider = source_provider
+        # Read at snapshot time: the transport owns the count, and the
+        # pipeline only reports it.
+        self._frames_ignored = frames_ignored
+        self._local_detector = local_detector
         self._stats_hook = stats_hook
         sender.set_response_handler(self._handle_response)
         self._last_seq = 0
@@ -412,5 +418,7 @@ class BridgePipeline:
             rtt_p50_ms=sender.rtt_p50_ms,
             rtt_p95_ms=sender.rtt_p95_ms,
             health=health_snapshot(self._monitor),
+            local_detector=self._local_detector,
+            frames_ignored=0 if self._frames_ignored is None else self._frames_ignored(),
         )
 
