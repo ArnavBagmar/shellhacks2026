@@ -99,6 +99,18 @@ serve() {
   PYTHONPATH=src exec caffeinate -i uv run --env-file .env python -m cane.scene --serve --ws-port "$PORT" "$@"
 }
 
+# Kills the inference service and its uv wrapper; full()'s trap calls it.
+# Never `exec` the bridge after setting that trap: exec replaces this shell,
+# the trap is lost and the service is orphaned (learned the hard way).
+reap_inference() {
+  local pid
+  kill "${INFER_PID:-0}" 2>/dev/null || true
+  pid="$(lsof -nP -iTCP:"${INFER_PORT:-0}" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
+  if [[ -n "$pid" ]] && ps -o command= -p "$pid" 2>/dev/null | grep -q "cane.cloud"; then
+    kill "$pid" 2>/dev/null || true
+  fi
+}
+
 # The whole pipeline, two processes on this laptop:
 #   1. cane.cloud   :$INFER_PORT   detections + the depth head (steps 22, 27)
 #   2. cane.bridge  :$PORT         X4 capture -> crops -> steer frames + Gemini answers
@@ -135,8 +147,11 @@ full() {
     uvicorn cane.cloud.app:app --port "$infer_port" \
     >> "logs/inference-$(date +%Y%m%d).log" 2>&1 &
   local infer_pid=$!
-  # Stop the service whenever the bridge exits, however it exits.
-  trap 'kill '"$infer_pid"' 2>/dev/null || true' EXIT INT TERM
+  # Stop the service whenever the bridge exits, however it exits. `uv run` is a
+  # wrapper, so killing $! alone can leave the uvicorn child holding the port.
+  INFER_PID="$infer_pid"
+  INFER_PORT="$infer_port"
+  trap reap_inference EXIT INT TERM
 
   say "waiting for it to bind"
   local up=""
@@ -161,13 +176,16 @@ full() {
   say "phone app settings -> Address: $(laptop_ip)   Port: $PORT"
   say "source $source, rung $rung, delta_deg $delta   (CANE_SOURCE / CANE_RUNG / CANE_DELTA_DEG)"
   say "logs -> backend/logs/{laptop,inference}-$(date +%Y%m%d).log"
-  PYTHONPATH=src exec caffeinate -i uv run --env-file .env \
+  local status=0
+  PYTHONPATH=src caffeinate -i uv run --env-file .env \
     --extra yolo --extra depth --extra vision --extra mac --extra scene \
     python -m cane.bridge \
       --source "$source" --rung "$rung" --delta-deg "$delta" \
       --inference-url "http://127.0.0.1:$infer_port/infer" \
       --ws-port "$PORT" --scene \
-      --local-detector ultralytics "$@"
+      --local-detector ultralytics "$@" || status=$?
+  reap_inference
+  return "$status"
 }
 
 phone() {
