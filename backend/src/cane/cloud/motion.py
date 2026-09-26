@@ -9,6 +9,14 @@ The three ways this maths blows up are handled by rejecting the sample, not by
 clamping it. A glitch clamped to the contract's +-60 m/s is indistinguishable
 from a real car closing at 60 m/s, which is exactly the value that trips the
 phone's urgency 3.
+
+Box-height jitter is the fourth. On a *seated* person the live run produced
++-1.3 m/s of closing speed frame after frame, which the EMA alone does not
+suppress. Two filters answer it, and neither delays a real approach by more
+than one frame: a deadband (below it the object is tracked but reported as
+not moving) and a sign-consistency gate (one sample never speaks for itself).
+A median prefilter was considered and rejected: it would cost a whole frame
+of latency on the cyclist signal, and latency is the product.
 """
 
 from __future__ import annotations
@@ -38,6 +46,16 @@ RAW_REJECT_MPS: Final = 40.0
 CLOSING_DECIMALS: Final = 3
 MS_PER_S: Final = 1000.0
 
+# Below this the track is reported as not approaching -- `0.0`, never `None`:
+# the object is still tracked and the phone must not read "unknown" as
+# "unmeasured". Sized from the live run's +-1.3 m/s of jitter on a stationary
+# person and from walking pace (1.4 m/s), which must still get through.
+CLOSING_DEADBAND_MPS: Final = 0.5
+# How many consecutive raw samples must agree in sign before anything is
+# reported. Two: one frame of latency, and a single bad box can never speak.
+CLOSING_CONSISTENT_SAMPLES: Final = 2
+STATIONARY_MPS: Final = 0.0
+
 
 def focal_px(crop_px: int) -> float:
     """Pinhole focal length of a square 60-degree crop, in that crop's pixels."""
@@ -66,17 +84,23 @@ def band_for_range(range_m: float) -> RangeBand:
 
 @dataclass(frozen=True, slots=True)
 class MotionState:
-    """One track's range history. Frozen: `update_motion` returns a new one."""
+    """One track's range history. Frozen: `update_motion` returns a new one.
+
+    `prev_raw_mps` is the *unsmoothed* previous sample, kept only so the
+    sign-consistency gate has something to compare against; the EMA cannot
+    serve that purpose because it carries the sign of the whole history.
+    """
 
     last_range_m: float
     last_t_capture_ms: int
     height_m: float
     ema_mps: float | None
+    prev_raw_mps: float | None = None
 
 
 def _restart(range_m: float, height_m: float, t_capture_ms: int) -> tuple[MotionState, None]:
-    """Baseline replaced, EMA cleared, nothing emitted for this frame."""
-    return MotionState(range_m, t_capture_ms, height_m, None), None
+    """Baseline replaced, EMA and sign history cleared, nothing emitted."""
+    return MotionState(range_m, t_capture_ms, height_m, None, None), None
 
 
 def _smooth(raw_mps: float, previous_ema: float | None) -> float:
@@ -88,13 +112,34 @@ def _smooth(raw_mps: float, previous_ema: float | None) -> float:
     return EMA_ALPHA * raw_mps + (1.0 - EMA_ALPHA) * previous_ema
 
 
+def _agrees(raw_mps: float, previous_raw_mps: float | None) -> bool:
+    """True when the last `CLOSING_CONSISTENT_SAMPLES` raw samples tell the
+    same story: same direction, both bigger than the deadband.
+    """
+    if previous_raw_mps is None:
+        return False
+    if abs(raw_mps) < CLOSING_DEADBAND_MPS or abs(previous_raw_mps) < CLOSING_DEADBAND_MPS:
+        return False
+    return (raw_mps > 0.0) == (previous_raw_mps > 0.0)
+
+
+def _reported(raw_mps: float, previous_raw_mps: float | None, ema_mps: float) -> float:
+    """What the wire sees. `0.0` means "tracked, not approaching" -- it is a
+    measurement, unlike `None`, which means "no trustworthy sample at all".
+    """
+    if not _agrees(raw_mps, previous_raw_mps) or abs(ema_mps) < CLOSING_DEADBAND_MPS:
+        return STATIONARY_MPS
+    return ema_mps
+
+
 def update_motion(
     state: MotionState | None, range_m: float, height_m: float, t_capture_ms: int
 ) -> tuple[MotionState, float | None]:
     """Fold one range sample into a track's state.
 
     Returns the new state and the smoothed ``closing_mps`` (positive =
-    approaching), or ``None`` when this frame carries no trustworthy sample.
+    approaching), ``0.0`` when the track is measured but not moving, or
+    ``None`` when this frame carries no trustworthy sample at all.
     """
     if state is None:
         return _restart(range_m, height_m, t_capture_ms)
@@ -117,4 +162,8 @@ def update_motion(
 
     ema_mps = min(max(_smooth(raw_mps, state.ema_mps), CLOSING_MPS_MIN), CLOSING_MPS_MAX)
     ema_mps = round(ema_mps, CLOSING_DECIMALS)
-    return MotionState(range_m, t_capture_ms, height_m, ema_mps), ema_mps
+    # The EMA and the sign history keep updating even when the gate reports
+    # 0.0, so a real approach that follows a jittery stretch starts from a
+    # current filter rather than a stale one.
+    new_state = MotionState(range_m, t_capture_ms, height_m, ema_mps, raw_mps)
+    return new_state, _reported(raw_mps, state.prev_raw_mps, ema_mps)

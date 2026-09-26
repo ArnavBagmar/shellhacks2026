@@ -400,8 +400,9 @@ async def test_non_inference_overhead_p50_under_budget(
 async def test_a_detection_that_grows_produces_a_closing_speed(
     meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
 ) -> None:
-    """End to end through HTTP, not just the service: the id is stable and
-    the second frame carries a signed range rate.
+    """End to end through HTTP, not just the service: the id is stable and,
+    once two samples agree on the direction, a signed range rate reaches the
+    wire. Frame 2 reports 0.0 -- tracked, not yet known to be approaching.
     """
     async with cloud_harness() as harness:
         ids, closings = [], []
@@ -412,7 +413,8 @@ async def test_a_detection_that_grows_produces_a_closing_speed(
             closings.append(body.detections[0].closing_mps)
     assert len(set(ids)) == 1
     assert closings[0] is None
-    assert closings[1] is not None and closings[1] > 0.0
+    assert closings[1] == 0.0
+    assert closings[2] is not None and closings[2] > 0.0
 
 
 def test_raw_detection_is_frozen() -> None:

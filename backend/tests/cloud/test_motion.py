@@ -13,6 +13,7 @@ import pytest
 
 from cane.cloud.class_map import HEIGHT_M_BY_CLASS
 from cane.cloud.motion import (
+    CLOSING_DEADBAND_MPS,
     EMA_ALPHA,
     MAX_DT_MS,
     RAW_REJECT_MPS,
@@ -36,6 +37,21 @@ T0 = 1_790_000_000_000
 
 def _h_px_for_range(range_m: float, height_m: float, crop_px: int) -> float:
     return focal_px(crop_px) * height_m / range_m
+
+
+def _drive(speeds_mps: list[float], dt_ms: int = 333, start_m: float = 20.0) -> list[float | None]:
+    """Report one closing value per raw speed, the baseline frame excluded.
+
+    Positive = approaching, so the range shrinks by `speed * dt`.
+    """
+    state, _ = update_motion(None, start_m, PERSON_H_M, T0)
+    range_m, stamp, reported = start_m, T0, []
+    for speed in speeds_mps:
+        range_m -= speed * dt_ms / 1000.0
+        stamp += dt_ms
+        state, closing = update_motion(state, range_m, PERSON_H_M, stamp)
+        reported.append(closing)
+    return reported
 
 
 def test_focal_px_matches_60_deg_fov() -> None:
@@ -86,26 +102,34 @@ def test_first_sample_returns_none() -> None:
 
 
 def test_closing_6_7_mps_over_three_frames_within_10_percent() -> None:
-    """A cyclist at 15 mph, sampled at rung 1's 3 fps."""
+    """A cyclist at 15 mph, sampled at rung 1's 3 fps.
+
+    Frame 1 is the baseline (`None`), frame 2 is the first raw sample and the
+    sign-consistency gate has nothing to compare it with (`0.0`), frame 3 is
+    the first *reportable* one -- and it must be the real speed, not a
+    smoothed-down fraction of it. One frame of latency, 333 ms, is the price
+    of not announcing a phantom cyclist to a blind walker.
+    """
     dt_ms = 333
     speed = 6.7
     state, closing = update_motion(None, 20.0, CYCLIST_H_M, T0)
     assert closing is None
     seen: list[float] = []
     range_m = 20.0
-    for frame in range(1, 3):
+    for frame in range(1, 4):
         range_m -= speed * dt_ms / 1000.0
         state, closing = update_motion(state, range_m, CYCLIST_H_M, T0 + frame * dt_ms)
         assert closing is not None
         seen.append(closing)
-    assert all(abs(c - speed) <= 0.1 * speed for c in seen)
+    assert seen[0] == 0.0
+    assert all(abs(c - speed) <= 0.1 * speed for c in seen[1:])
 
 
-def test_receding_is_negative() -> None:
-    state, _ = update_motion(None, 10.0, PERSON_H_M, T0)
-    _, closing = update_motion(state, 12.0, PERSON_H_M, T0 + 500)
-    assert closing is not None and closing < 0.0
-    assert closing == pytest.approx(-4.0)
+def test_receding_consistently_is_negative() -> None:
+    """Two consistent -2 m/s samples: the gate passes and the sign survives."""
+    reported = _drive([-2.0, -2.0])
+    assert reported[0] == 0.0
+    assert reported[1] is not None and reported[1] == pytest.approx(-2.0)
 
 
 def test_dt_zero_or_negative_returns_none_and_keeps_baseline() -> None:
@@ -147,18 +171,26 @@ def test_raw_over_40_mps_is_rejected_not_clamped() -> None:
 
 
 def test_a_raw_just_inside_the_reject_limit_is_kept() -> None:
-    state, _ = update_motion(None, 20.0, PERSON_H_M, T0)
-    _, closing = update_motion(state, 20.0 - (RAW_REJECT_MPS - 1.0), PERSON_H_M, T0 + 1000)
-    assert closing == pytest.approx(RAW_REJECT_MPS - 1.0)
+    fast = RAW_REJECT_MPS - 1.0
+    reported = _drive([fast, fast], dt_ms=1000, start_m=200.0)
+    assert reported[1] == pytest.approx(fast)
 
 
-def test_ema_halves_a_step_change() -> None:
-    """First accepted sample initialises the EMA; it never blends against 0."""
+def test_ema_halves_a_step_change_and_keeps_running_behind_the_gate() -> None:
+    """First accepted sample initialises the EMA; it never blends against 0.
+
+    The EMA is asserted on the *state*, because the sign-consistency gate
+    decides separately what is reported -- and it must not be able to stall
+    the filter, or a real approach after a jittery stretch would start from
+    a stale value.
+    """
     state, _ = update_motion(None, 20.0, PERSON_H_M, T0)
     state, first = update_motion(state, 15.0, PERSON_H_M, T0 + 500)
-    assert first == pytest.approx(10.0)  # not 5.0
-    _, second = update_motion(state, 15.0, PERSON_H_M, T0 + 1000)
-    assert second == pytest.approx(EMA_ALPHA * 0.0 + (1.0 - EMA_ALPHA) * 10.0)
+    assert state.ema_mps == pytest.approx(10.0)  # not 5.0
+    assert first == 0.0  # one sample only: nothing to be consistent with
+    state, second = update_motion(state, 15.0, PERSON_H_M, T0 + 1000)
+    assert state.ema_mps == pytest.approx(EMA_ALPHA * 0.0 + (1.0 - EMA_ALPHA) * 10.0)
+    assert second == 0.0  # the second raw is 0 m/s: inside the deadband
 
 
 def test_result_is_within_contract_bounds() -> None:
@@ -170,6 +202,44 @@ def test_result_is_within_contract_bounds() -> None:
         state, closing = update_motion(state, max(range_m, 0.2), PERSON_H_M, stamp)
         assert closing is None or CLOSING_MPS_MIN <= closing <= CLOSING_MPS_MAX
         assert math.isfinite(state.last_range_m)
+
+
+def test_alternating_jitter_on_a_stationary_target_reports_zero() -> None:
+    """The live run: a *seated* person whose box height flickers produced
+    +-1.3 m/s of closing speed frame after frame. Box-height noise alternates
+    in sign; a real approach does not.
+    """
+    reported = _drive([1.3, -1.3, 1.3, -1.3, 1.3])
+    assert reported == [0.0] * 5
+
+
+def test_a_consistent_slow_drift_stays_inside_the_deadband() -> None:
+    """0.3 m/s is a person shifting their weight, not an approach."""
+    drift = CLOSING_DEADBAND_MPS - 0.2
+    assert _drive([drift] * 4) == [0.0] * 4
+
+
+def test_a_single_spike_is_never_reported() -> None:
+    """One bad box in an otherwise quiet series must not reach the phone:
+    5 m/s at 3 m is urgency 3, and the walker would flinch at nothing.
+    """
+    quiet = 0.1
+    reported = _drive([quiet, quiet, 5.0, quiet, quiet])
+    assert reported == [0.0] * 5
+
+
+def test_two_consistent_samples_past_the_deadband_are_reported() -> None:
+    """The gate must not swallow the signal it exists to protect."""
+    walking = 1.4
+    reported = _drive([walking, walking, walking])
+    assert reported[0] == 0.0
+    assert all(c == pytest.approx(walking) for c in reported[1:])
+
+
+def test_a_sign_flip_after_a_real_approach_reports_zero_not_the_flip() -> None:
+    reported = _drive([2.0, 2.0, -2.0, 2.0])
+    assert reported[1] == pytest.approx(2.0)
+    assert reported[2] == 0.0 and reported[3] == 0.0
 
 
 def test_motion_state_is_frozen() -> None:

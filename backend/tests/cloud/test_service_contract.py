@@ -70,16 +70,20 @@ def _images() -> tuple[np.ndarray, ...]:
 
 
 def test_response_converts_to_a_valid_x4_cloud_awareness_event() -> None:
+    """Three frames: the closing-speed gate needs two consistent samples
+    before it reports anything but 0.0 (design A6 as amended).
+    """
     service = _service()
     service.infer(_meta(T0), _images())
-    response = service.infer(_meta(T0 + 333), _images())
+    service.infer(_meta(T0 + 333), _images())
+    response = service.infer(_meta(T0 + 666), _images())
 
     events = events_from_response(response, YAWS, DELTA_DEG)
     assert len(events) == len(response.detections) == CROP_COUNT
     for event in events:
         assert event.source is Source.X4_CLOUD
         assert event.schema_version == 1
-        assert event.t_capture_ms == T0 + 333
+        assert event.t_capture_ms == T0 + 666
         assert isinstance(event.cls, ObjectClass)
         assert BEARING_DEG_MIN_EXCLUSIVE < event.bearing_deg <= BEARING_DEG_MAX
         assert event.range_band is not None
@@ -93,7 +97,8 @@ def test_converted_event_always_has_range_m_none() -> None:
     """
     service = _service()
     service.infer(_meta(T0), _images())
-    response = service.infer(_meta(T0 + 333), _images())
+    service.infer(_meta(T0 + 333), _images())
+    response = service.infer(_meta(T0 + 666), _images())
     assert all(e.range_m is None for e in events_from_response(response, YAWS, DELTA_DEG))
     assert "range_m" not in response.model_dump_json(by_alias=True)
 

@@ -5,7 +5,8 @@
         [--max-inference-ms 25.0]
 
 Posts the same six crops a few hundred milliseconds apart so ByteTrack
-reaches two samples and `closing_mps` actually appears, then prints one line
+reaches the two consistent range samples a non-zero `closing_mps` needs
+(frame 1 reports null, frame 2 reports 0.0), then prints one line
 per detection and exits non-zero if the service is not ready, if any request
 failed, or if the median inference time (excluding the first frame, which
 pays the one-time shape warm-up) exceeds the budget.

@@ -163,14 +163,24 @@ def test_a_truncated_box_emits_a_band_but_never_a_closing_speed() -> None:
         assert detection.closing_mps is None
 
 
-def test_closing_speed_appears_on_the_second_frame_of_a_track() -> None:
-    frames = [frame(person(y1=200.0, y2=280.0)), frame(person(y1=195.0, y2=290.0))]
+def test_closing_speed_appears_on_the_third_frame_of_a_track() -> None:
+    """Frame 1 has no baseline (`None`), frame 2 has one raw sample and
+    nothing to check its sign against (`0.0`, i.e. tracked and not moving),
+    frame 3 is the first frame two consistent samples can speak for.
+    """
+    frames = [
+        frame(person(y1=200.0, y2=280.0)),
+        frame(person(y1=195.0, y2=290.0)),
+        frame(person(y1=190.0, y2=300.0)),
+    ]
     service = build(*frames)
     first = service.infer(meta(), images()).detections[0]
     second = service.infer(meta(T0 + 333), images()).detections[0]
+    third = service.infer(meta(T0 + 666), images()).detections[0]
     assert first.closing_mps is None
-    assert second.closing_mps is not None and second.closing_mps > 0.0
-    assert first.track_id == second.track_id
+    assert second.closing_mps == 0.0
+    assert third.closing_mps is not None and third.closing_mps > 0.0
+    assert first.track_id == second.track_id == third.track_id
 
 
 def test_track_id_is_namespaced_per_crop_and_generation() -> None:
