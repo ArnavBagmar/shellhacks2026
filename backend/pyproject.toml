@@ -5,12 +5,17 @@ description = "Smart cane backend: AwarenessEvent contract and X4 bridge/cloud s
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7",
+    "websockets>=13",
 ]
+
+[project.scripts]
+cane-link = "cane.transport.__main__:main"
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "jsonschema>=4.20",
+    "pytest-asyncio>=0.24",
 ]
 
 [build-system]
@@ -25,3 +30,7 @@ packages = ["src/cane"]
 # (a local filesystem quirk), which CPython's site.py silently skips. Point
 # pytest at src/ directly so collection does not depend on that mechanism.
 pythonpath = ["src"]
+# Both fixed explicitly so pytest-asyncio never emits a deprecation warning
+# about an implicit default (asyncio tests live under tests/transport/).
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

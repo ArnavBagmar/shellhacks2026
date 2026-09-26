@@ -76,3 +76,40 @@ This template is itself schema-valid (see
 `contracts/` is frozen after Step 2 — changes need controller approval.
 A `schema` version bump is a simultaneous redeploy of cloud, bridge and a
 rebuilt iOS app; treat it as re-running this step, not a patch.
+
+## Transport envelope
+
+`transport_envelope.schema.json` (draft 2020-12) documents the three
+WebSocket frame shapes the laptop (server) and phone (client) exchange —
+see `docs/camera-sync-design.md` §4.2 and `cane.transport.messages` /
+`CaneTransport`'s `Envelope.swift` for the code. Every frame is a JSON text
+object with a `type` string:
+
+```json
+{"type": "ping", "t1": 1790000000000}
+{"type": "pong", "t1": 1790000000000, "t2": 1790000000012, "t3": 1790000000013}
+{"type": "event", "event": { "...": "the 11-field AwarenessEvent, untouched" }}
+```
+
+- The laptop initiates every `ping`; the phone only answers with `pong`,
+  echoing `t1` so the laptop can match it, with `t2` = phone receive time
+  and `t3` = phone send time. All three timestamps are integer
+  Unix-epoch milliseconds.
+- `event` carries exactly one `AwarenessEvent`, nested untouched under the
+  `"event"` key — the envelope never adds a key to it, and it is never
+  validated against `awareness_event.schema.json` directly (only the
+  nested `event` value is, via the `$ref` in
+  `transport_envelope.schema.json`).
+- The types `health` and `location` are **reserved** (phone → laptop,
+  defined in later steps). A receiver that sees an unrecognised `type`
+  logs at debug level and ignores the frame — never errors, never
+  disconnects. Malformed JSON, or an `event` payload that fails contract
+  validation, is logged (warning) and dropped; the connection stays up.
+- One event per frame. Batching (`{"events": [...]}`) is a future envelope
+  decision, not part of this schema.
+
+Both language test suites do not validate against
+`transport_envelope.schema.json` directly; it is documentation, checked by
+one Python unit test (`backend/tests/transport/test_messages.py`) that
+every message `cane.transport.messages.encode` produces validates against
+it.

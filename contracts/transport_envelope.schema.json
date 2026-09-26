@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cane.shellhacks/contracts/transport_envelope.schema.json",
+  "title": "TransportEnvelope",
+  "description": "The three WebSocket frame shapes exchanged between the laptop (server) and the phone (client); see docs/camera-sync-design.md Sec 4.2 and contracts/README.md 'Transport envelope'. The reserved types 'health' and 'location' (phone -> laptop, defined in later steps) and any other unrecognised 'type' are valid JSON that a receiver logs and ignores -- they are deliberately out of scope for this schema, which only documents the three shapes the laptop and phone actually exchange today.",
+  "oneOf": [
+    { "$ref": "#/$defs/ping" },
+    { "$ref": "#/$defs/pong" },
+    { "$ref": "#/$defs/event" }
+  ],
+  "$defs": {
+    "ping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "t1"],
+      "properties": {
+        "type": { "const": "ping" },
+        "t1": {
+          "type": "integer",
+          "description": "Laptop send time, integer Unix-epoch milliseconds."
+        }
+      }
+    },
+    "pong": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "t1", "t2", "t3"],
+      "properties": {
+        "type": { "const": "pong" },
+        "t1": {
+          "type": "integer",
+          "description": "Echoed laptop send time, integer Unix-epoch milliseconds."
+        },
+        "t2": {
+          "type": "integer",
+          "description": "Phone receive time, integer Unix-epoch milliseconds."
+        },
+        "t3": {
+          "type": "integer",
+          "description": "Phone send time, integer Unix-epoch milliseconds."
+        }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "event"],
+      "properties": {
+        "type": { "const": "event" },
+        "event": {
+          "$ref": "awareness_event.schema.json"
+        }
+      }
+    }
+  }
+}
