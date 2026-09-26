@@ -8,30 +8,22 @@ let package = Package(
         .macOS(.v14),
     ],
     products: [
-        .library(
-            name: "CaneContracts",
-            targets: ["CaneContracts"]
-        ),
-        .library(
-            name: "CaneTransport",
-            targets: ["CaneTransport"]
-        ),
+        .library(name: "CaneContracts", targets: ["CaneContracts"]),
+        .library(name: "CaneTransport", targets: ["CaneTransport"]),
+        .library(name: "CaneFeedback", targets: ["CaneFeedback"]),
+        .library(name: "CaneNavigation", targets: ["CaneNavigation"]),
     ],
     targets: [
-        .target(
-            name: "CaneContracts"
-        ),
-        .testTarget(
-            name: "CaneContractsTests",
-            dependencies: ["CaneContracts"]
-        ),
-        .target(
-            name: "CaneTransport",
-            dependencies: ["CaneContracts"]
-        ),
-        .testTarget(
-            name: "CaneTransportTests",
-            dependencies: ["CaneTransport", "CaneContracts"]
-        ),
+        .target(name: "CaneContracts"),
+        .testTarget(name: "CaneContractsTests", dependencies: ["CaneContracts"]),
+        .target(name: "CaneTransport", dependencies: ["CaneContracts"]),
+        .testTarget(name: "CaneTransportTests", dependencies: ["CaneTransport", "CaneContracts"]),
+        // Step 9 — feedback manager gauntlet (consumes AwarenessEvent, emits Announcement).
+        .target(name: "CaneFeedback", dependencies: ["CaneContracts"]),
+        .testTarget(name: "CaneFeedbackTests", dependencies: ["CaneFeedback", "CaneContracts"]),
+        // Step 12 — navigation engine (Routes API, heading, turn cues). Deliberately
+        // independent of CaneContracts: CoreLocation never feeds the awareness path.
+        .target(name: "CaneNavigation"),
+        .testTarget(name: "CaneNavigationTests", dependencies: ["CaneNavigation"]),
     ]
 )

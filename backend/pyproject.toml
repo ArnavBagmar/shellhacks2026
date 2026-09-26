@@ -6,7 +6,31 @@ requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7",
     "websockets>=13",
+    # Step 6 — X4 bridge (grab, dewarp, one-in-flight sender)
+    "numpy>=1.26",
+    "opencv-python>=4.10",
+    "httpx>=0.27",
+    # Step 7 — cloud inference service (FastAPI + ByteTrack via supervision)
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "supervision>=0.25",
+    "pydantic-settings>=2.4",
 ]
+
+[project.optional-dependencies]
+# macOS-only native capture: OpenCV cannot select the X4's 2880x1440 mode on
+# macOS, so the bridge talks to AVFoundation through PyObjC (docs/insta360feed.md).
+mac = [
+    "pyobjc-framework-AVFoundation; sys_platform == 'darwin'",
+    "pyobjc-framework-CoreMedia; sys_platform == 'darwin'",
+    "pyobjc-framework-Quartz; sys_platform == 'darwin'",
+    "pyobjc-framework-libdispatch; sys_platform == 'darwin'",
+]
+# Real YOLO11s inference on the dev laptop (PyTorch CPU/MPS). Not needed for tests.
+yolo = ["ultralytics>=8.3"]
+# Cloud L4 only: the TensorRT engine is exported on the serving GPU (step 7 §F5).
+gpu = ["ultralytics>=8.3", "tensorrt"]
 
 [project.scripts]
 cane-link = "cane.transport.__main__:main"
