@@ -8,6 +8,7 @@ state metres" rule -- is the bridge's job.
 from __future__ import annotations
 
 import logging
+from typing import get_args
 
 from cane.bridge.dewarp import CROP_FOV_DEG
 from cane.bridge.ttl import ttl_ms_for
@@ -23,7 +24,20 @@ logger = logging.getLogger(__name__)
 
 HALF_TURN_DEG = 180.0
 FULL_TURN_DEG = 360.0
-SCHEMA_VERSION = 1
+
+
+def _contract_schema_version() -> int:
+    """The version the AwarenessEvent contract itself declares.
+
+    ``AwarenessEvent.schema_version`` is a ``Literal``, so the contract is
+    the single source of truth and the bridge never carries its own copy to
+    drift out of date.
+    """
+    (version,) = get_args(AwarenessEvent.model_fields["schema_version"].annotation)
+    return int(version)
+
+
+SCHEMA_VERSION = _contract_schema_version()
 
 
 def normalize_bearing_deg(deg: float) -> float:

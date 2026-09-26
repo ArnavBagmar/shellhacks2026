@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import importlib
+from typing import Literal, get_args
+
 import pytest
 
+from cane.bridge import events as events_module
 from cane.bridge.events import events_from_response, normalize_bearing_deg
 from cane.bridge.ttl import TTL_MS_BY_CLASS, ttl_ms_for
 from cane.cloud.api_models import Detection, InferenceResponse
 from cane.contracts.awareness_event import (
+    AwarenessEvent,
     ObjectClass,
     RangeBand,
     Source,
@@ -163,3 +168,25 @@ def test_a_detection_pointing_at_a_crop_that_does_not_exist_is_dropped() -> None
         _response(_detection(crop_index=5)), yaws_deg=YAWS[:3], delta_deg=0.0
     )
     assert events == ()
+
+
+def test_the_schema_version_is_taken_from_the_contract() -> None:
+    """A bridge-local copy of the version is a silent producer of rejects.
+
+    The day the contract moves to 2, a hardcoded 1 here keeps building
+    events the phone's parser refuses -- and the bridge would count them as
+    rejections of the *cloud*, not of itself. So the value must come from
+    the contract model, which this test proves by moving the contract.
+    """
+    field = AwarenessEvent.model_fields["schema_version"]
+    contract_version = get_args(field.annotation)[0]
+    original = field.annotation
+
+    field.annotation = Literal[2]
+    try:
+        assert importlib.reload(events_module).SCHEMA_VERSION == 2
+    finally:
+        field.annotation = original
+        importlib.reload(events_module)
+
+    assert events_module.SCHEMA_VERSION == contract_version

@@ -27,7 +27,12 @@ from cane.bridge.dewarp import CROP_YAWS_DEG, CropSet, encode_cropset, dewarp_eq
 from cane.bridge.events import events_from_response
 from cane.bridge.log_throttle import LogThrottle
 from cane.bridge.sender import OneInFlightSender, SendOutcome
-from cane.cloud.api_models import InferenceMeta, InferenceRequest, InferenceResponse
+from cane.cloud.api_models import (
+    SCHEMA_VERSION,
+    InferenceMeta,
+    InferenceRequest,
+    InferenceResponse,
+)
 from cane.contracts.awareness_event import AwarenessEvent
 from cane.transport.clock_sync import ClockNotSyncedError
 from cane.transport.wall_clock import now_ms
@@ -334,7 +339,7 @@ class BridgePipeline:
 
     def _meta(self, t_capture_ms: int) -> InferenceMeta:
         meta = InferenceMeta(
-            schema=1,
+            schema=SCHEMA_VERSION,
             t_capture_ms=t_capture_ms,
             rung=self._config.rung.index,
             crop_px=self._crop_px,

@@ -24,7 +24,13 @@ from typing import Annotated, Sequence
 from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from pydantic import ValidationError
 
-from cane.cloud.api_models import CROP_COUNT, Detection, InferenceMeta, InferenceResponse
+from cane.cloud.api_models import (
+    CROP_COUNT,
+    SCHEMA_VERSION,
+    Detection,
+    InferenceMeta,
+    InferenceResponse,
+)
 
 DEFAULT_PORT = 8000
 DEFAULT_HOST = "127.0.0.1"
@@ -87,7 +93,7 @@ def build_app(delay_ms: int = DEFAULT_DELAY_MS) -> FastAPI:
         if delay_ms:
             await asyncio.sleep(delay_ms / MS_PER_S)
         body = InferenceResponse(
-            schema=1,
+            schema=SCHEMA_VERSION,
             # Echoed, never recomputed: the cloud is timeless.
             t_capture_ms=parsed.t_capture_ms,
             inference_ms=(time.perf_counter() - started) * MS_PER_S,
