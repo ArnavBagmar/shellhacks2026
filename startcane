@@ -4,6 +4,10 @@
 #
 #   ./startcane            laptop serve, phone camera only (no X4 needed; what testing at a desk wants)
 #   ./startcane x4         laptop serve over the live Insta360 X4 + the phone camera
+#                          (voice/Gemini only -- NO steering; see `full` below)
+#   ./startcane full       the whole cane: inference service + X4 bridge + voice.
+#                          This is the one that produces haptic steering (steps 21-27).
+#                          CANE_INFER_PORT=8000, CANE_RUNG=3, CANE_DELTA_DEG=0
 #   ./startcane still      laptop serve over the repo's old test photo as a fake 360 view
 #                          (Gemini then describes that photo's room, not yours)
 #   ./startcane phone      build the iPhone app and install it on every plugged-in iPhone
@@ -95,6 +99,77 @@ serve() {
   PYTHONPATH=src exec caffeinate -i uv run --env-file .env python -m cane.scene --serve --ws-port "$PORT" "$@"
 }
 
+# The whole pipeline, two processes on this laptop:
+#   1. cane.cloud   :$INFER_PORT   detections + the depth head (steps 22, 27)
+#   2. cane.bridge  :$PORT         X4 capture -> crops -> steer frames + Gemini answers
+# `./startcane x4` runs only the second half's voice service, which is why it
+# produces no steering: nothing is computing depth for it.
+#
+# Rung 3 (512 px, q60, 3 fps) is the default on purpose. Measured on one
+# Apple GPU with both models sharing it: rung 1 leaves 9 ms of headroom in a 333 ms
+# tick and the cue goes ragged; rung 3 leaves 120 ms. Rung 1 is for the L4.
+full() {
+  need uv "brew install uv"
+  need curl "it ships with macOS"
+  check_env
+  cd "$BACKEND"
+  local infer_port="${CANE_INFER_PORT:-8000}"
+  local rung="${CANE_RUNG:-3}"
+  local delta="${CANE_DELTA_DEG:-0}"
+  local venv=".venv-vision"
+  local source="${CANE_SOURCE:-x4}"   # synthetic | file:PATH | x4 -- rehearse at a desk with synthetic
+
+  say "syncing Python deps (torch + ultralytics + depth: the first run is slow)"
+  UV_PROJECT_ENVIRONMENT="$venv" uv sync --quiet \
+    --extra mac --extra scene --extra yolo --extra depth --extra vision
+
+  if lsof -nP -iTCP:"$infer_port" -sTCP:LISTEN -t >/dev/null 2>&1; then
+    die "port $infer_port is busy -- an old inference service? (CANE_INFER_PORT=8001 ./startcane full)"
+  fi
+  free_port
+  check_sleep
+
+  say "starting the inference service on :$infer_port"
+  UV_PROJECT_ENVIRONMENT="$venv" CANE_DETECTOR=ultralytics CANE_DEVICE=mps CANE_DEPTH_DEVICE=mps \
+    PYTHONPATH=src uv run --extra yolo --extra depth --extra vision --extra mac \
+    uvicorn cane.cloud.app:app --port "$infer_port" \
+    >> "logs/inference-$(date +%Y%m%d).log" 2>&1 &
+  local infer_pid=$!
+  # Stop the service whenever the bridge exits, however it exits.
+  trap 'kill '"$infer_pid"' 2>/dev/null || true' EXIT INT TERM
+
+  say "waiting for it to bind"
+  local up=""
+  for _ in $(seq 1 60); do
+    kill -0 "$infer_pid" 2>/dev/null || die "the inference service died -- see backend/logs/inference-$(date +%Y%m%d).log"
+    curl -fsS -m 2 "http://127.0.0.1:$infer_port/healthz" >/dev/null 2>&1 && { up=1; break; }
+    sleep 1
+  done
+  [[ -n "$up" ]] || die "the inference service never answered on :$infer_port"
+
+  # Warming is not optional: the first call compiles for ~3 s, and an unwarmed
+  # depth model means the bridge sends steer frames late or not at all.
+  say "warming the models (first call compiles, ~30 s)"
+  local warm
+  warm="$(curl -fsS -m 300 "http://127.0.0.1:$infer_port/warmup" || true)"
+  case "$warm" in
+    *'"ready":true'*) say "depth is ready" ;;
+    "")               die "warmup failed -- see backend/logs/inference-$(date +%Y%m%d).log" ;;
+    *)                die "warmup returned no ready depth model, so there would be NO steering: $warm" ;;
+  esac
+
+  say "phone app settings -> Address: $(laptop_ip)   Port: $PORT"
+  say "source $source, rung $rung, delta_deg $delta   (CANE_SOURCE / CANE_RUNG / CANE_DELTA_DEG)"
+  say "logs -> backend/logs/{laptop,inference}-$(date +%Y%m%d).log"
+  PYTHONPATH=src exec caffeinate -i uv run --env-file .env \
+    --extra yolo --extra depth --extra vision --extra mac --extra scene \
+    python -m cane.bridge \
+      --source "$source" --rung "$rung" --delta-deg "$delta" \
+      --inference-url "http://127.0.0.1:$infer_port/infer" \
+      --ws-port "$PORT" --scene \
+      --local-detector ultralytics "$@"
+}
+
 phone() {
   need xcodegen "brew install xcodegen"
   [[ -f "$APP/Config/Local.xcconfig" ]] \
@@ -144,9 +219,10 @@ case "$cmd" in
   front)          serve --save-views logs/views "$@" ;;
   still)          serve --equirect "$STILL" --save-views logs/views "$@" ;;
   x4)             serve --source x4 --save-views logs/views "$@" ;;
+  full|cane)      full "$@" ;;
   phone|install)  phone ;;
   test|tests)     tests ;;
   logs|log)       logs ;;
-  -h|--help|help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h|--help|help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' ;;
   *)              die "unknown command '$cmd' (try ./startcane help)" ;;
 esac
