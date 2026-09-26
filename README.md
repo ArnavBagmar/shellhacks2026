@@ -9,16 +9,18 @@ An assistive extension to the white cane. A chest-mounted iPhone detects front h
 | Path | What it is | Status |
 |---|---|---|
 | `contracts/` | The integration surface: `awareness_event.schema.json` (the 11-field contract, single source of truth), `transport_envelope.schema.json` (ping/pong/event frames), the golden fixture both test suites run, and a README with field semantics + the COCO→class mapping | **Done, frozen** — any change means re-running step 2 in both languages |
-| `backend/` | Python 3.12 `uv` project, package `cane`: `cane.contracts` (Pydantic model + parser), `cane.transport` (NTP offset estimator, WebSocket event-link server, CLI), `cane.bridge` (X4 capture, six-crop dewarp, one-in-flight sender, health monitor + local fallback, dev stub server), `cane.cloud` (inference service: YOLO11s + ByteTrack + closing speed, FastAPI; deployed on an L4 with TensorRT), `cane.benchmarks` (local YOLOE / Depth Anything V2 baselines and the fused objects+depth preview) | **Done** (steps 2, 3, 6, 7, 8) |
+| `backend/` | Python 3.12 `uv` project, package `cane`: `cane.contracts` (Pydantic model + parser), `cane.transport` (NTP offset estimator, WebSocket event-link server, CLI), `cane.bridge` (X4 capture, six-crop dewarp, one-in-flight sender, health monitor + local fallback, dev stub server), `cane.cloud` (inference service: YOLO11s + ByteTrack + closing speed, FastAPI; deployed on an L4 with TensorRT), `cane.benchmarks` (local YOLOE / Depth Anything V2 baselines, the fused objects+depth preview, and `crops` — the live six-crop view of exactly what the cloud receives) | **Done** (steps 2, 3, 6, 7, 8) |
+| `ios/CaneKit/` | SwiftPM package: `CaneContracts` (Codable model + validation), `CaneTransport` (WebSocket client, pong responder, reconnect), `CaneFeedback` (feedback manager gauntlet), `CaneNavigation` (Routes/Places, route follower, turn cues), `CaneOutput` (bearing sectors, haptic scripts, speech phrases, stereo panning) + `nav-cli` | **Done** (steps 2, 3, 9, 12); `CaneOutput` is step 10's pure logic — no CoreHaptics/AVSpeech playback yet |
+| `docs/steps/` | Per-step build briefs and architect design reviews — far more detailed than the runbook; each is the binding spec for that step | Steps 2, 3, 6, 7, 8, 9, 10, 12 (see its README) |
 
 ## Quick start
 
 ```bash
 # Python (needs uv; CPython 3.12 is fetched automatically)
-cd backend && uv sync --extra mac && uv run pytest -q   # 570 tests (+1 live-X4 test behind CANE_LIVE_X4=1)
+cd backend && uv sync --extra mac && uv run pytest -q   # 589 tests (+1 live-X4 test behind CANE_LIVE_X4=1)
 
 # Swift (Xcode 26 / Swift 6.3; tests run on the Mac, no device needed)
-cd ios/CaneKit && swift test                       # 277 tests, includes a real phone↔laptop round trip
+cd ios/CaneKit && swift test                       # 312 tests, includes a real phone↔laptop round trip
 
 # Run the laptop-side event link and watch the clock offset (the phone app connects to ws://<laptop>:8765)
 cd backend && PYTHONPATH=src uv run python -m cane.transport.server --port 8765 --demo-event-every 1
@@ -36,7 +38,7 @@ cd backend && UV_PROJECT_ENVIRONMENT=.venv-yolo CANE_DETECTOR=ultralytics CANE_D
 
 - **P1 · perception (iOS)** — step 4 in `docs/orchestration-runbook.md`. Produce `AwarenessEvent(source: .phone)` and send it through `CaneTransport`. Bearings are torso-relative and must be normalized into `(-180, 180]`; the phone needs a frame-stable `track_id` (see `docs/steps/step-09-design.md` hazard H1). Add new Swift targets to `ios/CaneKit`, never a sibling package.
 - **P2 · X4 bridge + cloud (Python)** — steps 6, 7 and 8 are built and reviewed. The service runs on the L4 VM `l4-infer` (start/stop routine and the measured numbers in `backend/deploy/README.md`). Remaining: Firestore writes (15) and the latency benchmark (16). The prototype capture code it references lives in the separate `insta360` folder documented in `docs/insta360feed.md`.
-- **P3 · experience (iOS)** — steps 9 (feedback manager) and 12 (navigation) are built; start from `docs/steps/step-10-brief.md` + `step-10-design.md` (haptics, speech, audio session — it consumes `Announcement` from `CaneFeedback` and `TurnCue` from `CaneNavigation`), then voice (11) and sign reading (13).
+- **P3 · experience (iOS)** — steps 9 (feedback manager) and 12 (navigation) are built, and `CaneOutput` now carries step 10's pure logic (bearing sectors, haptic scripts, speech phrases, stereo panning). **What is missing is the playback half and, before it, an app to run in:** there is no app target anywhere in this repo, so nothing consumes events on a real device. A thin shell wiring `CaneTransport → CaneFeedback → CaneOutput → CoreHaptics/AVSpeech` is the highest-value next task and unblocks steps 4, 5, 11 and 13. Then voice (11) and sign reading (13).
 
 ## Rules that keep three lanes from colliding
 

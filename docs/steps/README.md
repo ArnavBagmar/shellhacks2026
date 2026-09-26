@@ -10,7 +10,7 @@ Each `step-NN-brief.md` is the binding, self-contained requirements for that run
 | 7 · Cloud inference service (TensorRT on L4 / YOLO11s on MPS locally) | step-07-brief.md | step-07-design.md (15 binding amendments) | built, reviewed, fixed, live on the L4 (TensorRT, 72 ms round trip from the venue); MPS path also verified |
 | 8 · Health monitor, rung stepping, local fallback | step-08-brief.md | — | built, reviewed, fixed; flip verified live |
 | 9 · Feedback manager gauntlet | step-09-brief.md | step-09-design.md | built, reviewed, fixed |
-| 10 · Haptics + TTS + panning | step-10-brief.md | step-10-design.md | ready to build (P3) |
-| 12 · Navigation: Routes API + turn cues | step-12-brief.md (incl. verified API reference §H) | — | built, reviewed, fixed; live check needs a Maps key |
+| 10 · Haptics + TTS + panning | step-10-brief.md | step-10-design.md | **part built** — `CaneOutput` logic in (35 tests); playback (CoreHaptics/AVSpeech/audio session) still open |
+| 12 · Navigation: Routes API + turn cues | step-12-brief.md (incl. verified API reference §H) | — | built, reviewed, fixed; live check re-run 2026-09-26, seven expected cues |
 
 Steps not listed here have only their runbook entry so far (`docs/orchestration-runbook.md`).
