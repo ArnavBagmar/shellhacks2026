@@ -14,8 +14,12 @@ import json
 import pytest
 import websockets
 
+from cane.bridge.capture.base import Frame
 from cane.bridge.capture.grab_thread import GrabThread
-from cane.bridge.capture.synthetic_source import SyntheticEquirectSource
+from cane.bridge.capture.synthetic_source import (
+    SyntheticEquirectSource,
+    make_equirect_frame,
+)
 from cane.bridge.config import BridgeConfig
 from cane.bridge.pipeline import (
     BridgePipeline,
@@ -30,6 +34,7 @@ from cane.contracts.awareness_event import Source
 from cane.transport.clock_sync import ClockNotSyncedError
 from cane.transport.messages import EventMessage, Ping, Pong, decode, encode
 from cane.transport.server import EventLinkServer
+from cane.transport.wall_clock import now_ms
 
 EQUIRECT_W = 640
 EQUIRECT_H = 320
@@ -198,6 +203,43 @@ async def test_an_unsynced_clock_skips_frames_instead_of_crashing() -> None:
     assert stats.sent == 0
 
 
+class StalledGrab:
+    """A camera that stopped delivering: the slot holds one old frame."""
+
+    def __init__(self, age_ms: int) -> None:
+        self.frames_grabbed = 1
+        self._frame = Frame(
+            image=make_equirect_frame(EQUIRECT_W, EQUIRECT_H, 0),
+            t_arrival_laptop_ms=now_ms() - age_ms,
+            seq=1,
+        )
+
+    def wait_for_new(self, last_seq: int, timeout_s: float) -> Frame | None:
+        return self._frame if last_seq < self._frame.seq else None
+
+
+async def test_a_stalled_camera_is_skipped_not_shipped_stale() -> None:
+    """Sending a 500 ms old frame is exactly the failure this step exists to
+    prevent, so the tick is dropped instead.
+    """
+    transport = EchoingFakeCloud()
+    sender = OneInFlightSender(transport)
+    pipeline = BridgePipeline(
+        config=_config(),
+        grab=StalledGrab(age_ms=500),
+        sender=sender,
+        clock_provider=LaptopClock,
+        event_sink=None,
+        crop_px=CROP_PX,
+    )
+
+    stats = await pipeline.run(duration_s=0.5)
+
+    assert transport.requests == []
+    assert stats.skipped_stale > 0
+    assert stats.sent == 0
+
+
 async def test_laptop_clock_applies_the_pipeline_delay_constant() -> None:
     clock = LaptopClock(pipeline_delay_d_ms=40)
     assert clock.capture_time_ms(1_790_000_000_000) == 1_790_000_000_000 - 40
@@ -213,6 +255,7 @@ def test_the_stats_line_names_every_acceptance_number() -> None:
             dropped_busy=0,
             skipped_unsynced=0,
             skipped_no_frame=0,
+            skipped_stale=0,
             succeeded=15,
             failed=0,
             rejected=0,

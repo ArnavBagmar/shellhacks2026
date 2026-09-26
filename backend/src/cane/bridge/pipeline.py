@@ -16,7 +16,8 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Protocol
+from enum import StrEnum
+from typing import Callable, Protocol
 
 from cane.bridge.capture.base import Frame
 from cane.bridge.capture.grab_thread import GrabThread
@@ -33,7 +34,37 @@ logger = logging.getLogger(__name__)
 
 FRAME_WAIT_TIMEOUT_S = 0.25
 UNSYNCED_LOG_INTERVAL_S = 5.0
-MS_PER_S = 1000.0
+# A 30 fps camera means the frame sitting in the slot is on average half a
+# frame period (17 ms) old, and up to 33 ms old, before we have done any work.
+# When the one already there is staler than this, wait for the next arrival
+# instead: the send happens a few ms later but carries pixels from a later
+# instant of reality, which is strictly better for a warning system -- and it
+# is what keeps frame age at send well inside the 50 ms budget.
+MAX_FRAME_AGE_AT_PICKUP_MS = 10
+# If even after waiting there is nothing fresher than this, the camera has
+# stalled: skip the tick rather than ship a stale frame. Dropping beats
+# sending a warning about where a cyclist was a third of a second ago, and it
+# is the same trade as the one-request-in-flight rule, applied to capture.
+MAX_SENDABLE_FRAME_AGE_MS = 100
+
+
+class TickSkip(StrEnum):
+    """Why a tick produced no request. Counted on the loop thread."""
+
+    NO_FRAME = "no_frame"
+    STALE_FRAME = "stale_frame"
+    UNSYNCED = "unsynced"
+    ENCODE_FAILED = "encode_failed"
+
+
+@dataclass(frozen=True, eq=False)
+class TickWork:
+    """What one worker-thread hop produced: a request, or a reason it did not."""
+
+    skip: TickSkip | None
+    request: InferenceRequest | None = None
+    frame_seq: int = 0
+    t_arrival_laptop_ms: int = 0
 
 
 class CaptureClock(Protocol):
@@ -74,6 +105,7 @@ class PipelineStats:
     dropped_busy: int
     skipped_unsynced: int
     skipped_no_frame: int
+    skipped_stale: int
     succeeded: int
     failed: int
     rejected: int
@@ -107,7 +139,8 @@ def format_stats_line(stats: PipelineStats) -> str:
         f"rtt p50 {_ms(stats.rtt_p50_ms)} p95 {_ms(stats.rtt_p95_ms)} | "
         f"in_flight_max {stats.max_in_flight} | events {stats.events_delivered} | "
         f"failed {stats.failed} rejected {stats.rejected} "
-        f"unsynced {stats.skipped_unsynced} no_frame {stats.skipped_no_frame}"
+        f"unsynced {stats.skipped_unsynced} no_frame {stats.skipped_no_frame} "
+        f"stale {stats.skipped_stale}"
     )
 
 
@@ -137,6 +170,7 @@ class BridgePipeline:
         self._dropped_busy = 0
         self._skipped_unsynced = 0
         self._skipped_no_frame = 0
+        self._skipped_stale = 0
         self._events_delivered = 0
         self._events_undelivered = 0
         self._last_unsynced_log = 0.0
@@ -173,37 +207,72 @@ class BridgePipeline:
         if self._sender.busy:
             self._dropped_busy += 1
             return
-        frame = await asyncio.to_thread(
-            self._grab.wait_for_new, self._last_seq, FRAME_WAIT_TIMEOUT_S
-        )
-        if frame is None:
-            self._skipped_no_frame += 1
+        # One hop into a worker thread for the whole cv2 half of the tick:
+        # every extra round-trip through the event loop is milliseconds added
+        # to frame age at send, which is the number this step is judged on.
+        work = await asyncio.to_thread(self._take_and_build)
+        if work.skip is not None:
+            self._count_skip(work.skip)
             return
-        self._last_seq = frame.seq
-        t_capture_ms = self._capture_stamp(frame)
-        if t_capture_ms is None:
-            return
-        request = await asyncio.to_thread(self._build_request, frame, t_capture_ms)
-        if request is None:
-            return
-        outcome = self._sender.try_send(request, frame.t_arrival_laptop_ms)
+        if work.frame_seq:
+            self._last_seq = work.frame_seq
+        assert work.request is not None  # skip is None, so a request was built
+        outcome = self._sender.try_send(work.request, work.t_arrival_laptop_ms)
         if outcome is SendOutcome.DROPPED_BUSY:  # pragma: no cover - pre-checked above
             self._dropped_busy += 1
 
-    def _capture_stamp(self, frame: Frame) -> int | None:
-        try:
-            return self._clock_provider().capture_time_ms(frame.t_arrival_laptop_ms)
-        except ClockNotSyncedError:
-            self._skipped_unsynced += 1
-            now = time.monotonic()
-            if now - self._last_unsynced_log >= UNSYNCED_LOG_INTERVAL_S:
-                self._last_unsynced_log = now
-                logger.warning(
-                    "phone clock not synced yet; skipping frames "
-                    "(%d so far). Connect the phone, or run with --allow-unsynced.",
-                    self._skipped_unsynced,
-                )
+    def _freshest_frame(self) -> Frame | None:
+        """The newest frame, or the next one to arrive if that one is stale."""
+        frame = self._grab.wait_for_new(self._last_seq, FRAME_WAIT_TIMEOUT_S)
+        if frame is None:
             return None
+        if now_ms() - frame.t_arrival_laptop_ms <= MAX_FRAME_AGE_AT_PICKUP_MS:
+            return frame
+        fresher = self._grab.wait_for_new(frame.seq, FRAME_WAIT_TIMEOUT_S)
+        return fresher if fresher is not None else frame
+
+    def _count_skip(self, skip: TickSkip) -> None:
+        if skip is TickSkip.NO_FRAME:
+            self._skipped_no_frame += 1
+        elif skip is TickSkip.STALE_FRAME:
+            self._skipped_stale += 1
+        elif skip is TickSkip.UNSYNCED:
+            self._skipped_unsynced += 1
+            self._log_unsynced()
+
+    def _take_and_build(self) -> TickWork:
+        """Worker thread: freshest frame -> stamp -> dewarp -> JPEG."""
+        frame = self._freshest_frame()
+        if frame is None:
+            return TickWork(skip=TickSkip.NO_FRAME)
+        age_ms = now_ms() - frame.t_arrival_laptop_ms
+        if age_ms > MAX_SENDABLE_FRAME_AGE_MS:
+            return TickWork(skip=TickSkip.STALE_FRAME, frame_seq=frame.seq)
+        try:
+            t_capture_ms = self._clock_provider().capture_time_ms(frame.t_arrival_laptop_ms)
+        except ClockNotSyncedError:
+            return TickWork(skip=TickSkip.UNSYNCED, frame_seq=frame.seq)
+        request = self._build_request(frame, t_capture_ms)
+        if request is None:
+            return TickWork(skip=TickSkip.ENCODE_FAILED, frame_seq=frame.seq)
+        return TickWork(
+            skip=None,
+            request=request,
+            frame_seq=frame.seq,
+            t_arrival_laptop_ms=frame.t_arrival_laptop_ms,
+        )
+
+    def _log_unsynced(self) -> None:
+        """At most one line per 5 s: this fires on every tick when it fires."""
+        now = time.monotonic()
+        if now - self._last_unsynced_log < UNSYNCED_LOG_INTERVAL_S:
+            return
+        self._last_unsynced_log = now
+        logger.warning(
+            "phone clock not synced yet; skipping frames (%d so far). "
+            "Connect the phone, or run with --allow-unsynced.",
+            self._skipped_unsynced,
+        )
 
     def _build_request(self, frame: Frame, t_capture_ms: int) -> InferenceRequest | None:
         """Dewarp + encode. Runs in a worker thread; never raises into the loop."""
@@ -257,6 +326,7 @@ class BridgePipeline:
             dropped_busy=self._dropped_busy + sender.dropped_busy,
             skipped_unsynced=self._skipped_unsynced,
             skipped_no_frame=self._skipped_no_frame,
+            skipped_stale=self._skipped_stale,
             succeeded=sender.succeeded,
             failed=sender.failed,
             rejected=sender.rejected,

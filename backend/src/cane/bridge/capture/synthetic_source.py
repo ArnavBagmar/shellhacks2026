@@ -86,9 +86,10 @@ class SyntheticEquirectSource:
         self._next_due = max(self._next_due + self._period_s, time.monotonic())
         self._emitted += 1
         self._seq += 1
-        t_arrival_laptop_ms = now_ms()
-        image = make_equirect_frame(self._width, self._height, t_arrival_laptop_ms)
-        return Frame(image=image, t_arrival_laptop_ms=t_arrival_laptop_ms, seq=self._seq)
+        # Stamp *after* the frame exists: a real capture callback times the
+        # moment the buffer arrives, not the moment the sensor was asked.
+        image = make_equirect_frame(self._width, self._height, now_ms())
+        return Frame(image=image, t_arrival_laptop_ms=now_ms(), seq=self._seq)
 
     def close(self) -> None:
         self._closed = True

@@ -39,6 +39,8 @@ SOURCE_X4 = "x4"
 FILE_PREFIX = "file:"
 INDEX_PREFIX = "index:"
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+# httpx logs one INFO line per request; at 3 fps that buries the 5 s stats line.
+NOISY_LOGGERS = ("httpx", "httpcore")
 UNSYNCED_BANNER = (
     "--allow-unsynced: stamping t_capture_ms with the LAPTOP clock (offset 0). "
     "Events sent to a phone in this mode carry the wrong clock domain -- "
@@ -144,6 +146,8 @@ def _clock_provider(config: BridgeConfig, server: EventLinkServer):
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     logging.basicConfig(level=args.log_level.upper(), format=LOG_FORMAT, stream=sys.stderr)
+    for name in NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
     try:
         config = build_config(args)
     except ValueError as exc:
