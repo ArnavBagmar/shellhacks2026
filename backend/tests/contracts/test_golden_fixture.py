@@ -7,6 +7,9 @@ two validators fails loudly. Case parametrization happens in conftest.py's
 place.
 """
 
+import json
+import re
+
 import pytest
 from jsonschema import Draft202012Validator
 
@@ -14,6 +17,8 @@ from cane.contracts.awareness_event import AwarenessEventError, parse_awareness_
 
 MIN_VALID_CASES = 8
 MIN_INVALID_CASES = 10
+
+_README_TEMPLATE_HEADING = "## Copy-paste event template"
 
 
 def test_fixture_envelope_is_sane(fixture):
@@ -60,3 +65,21 @@ def test_fixture_case_matches_both_validators(case, schema):
 def test_malformed_payload_is_rejected_not_crashed(malformed_payload):
     with pytest.raises(AwarenessEventError):
         parse_awareness_event(malformed_payload)
+
+
+def _extract_readme_template(readme_text: str) -> dict:
+    heading_index = readme_text.index(_README_TEMPLATE_HEADING)
+    match = re.search(r"```json\s*\n(.*?)\n```", readme_text[heading_index:], re.DOTALL)
+    assert match, f"contracts/README.md: no ```json block under '{_README_TEMPLATE_HEADING}'"
+    return json.loads(match.group(1))
+
+
+def test_readme_template_is_schema_valid(readme_text, schema):
+    """A developer who copies contracts/README.md's template verbatim must
+    get a valid event, not an immediately rejected one."""
+    template = _extract_readme_template(readme_text)
+
+    errors = sorted(Draft202012Validator(schema).iter_errors(template), key=str)
+    assert not errors, [e.message for e in errors]
+
+    parse_awareness_event(template)  # must not raise AwarenessEventError

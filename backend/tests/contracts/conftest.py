@@ -13,6 +13,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_PATH = REPO_ROOT / "contracts" / "awareness_event.schema.json"
 FIXTURE_PATH = REPO_ROOT / "contracts" / "fixtures" / "awareness_events.golden.json"
+README_PATH = REPO_ROOT / "contracts" / "README.md"
 
 
 @pytest.fixture(scope="session")
@@ -25,6 +26,11 @@ def schema() -> dict[str, Any]:
 def fixture() -> dict[str, Any]:
     with FIXTURE_PATH.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+@pytest.fixture(scope="session")
+def readme_text() -> str:
+    return README_PATH.read_text(encoding="utf-8")
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
