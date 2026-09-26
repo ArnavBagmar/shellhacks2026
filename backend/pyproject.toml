@@ -19,6 +19,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+depth = ["torch", "torchvision", "numpy", "opencv-python>=4.11,<5"]
+vision = [
+    "clip",
+    "ultralytics>=8.4.163,<8.5",
+    "opencv-python>=4.11,<5",
+    "pip>=24",
+]
 # macOS-only native capture: OpenCV cannot select the X4's 2880x1440 mode on
 # macOS, so the bridge talks to AVFoundation through PyObjC (docs/insta360feed.md).
 mac = [
@@ -34,8 +41,14 @@ yolo = ["ultralytics>=8.3"]
 # torch and TensorRT; the PyPI tensorrt sdist must never be built on a Mac (A4).
 gpu = ["ultralytics>=8.3; sys_platform == 'linux'", "tensorrt; sys_platform == 'linux'"]
 
+[tool.uv.sources]
+clip = { git = "https://github.com/ultralytics/CLIP.git", rev = "a13192f8cb767260d7dfd98c843b0716593169e7" }
+
 [project.scripts]
 cane-link = "cane.transport.__main__:main"
+cane-bench-yolo = "cane.benchmarks.yolo:main"
+cane-bench-depth = "cane.benchmarks.depth:main"
+cane-preview = "cane.benchmarks.fused:main"
 
 [dependency-groups]
 dev = [

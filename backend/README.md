@@ -86,3 +86,28 @@ every time, a `sitecustomize.py` dropped into
 `backend/src` on `sys.path` works too; it is local to that `.venv` (not
 part of the package, not committed) and needs recreating if `.venv` is
 ever rebuilt from scratch.
+
+## Standalone perception benchmark
+
+YOLOE runs independently of the event link. See
+[`docs/yolo-benchmark.md`](../docs/yolo-benchmark.md) for setup, video/camera commands,
+per-stage timings and saved outputs. Install the optional `vision` extra;
+transport itself needs no ML dependencies.
+
+Depth Anything V2 Small is now a separate benchmark; see
+[`docs/depth-benchmark.md`](../docs/depth-benchmark.md) for official-source/weight
+setup, the side-by-side preview, and the precise meaning of relative depth.
+
+## Merged perception preview
+
+Detections and relative depth on **one frame, in one window**, with each layer
+switchable from the toolbar:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m cane.benchmarks.fused --camera 0 --show --max-frames 0
+```
+
+See [`docs/fused-preview.md`](../docs/fused-preview.md) for controls, the
+light-green-farther / dark-orange-nearer colour scale, the per-box depth median,
+and what the recorded timings do and do not mean. The two single-model runners
+above remain the per-model baselines.
