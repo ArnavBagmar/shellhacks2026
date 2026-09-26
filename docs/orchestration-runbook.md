@@ -13,20 +13,37 @@
 > is no fuzzy matching. Two of the three lanes write Swift; using `code-reviewer` for all of it
 > would have been the worse trade.
 
-## Build status — 2026-09-26
+## Build status — 2026-09-26 (evening)
+
+**Lane assignment.** P1 (teammate): steps 4, 5 and scene segmentation. Claude (this session): 6 → 7 → 8, 9, 12. Open for the team: 10, 11, 13, then 14–16.
 
 | Step | State | Where |
 |---|---|---|
-| 2 · Event contract + golden fixtures | **built, reviewed, on `main`** — schema, fixture (11 valid / 27 invalid / 7 malformed), Pydantic + Swift models, drift tests | `contracts/`, `backend/src/cane/contracts`, `ios/CaneKit/Sources/CaneContracts` |
-| 3 · NTP handshake + WebSocket transport | **built, reviewed, on `main`** — offset estimator, Python event-link server + CLI, Swift actor client with reconnect; real phone↔laptop round-trip test | `backend/src/cane/transport`, `ios/CaneKit/Sources/CaneTransport` |
-| 6 · X4 bridge | brief ready, defines the bridge↔cloud API | `docs/steps/step-06-brief.md` |
-| 7 · Cloud L4 service | brief ready; architect pass still to run | `docs/steps/step-07-brief.md` |
-| 9 · Feedback manager | brief + architect design ready — **P3 can start now against the fixture** | `docs/steps/step-09-*.md` |
-| 10 · Haptics + TTS | brief + accessibility design ready | `docs/steps/step-10-*.md` |
-| 1 · Spikes | **not started — hardware, team must run**; spike 1 is largely answered by `insta360feed.md` (X4 is UVC; use the AVFoundation source, not OpenCV, for 2880×1440 on macOS) | §6 of `camera-sync-design.md` |
-| 4, 5, 8, 11–19 | runbook entry only | below |
+| 2 · Event contract + golden fixtures | **built, reviewed, on `main`** | `contracts/`, `backend/src/cane/contracts`, `ios/CaneKit/Sources/CaneContracts` |
+| 3 · NTP handshake + WebSocket transport | **built, reviewed, on `main`** | `backend/src/cane/transport`, `ios/CaneKit/Sources/CaneTransport` |
+| 6 · X4 bridge | **built, live-tested on the X4, reviewed; fix round landing** — frame age at send p50 13 / p95 36–43 ms under an 800 ms uplink, never more than one request in flight; six-crop dewarp verified on venue footage | `backend/src/cane/bridge`, `docs/steps/assets/step-06-live-*.jpg`, `docs/steps/step-06-brief.md` |
+| 7 · Cloud inference service | **design reviewed (15 amendments); implementer running** — local YOLO11s on Apple MPS is today's runnable path; the L4 Docker/deploy files are UNVERIFIED documentation until the team has a GCP project | `docs/steps/step-07-brief.md`, `docs/steps/step-07-design.md` |
+| 8 · Health monitor + local fallback | **brief ready**, starts when 7 lands | `docs/steps/step-08-brief.md` |
+| 9 · Feedback manager gauntlet | **built, reviewed, fixed, on `main`** — 126 tests, actor + gauntlet per the design; step 10 must `tick` the manager and give hazard speech priority over navigation | `ios/CaneKit/Sources/CaneFeedback`, `docs/steps/step-09-*.md` |
+| 12 · Navigation (Routes + turn cues) | **built, reviewed, fixed, on `main`** — 113 tests; the live Routes/Places check needs a Maps key: `GOOGLE_MAPS_API_KEY=… swift run nav-cli "<origin>" "<destination>"` | `ios/CaneKit/Sources/CaneNavigation`, `docs/steps/step-12-brief.md` |
+| 10 · Haptics + TTS | brief + accessibility design ready — **P3 can start now**; consumes `Announcement` from step 9 and `TurnCue` from step 12 | `docs/steps/step-10-*.md` |
+| 1 · Spikes | **spike 1 CLOSED** (X4 is UVC; 2880×1440 streams at ~29 fps through the AVFoundation source; OpenCV cannot select that mode). Spikes 4, 5, 7, 8, 9 still team-run | §6 of `camera-sync-design.md` |
+| 4, 5 | P1 lane — runbook entry only | below |
+| 11, 13–19 | runbook entry only | below |
 
-Rules of the road: `contracts/` is frozen (a change = re-running step 2 in both languages); every step's binding spec is its `docs/steps/step-NN-brief.md` plus `-design.md` where present, and the design's amendments override the brief.
+Rules of the road: `contracts/` is frozen (a change = re-running step 2 in both languages); every step's binding spec is its `docs/steps/step-NN-brief.md` plus `-design.md` where present, and the design's amendments override the brief. Test counts today: `backend` 249 passed (+1 live-X4 test gated on `CANE_LIVE_X4=1`), `ios/CaneKit` 275.
+
+### Refreshed invocations for the steps that now have briefs
+
+These supersede the older commands below for steps 6, 7, 8, 9 and 12: the plan path points at the brief (or design), which is the binding spec.
+
+```bash
+/everything-claude-code:orchestrate custom "ecc:tdd-guide,ecc:performance-optimizer,ecc:python-reviewer" "[Plan: docs/steps/step-06-brief.md#step-6] Build the X4 bridge per rulings F1–F6: AVFoundation 2880×1440 capture into a single-slot latest-frame store on a dedicated thread, six 60° remap-LUT crops, JPEG per rung, a one-in-flight sender, bearing = yaw + (cx−0.5)·60 + delta_deg normalised into (−180, 180], t_capture from the phone clock, events to EventLinkServer; api_models per step-07-design A2. Acceptance: frame age at send p95 < 50 ms with an 800 ms uplink and in-flight never > 1, measured live on the X4; stripe tests pin the LUT geometry; the e2e test delivers a valid x4_cloud event to a fake phone. Out of scope: the inference server (7), rung stepping and local fallback (8), Firestore (15)"
+/everything-claude-code:orchestrate custom "ecc:tdd-guide,ecc:mle-reviewer,ecc:python-reviewer" "[Plan: docs/steps/step-07-design.md#step-7] Implement the inference service per amendments A1–A15 (they win over the brief): FastAPI /infer /healthz /warmup over a FastAPI-free InferenceService; per-(session, crop) supervision ByteTrack with rung-fps eviction and generation-stamped track ids; pinhole range → band and glitch-rejecting closing speed; a timeless request path proven by an AST test; CANE_DETECTOR=ultralytics on MPS for the laptop; tier-2 Docker/L4 files carry the UNVERIFIED header. Acceptance: tests green under -W error with no torch in .venv; t_capture_ms echoed byte-identical and no range_m in the raw body; track_id stable across 30 frames; a live X4 → bridge → service run emits x4_cloud events. Out of scope: urgency, OCR, faces, the bridge (6), fallback (8)"
+/everything-claude-code:orchestrate custom "ecc:tdd-guide,ecc:silent-failure-hunter,ecc:python-reviewer" "[Plan: docs/steps/step-08-brief.md#step-8] Implement the health monitor per rulings E1–E5: one InferenceBackend interface with a CloudBackend and an in-process LocalBackend that reuses step 7's InferenceService; a pure HealthMonitor (step down at p95 RTT > 500 ms over 10 frames; flip to local on 3 consecutive timeouts, rung 4 still failing, or phone stale-drop rate ≥ 0.2; recover one rung per 30 s healthy via /healthz probes); dynamic rungs in the pipeline; the health message from the phone. Acceptance: induced timeouts flip to local within 3 frames; upward steps at most once per 30 s; identical scripted detections yield identical events through cloud and local except source and track_id. Out of scope: the service (7), Firestore (15), the Swift sender of the health message"
+/everything-claude-code:orchestrate custom "ecc:architect,ecc:tdd-guide,ecc:swift-reviewer" "[Plan: docs/steps/step-09-brief.md#step-9] Build CaneFeedback per the brief and design amendments A1–A17: public validating AwarenessEvent init first, then validate → staleness → exact-duplicate → dedup → urgency (total function, confidence-gated, announced-anchored hysteresis) → refractory → keyed bounded queue → pump with dequeue re-gate, all inside one actor with bounded state. Acceptance: the golden fixture incl. malformed events passes; a flood of one track_id yields one announcement; urgency 1 never speaks; a stale event is never announced late"
+/everything-claude-code:orchestrate custom "ecc:docs-lookup,ecc:tdd-guide,ecc:swift-reviewer" "[Plan: docs/steps/step-12-brief.md#step-12] Build CaneNavigation per rulings F1–F7 and the section-H API reference: Routes API v2 WALK with the mandatory field mask, a Places Text Search resolver with Geocoding fallback, the 1e5 polyline decoder, a route follower, the turn-cue policy with the F3 constants, a NavigationEngine actor, an iOS-only CoreLocation adapter and nav-cli. Acceptance: the two-turn fixture walk yields exactly prepare-left, now-left, prepare-right, now-right, arrived; GPS loss emits one cue then silence while the actor stays alive; the target has no awareness-path dependency. Out of scope: haptic pattern design (10), voice (11), the map view, last-50-feet (17)"
+```
 
 ---
 
