@@ -387,3 +387,54 @@ async def test_other_questions_do_not_fetch_weather() -> None:
     await _service(vlm, weather=weather).answer(_query("ask", utterance="what is the capital of france"))
     await _service(vlm, weather=weather).answer(_query())
     assert weather.calls == 0
+
+
+# ------------------------------------------------------------ phone box (distance)
+
+
+async def test_a_thing_found_in_the_phone_photo_brings_its_box() -> None:
+    reply = _found(6, 0.35, box_2d=[420, 310, 610, 390])
+    answer = await _service(FakeVLM(reply)).answer(_query(phone=True))
+
+    assert answer.phone_box is not None
+    assert (answer.phone_box.x_min, answer.phone_box.y_min) == (0.31, 0.42)
+    assert (answer.phone_box.x_max, answer.phone_box.y_max) == (0.39, 0.61)
+
+
+async def test_a_box_in_a_360_view_is_dropped_there_is_no_depth_there() -> None:
+    answer = await _service(FakeVLM(_found(2, 0.5, box_2d=[100, 100, 300, 300]))).answer(_query(phone=True))
+    assert answer.status == "found"
+    assert answer.phone_box is None
+
+
+@pytest.mark.parametrize("raw", [[1, 2, 3], [500, 500, 500, 900], [float("nan"), 0, 10, 10]])
+async def test_an_unusable_box_is_ignored_not_fatal(raw: list[float]) -> None:
+    answer = await _service(FakeVLM(_found(6, 0.5, box_2d=raw))).answer(_query(phone=True))
+    assert answer.status == "found"
+    assert answer.phone_box is None
+
+
+async def test_swapped_corners_are_put_right_and_edges_clamped() -> None:
+    answer = await _service(FakeVLM(_found(6, 0.5, box_2d=[900, 1200, 100, 800]))).answer(_query(phone=True))
+    assert answer.phone_box is not None
+    assert (answer.phone_box.x_min, answer.phone_box.x_max) == (0.8, 1.0)
+    assert (answer.phone_box.y_min, answer.phone_box.y_max) == (0.1, 0.9)
+
+
+async def test_without_x_center_the_box_centre_gives_the_bearing() -> None:
+    reply = VlmReply(status="found", image_index=6, subject="sprite can", box_2d=[0, 0, 1000, 500])
+    answer = await _service(FakeVLM(reply)).answer(_query(phone=True))
+    assert answer.bearing_deg == pytest.approx(-PHONE_HFOV / 4, abs=0.1)
+
+
+async def test_the_box_centre_gives_the_bearing_over_x_center() -> None:
+    # Live: x_center=221 (the box's 0-1000 scale) with box x 107-311 -> the
+    # thing is left of centre, not clamped to the right edge.
+    reply = _found(6, 221.0, box_2d=[527, 107, 829, 311])
+    answer = await _service(FakeVLM(reply)).answer(_query(phone=True))
+    assert answer.bearing_deg == pytest.approx((0.209 - 0.5) * PHONE_HFOV, abs=0.1)
+
+
+async def test_an_x_center_on_the_thousand_scale_is_read_as_a_fraction() -> None:
+    answer = await _service(FakeVLM(_found(6, 221.0))).answer(_query(phone=True))
+    assert answer.bearing_deg == pytest.approx((0.221 - 0.5) * PHONE_HFOV, abs=0.1)

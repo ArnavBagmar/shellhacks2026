@@ -97,7 +97,7 @@ final class FakeSpeaker: AssistSpeaker, @unchecked Sendable {
 final class QueryCoordinatorTests: XCTestCase {
     private func coordinator(_ link: FakeLink, _ speaker: FakeSpeaker, timeoutMs: Int = 10_000) -> QueryCoordinator {
         let frame = try? PhoneFrame(jpeg: Data([0xFF, 0xD8, 0xFF, 0xE0]), hfovDeg: 70, width: 1280, height: 720)
-        return QueryCoordinator(link: link, speaker: speaker, snapshot: { frame }, clock: { 1_790_000_000_000 },
+        return QueryCoordinator(link: link, speaker: speaker, snapshot: { FrontCapture(frame: frame) }, clock: { 1_790_000_000_000 },
                                 makeId: { "q-1" }, timeoutMs: timeoutMs)
     }
 

@@ -78,6 +78,8 @@ class VlmReply(BaseModel):
     status: str | None = None
     image_index: int | None = None
     x_center: float | None = None
+    #: [ymin, xmin, ymax, xmax] scaled 0-1000, Gemini's native box format.
+    box_2d: list[float] | None = None
     subject: str | None = None
     detail: str | None = None
     confidence: str | None = None

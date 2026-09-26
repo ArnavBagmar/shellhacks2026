@@ -32,7 +32,7 @@ Headline flow:
 (required iff `find`), `utterance`, `t_phone_ms`, `phone_frame` {`jpeg_b64`, `hfov_deg`, `width`,
 `height`} | null. `answer` laptop → phone: `query_id`, `status` ∈ `found | not_found | described |
 unavailable`, `subject`, `bearing_deg` (only with `found`, in `(-180, 180]`), `detail`, `confidence`,
-`latency_ms`. All keys always present; unknown keys rejected. Golden fixture:
+`latency_ms`, optional `phone_box` (below). All other keys always present; unknown keys rejected. Golden fixture:
 `contracts/fixtures/transport_query_answer.golden.json`, run by both suites. Server `max_size` 4 MiB.
 
 ## D. Laptop timing (`backend/src/cane/scene/service.py`)
@@ -89,6 +89,27 @@ Live runs (2026-09-26): cold client, 6 × 640 px, thinking LOW → timed out at 
 3.8-flash, fallback `gemini-3.5-flash-lite` answered in 1.1 s (1.6 s end to end, found "doorway" at +14°). Then 3.8-flash at LOW: 6.0 s to warm, 5.7 s to answer, not_found → lite
 became the primary. Next lite run sat 9 s with no reply (same settings) → hedged requests. Three hedged runs: the first copy never answered, the second answered in 1.4-2.6 s → two copies at t=0.
 
+### "How far is the Sprite can?" (TrueDepth distance)
+
+"how far is / how far away is / how close is / distance to X" -> `VoiceIntent.howFar(X)` -> an ordinary
+`find` query. Gemini's reply carries `box_2d` ([ymin, xmin, ymax, xmax], 0-1000, its native format); when
+the thing is in the **phone photo** the laptop sends it as `answer.phone_box` (fractions, top-left
+origin; a box in a 360 view is dropped -- no depth there). The prompts ask Gemini to answer with the
+phone image when the thing is visible in it.
+
+The phone keeps the whole TrueDepth map taken with the question's photo (`FrontCamera.snapshotJPEG(withDepth:)`,
+turned to the photo's orientation: the depth connection is rotated like video where supported, the rest
+in software), not a live one -- the answer comes back ~1.5 s later. `DepthMap.distance(inBox:)` reads the
+inner 60 % of the box and takes the 30th percentile of valid pixels (leans to the object, not the wall
+behind a loose box). Spoken only when `isTrustworthy()` (absolute accuracy, >= 35 % coverage, 0.2-3 m),
+in feet for US/UK locales: "Slightly left, sprite can, about 4 feet away, on the table." Asked but not
+measurable: past 3 m -> "more than 10 feet away"; found only in a 360 view -> "Face it and ask again to
+measure how far."; no sensor / sunlight -> says so. A measured distance is also added to plain finds; the
+failures only when asked. Every outcome is logged to the phone black box as `distance`
+(`outcome`, `metres`, `coverage`, `accuracy`). Live check 2026-09-26: Gemini returned tight boxes for
+"door" and "chair" on a test photo (1.2-2.4 s). **Not yet checked on the phone**: that the rotated depth
+map lines up with the photo (hold a can at a taped 1 m and 2 m, left and right of centre).
+
 ## E. Run it
 
 ```bash
@@ -121,7 +142,9 @@ command box and a status log; long-press 2 s (or two-finger double-tap) stops.
    **right**: the spoken side must match both times (catches a mirrored or rotated frame).
 2. A planted hazard mid-answer: the hazard cuts the answer, the answer is not replayed late.
 3. Query → spoken answer ≤ ~3 s after the end of speech on the venue hotspot (laptop logs `latency_ms`).
-4. Step 10's 24-trial haptic protocol (step-10 design Amendment 7) — the `HapticTrial` harness is
+4. "How far is the can?" with a can at a taped 1 m, then 2 m, left then right of centre: spoken distance
+   within ~15 %, and the phone log's `distance` record says `measured`.
+5. Step 10's 24-trial haptic protocol (step-10 design Amendment 7) — the `HapticTrial` harness is
    **not built yet**; the self-test ("Play the haptic alphabet") is.
 
 ## G. Not done in this step

@@ -266,6 +266,18 @@
           "type": "integer",
           "minimum": 0,
           "description": "Laptop-side time from receiving the query to sending this answer."
+        },
+        "phone_box": {
+          "type": ["object", "null"],
+          "description": "Optional key, omitted when there is none (older phones reject unknown keys). Where a found thing sits in the phone photo, as fractions of its width and height from the top-left corner; the phone measures the TrueDepth distance inside it. Only with status 'found'. x_min < x_max and y_min < y_max is checked by both decoders.",
+          "additionalProperties": false,
+          "required": ["x_min", "y_min", "x_max", "y_max"],
+          "properties": {
+            "x_min": { "type": "number", "minimum": 0, "maximum": 1 },
+            "y_min": { "type": "number", "minimum": 0, "maximum": 1 },
+            "x_max": { "type": "number", "minimum": 0, "maximum": 1 },
+            "y_max": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
         }
       },
       "allOf": [
@@ -314,6 +326,9 @@
           "then": {
             "properties": {
               "bearing_deg": {
+                "type": "null"
+              },
+              "phone_box": {
                 "type": "null"
               }
             }

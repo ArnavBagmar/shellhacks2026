@@ -133,7 +133,13 @@ object with a `type` string:
   `target` is required exactly when `kind` is `find`; `bearing_deg` is present exactly when `status` is `found`
   (same `(-180, 180]` torso-relative convention as events). The optional
   `phone_frame` is one base64 front-camera JPEG, unmirrored. As everywhere
-  else, every key is present and unknown keys are rejected:
+  else, every key is present and unknown keys are rejected -- with one
+  exception: `answer.phone_box` {`x_min`, `y_min`, `x_max`, `y_max`}, fractions
+  of the phone photo from its top-left corner, is sent only on a `found`
+  answer located in that photo and is *omitted* otherwise (phones built
+  before it reject unknown keys). The phone measures TrueDepth distance
+  inside it. `x_min < x_max`, `y_min < y_max` is checked by both decoders
+  (the schema cannot say it):
 
   ```json
   {"type": "query", "query_id": "q-7f3a", "kind": "find", "target": "bathroom",

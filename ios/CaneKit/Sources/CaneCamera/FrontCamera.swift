@@ -26,6 +26,9 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
         public let hfovDeg: Double
         public let width: Int
         public let height: Int
+        /// The TrueDepth map from the same moment, turned to match the
+        /// photo; nil without the sensor or when not asked for.
+        public let depth: DepthMap?
     }
 
     public enum CameraError: Error {
@@ -61,6 +64,10 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
     public var depth: DepthSample? { probe?.latest }
 
     private var probe: TrueDepthProbe?
+    /// How far the video frames are turned beyond the depth maps (clockwise
+    /// degrees): the video connection is rotated upright, and the depth
+    /// connection may not support rotation at all.
+    private var depthLagDeg = 0
     /// Set before `start()`. Off by default so nothing pays for the sensor
     /// until something asks for it.
     public var wantsDepth = false
@@ -93,8 +100,9 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
         lock.withLock { consumers.append(WeakConsumer(consumer)) }
     }
 
-    /// The newest frame as an upright JPEG, longest side <= `maxSide`.
-    public func snapshotJPEG(maxSide: Int = 1_280, quality: Double = 0.7) -> Snapshot? {
+    /// The newest frame as an upright JPEG, longest side <= `maxSide`, plus
+    /// the matching depth map when `withDepth` (one ~1 MB copy).
+    public func snapshotJPEG(maxSide: Int = 1_280, quality: Double = 0.7, withDepth: Bool = false) -> Snapshot? {
         guard let buffer = lock.withLock({ latest }) else { return nil }
         var image = CIImage(cvPixelBuffer: buffer)
         let extent = image.extent
@@ -108,7 +116,18 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
         else { return nil }
         let width = Int(image.extent.width.rounded())
         let height = Int(image.extent.height.rounded())
-        return Snapshot(jpeg: jpeg, hfovDeg: hfov(width: width, height: height), width: width, height: height)
+        var depth: DepthMap?
+        if withDepth, let map = probe?.latestMap() {
+            let turned = map.rotatedClockwise(lock.withLock { depthLagDeg })
+            let photoAspect = Double(width) / Double(max(height, 1))
+            let depthAspect = Double(turned.width) / Double(max(turned.height, 1))
+            if abs(photoAspect - depthAspect) > 0.02 {
+                logger.warning("truedepth: map \(turned.width)x\(turned.height) vs photo \(width)x\(height); boxes may land off")
+            }
+            depth = turned
+        }
+        return Snapshot(jpeg: jpeg, hfovDeg: hfov(width: width, height: height), width: width, height: height,
+                        depth: depth)
     }
 
     // MARK: - Setup
@@ -220,11 +239,20 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
     }
 
     private func applyRotation(_ angle: CGFloat) {
-        queue.async { [output] in
-            guard let connection = output.connection(with: .video),
-                  connection.isVideoRotationAngleSupported(angle)
-            else { return }
-            connection.videoRotationAngle = angle
+        queue.async { [weak self, output, depthOutput] in
+            if let connection = output.connection(with: .video), connection.isVideoRotationAngleSupported(angle) {
+                connection.videoRotationAngle = angle
+            }
+            // Turn the depth maps the same way when the connection allows it;
+            // whatever is left over is turned in software at snapshot time.
+            let depthConnection = depthOutput.connection(with: .depthData)
+            if let depthConnection, depthConnection.isVideoRotationAngleSupported(angle) {
+                depthConnection.videoRotationAngle = angle
+            }
+            let video = output.connection(with: .video)?.videoRotationAngle ?? 0
+            let depth = depthConnection?.videoRotationAngle ?? 0
+            guard let self else { return }
+            self.lock.withLock { self.depthLagDeg = Int((video - depth).rounded()) }
         }
     }
 

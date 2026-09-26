@@ -101,6 +101,28 @@ final class SceneMessagesTests: XCTestCase {
         }
     }
 
+    func testAPhoneBoxDecodesAndItsAbsenceIsNil() throws {
+        let boxed = try XCTUnwrap(FixturePaths.queryAnswerCases().first { $0.name == "answer_found_with_phone_box" }).frame
+        guard case .answer(let answer) = try InboundMessage.decode(JSONSerialization.data(withJSONObject: boxed)) else {
+            return XCTFail("not an answer")
+        }
+        XCTAssertEqual(answer.phoneBox, try PhoneBox(xMin: 0.31, yMin: 0.42, xMax: 0.39, yMax: 0.61))
+
+        var plain = boxed
+        plain.removeValue(forKey: "phone_box")
+        guard case .answer(let without) = try InboundMessage.decode(JSONSerialization.data(withJSONObject: plain)) else {
+            return XCTFail("not an answer")
+        }
+        XCTAssertNil(without.phoneBox)
+    }
+
+    func testAnInvertedPhoneBoxIsRejected() throws {
+        // The schema cannot say x_min < x_max; both decoders do.
+        var frame = try XCTUnwrap(FixturePaths.queryAnswerCases().first { $0.name == "answer_found_with_phone_box" }).frame
+        frame["phone_box"] = ["x_min": 0.5, "y_min": 0.1, "x_max": 0.4, "y_max": 0.2]
+        XCTAssertThrowsError(try InboundMessage.decode(JSONSerialization.data(withJSONObject: frame)))
+    }
+
     func testABoolIsNotAnIntegerTimestamp() throws {
         var frame = try XCTUnwrap(FixturePaths.queryAnswerCases().first { $0.name == "query_find_no_frame" }).frame
         frame["t_phone_ms"] = true

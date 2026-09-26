@@ -88,6 +88,22 @@ def test_an_answer_encodes_to_exactly_the_wire_shape() -> None:
     assert json.loads(encode(parsed)) == frame
 
 
+def test_a_phone_box_goes_on_the_wire_and_no_box_is_left_out() -> None:
+    boxed = _frame("answer_found_with_phone_box")
+    assert json.loads(encode(decode(json.dumps(boxed)))) == boxed  # type: ignore[arg-type]
+
+    plain = json.loads(encode(decode(json.dumps(_frame("answer_found_with_null_phone_box")))))  # type: ignore[arg-type]
+    assert "phone_box" not in plain  # older phones reject unknown keys
+
+
+def test_an_inverted_phone_box_is_rejected() -> None:
+    # The schema cannot say x_min < x_max; the decoders do.
+    frame = {**_frame("answer_found_with_phone_box"),
+             "phone_box": {"x_min": 0.5, "y_min": 0.1, "x_max": 0.4, "y_max": 0.2}}
+    with pytest.raises(MalformedMessageError):
+        decode(json.dumps(frame))
+
+
 def test_a_bool_is_not_an_integer_timestamp() -> None:
     frame = {**_frame("query_find_no_frame"), "t_phone_ms": True}
     with pytest.raises(MalformedMessageError):

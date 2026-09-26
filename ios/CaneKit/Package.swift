@@ -45,8 +45,11 @@ let package = Package(
         .testTarget(name: "CaneCameraTests", dependencies: ["CaneCamera"]),
         // Step 20 — "Hey Cane, is there a bathroom around?": intent -> query ->
         // the laptop's Gemini answer -> speech.
-        .target(name: "CaneAssist", dependencies: ["CaneTransport", "CaneOutput", "CaneVoice"]),
-        .testTarget(name: "CaneAssistTests", dependencies: ["CaneAssist", "CaneTransport", "CaneOutput", "CaneVoice"]),
+        .target(name: "CaneAssist", dependencies: ["CaneTransport", "CaneOutput", "CaneVoice", "CaneCamera"]),
+        .testTarget(
+            name: "CaneAssistTests",
+            dependencies: ["CaneAssist", "CaneTransport", "CaneOutput", "CaneVoice", "CaneCamera"]
+        ),
         // Step 12 — navigation engine (Routes API, heading, turn cues). Deliberately
         // independent of CaneContracts: CoreLocation never feeds the awareness path.
         .target(name: "CaneNavigation"),
