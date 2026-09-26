@@ -6,3 +6,8 @@ __pycache__/
 .build/
 *.xcuserstate
 .swiftpm/
+benchmark_runs/
+*.pt
+*.ts
+backend/third_party/
+backend/checkpoints/

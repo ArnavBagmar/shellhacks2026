@@ -8,8 +8,23 @@ dependencies = [
     "websockets>=13",
 ]
 
+[project.optional-dependencies]
+depth = ["torch", "torchvision", "numpy", "opencv-python>=4.11,<5"]
+vision = [
+    "clip",
+    "ultralytics>=8.4.163,<8.5",
+    "opencv-python>=4.11,<5",
+    "pip>=24",
+]
+
+[tool.uv.sources]
+clip = { git = "https://github.com/ultralytics/CLIP.git", rev = "a13192f8cb767260d7dfd98c843b0716593169e7" }
+
 [project.scripts]
 cane-link = "cane.transport.__main__:main"
+cane-bench-yolo = "cane.benchmarks.yolo:main"
+cane-bench-depth = "cane.benchmarks.depth:main"
+cane-preview = "cane.benchmarks.fused:main"
 
 [dependency-groups]
 dev = [
