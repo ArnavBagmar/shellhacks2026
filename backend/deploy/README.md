@@ -36,9 +36,17 @@ attacker-supplied JPEGs is the one security hole this step can create. Set
 `CANE_API_KEY` in the container as well if the venue network is shared.
 
 `g2-standard-8` + one L4 in `us-east1-b` (South Carolina, ~20-30 ms RTT from
-Florida). A 50 GB persistent disk is mounted at `/models` and carries the
-engine cache across recreates; the first boot on a fresh disk formats it only
-if you pass `CANE_FORMAT_DISK=1`.
+Florida). A 50 GB persistent disk is mounted at `/models` and carries **the
+TensorRT engine and its sidecar, and nothing else**; the first boot on a
+fresh disk formats it only if you pass `CANE_FORMAT_DISK=1`.
+
+`/models` is a bind mount, so it *hides* whatever the image baked under it.
+The `yolo11s.pt` weights are therefore baked at `/opt/models/yolo11s.pt`
+(`CANE_WEIGHTS_PATH`) and the ultralytics config at `/opt/ultralytics` — both
+outside the mount. Baked under `/models`, they would vanish behind an empty
+disk on the first boot and ultralytics would silently re-download the weights
+from GitHub: no error, just a slow start and a hard dependency on the venue
+wifi. `CANE_ENGINE_PATH` stays on the disk, which is the whole point of it.
 
 ## Cold start expectations
 
