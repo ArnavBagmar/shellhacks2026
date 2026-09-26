@@ -1,0 +1,8 @@
+// cp Local.xcconfig.example Local.xcconfig -- Local.xcconfig is gitignored.
+// Your Apple team id (Xcode > Settings > Accounts). A free account works;
+// its builds expire after 7 days.
+DEVELOPMENT_TEAM = ABCDE12345
+// Must be unique to your team for a free account.
+CANE_BUNDLE_ID = com.yourname.cane
+// Optional: enables "Hey Cane, take me to ..." (Routes + Places (New)).
+GOOGLE_MAPS_API_KEY =

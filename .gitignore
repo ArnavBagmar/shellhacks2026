@@ -13,3 +13,12 @@ __pycache__/
 *.engine.json
 yolo11s.pt
 *.mlpackage
+
+# step 20: the phone app -- the Xcode project is generated from project.yml
+# (xcodegen), and signing team / Maps key live in an uncommitted xcconfig.
+ios/CaneApp/*.xcodeproj
+ios/CaneApp/Config/Local.xcconfig
+xcuserdata/
+
+# walk logs (laptop + the phone's diag stream) -- local only, may hold transcripts
+backend/logs/

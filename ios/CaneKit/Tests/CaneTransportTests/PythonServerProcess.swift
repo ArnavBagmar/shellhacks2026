@@ -102,6 +102,28 @@ enum PythonServerProcess {
     /// cane.transport.server --port <port> --ping-interval <pingInterval>
     /// --demo-event-every <demoEventEvery>`, cwd `backend/`, with
     /// `PYTHONPATH=src` set (see `environment()`).
+    /// Step 20: `python -m cane.scene --serve --fake` over the repo's still
+    /// equirect -- the laptop's query/answer path with a stub VLM that never
+    /// finds anything, so no Gemini key is needed.
+    static func makeSceneServerProcess(uvPath: String, port: Int) -> Process {
+        let equirect = backendDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("docs/steps/assets/step-06-live-equirect.jpg")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: uvPath)
+        process.arguments = [
+            "run", "python", "-m", "cane.scene", "--serve", "--fake",
+            "--equirect", equirect.path,
+            "--ws-host", "127.0.0.1", "--ws-port", String(port),
+            "--log-level", "WARNING",
+        ]
+        process.currentDirectoryURL = backendDirectory
+        process.environment = environment()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        return process
+    }
+
     static func makeServerProcess(uvPath: String, port: Int, pingInterval: Double, demoEventEvery: Double) -> Process {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: uvPath)

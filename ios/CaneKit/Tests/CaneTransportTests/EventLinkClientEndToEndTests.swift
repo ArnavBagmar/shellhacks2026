@@ -51,4 +51,50 @@ final class EventLinkClientEndToEndTests: XCTestCase {
         let event = try XCTUnwrap(receivedEvent, "expected at least one AwarenessEvent from the server")
         XCTAssertEqual(event.source, .phone)
     }
+
+    /// Step 20: a `query` from the real client reaches the real scene
+    /// server and exactly one `answer` with the same id comes back.
+    func testQueryIsAnsweredEndToEndThroughRealSceneServer() async throws {
+        guard let uvPath = PythonServerProcess.findExecutable(named: "uv") else {
+            throw XCTSkip("'uv' not found on PATH; cannot spawn the Python scene server")
+        }
+        if let importError = PythonServerProcess.probeCaneImportable(uvPath: uvPath) {
+            throw XCTSkip("'import cane' failed in backend/'s venv: \(importError)")
+        }
+
+        let port = try PythonServerProcess.findFreePort()
+        let process = PythonServerProcess.makeSceneServerProcess(uvPath: uvPath, port: port)
+        try process.run()
+        defer {
+            process.terminate()
+            process.waitUntilExit()
+        }
+        try await Task.sleep(for: .milliseconds(1_500))
+
+        let client = EventLinkClient(url: URL(string: "ws://127.0.0.1:\(port)")!)
+        client.connect()
+        defer { client.disconnect() }
+
+        let query = try SceneQuery(
+            queryId: "e2e-1", kind: .find, target: "bathroom",
+            utterance: "is there a bathroom around", tPhoneMs: 1_790_000_000_000, phoneFrame: nil
+        )
+        let sent = try await withTimeout(seconds: 15) { () -> Bool in
+            // Retry until the socket is up: send throws notConnected before.
+            while !Task.isCancelled {
+                if (try? await client.send(query)) != nil { return true }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            return false
+        }
+        XCTAssertTrue(sent)
+        let answer = try await withTimeout(seconds: 15) { () -> SceneAnswer? in
+            var iterator = client.answers.makeAsyncIterator()
+            return await iterator.next()
+        }
+
+        let received = try XCTUnwrap(answer, "expected one answer from the scene server")
+        XCTAssertEqual(received.queryId, "e2e-1")
+        XCTAssertEqual(received.status, .notFound)
+    }
 }

@@ -20,7 +20,7 @@ extension EventLinkClient {
         session: URLSession,
         now: @escaping @Sendable () -> Int64,
         logger: Logger,
-        eventContinuation: AsyncStream<AwarenessEvent>.Continuation,
+        sinks: InboundSinks,
         weakClient: EventLinkClient?
     ) async {
         var backoff = ReconnectBackoff()
@@ -30,7 +30,7 @@ extension EventLinkClient {
             }
 
             let (receivedAnyFrame, connectionError) = await runConnection(
-                webSocketTask, now: now, logger: logger, eventContinuation: eventContinuation
+                webSocketTask, now: now, logger: logger, sinks: sinks
             )
             if receivedAnyFrame {
                 backoff.reset()
@@ -87,7 +87,7 @@ extension EventLinkClient {
         _ webSocketTask: URLSessionWebSocketTask,
         now: @escaping @Sendable () -> Int64,
         logger: Logger,
-        eventContinuation: AsyncStream<AwarenessEvent>.Continuation
+        sinks: InboundSinks
     ) async -> (receivedAnyFrame: Bool, error: Error?) {
         var receivedAnyFrame = false
         while true {
@@ -98,8 +98,7 @@ extension EventLinkClient {
                 let message = try await webSocketTask.receive()
                 receivedAnyFrame = true
                 await handle(
-                    data(for: message), on: webSocketTask, now: now, logger: logger,
-                    eventContinuation: eventContinuation
+                    data(for: message), on: webSocketTask, now: now, logger: logger, sinks: sinks
                 )
             } catch {
                 return (receivedAnyFrame, error)
@@ -112,14 +111,16 @@ extension EventLinkClient {
         on webSocketTask: URLSessionWebSocketTask,
         now: @escaping @Sendable () -> Int64,
         logger: Logger,
-        eventContinuation: AsyncStream<AwarenessEvent>.Continuation
+        sinks: InboundSinks
     ) async {
         do {
             switch try InboundMessage.decode(data) {
             case .ping:
                 await respondToPing(data, on: webSocketTask, now: now, logger: logger)
             case .event(let event):
-                eventContinuation.yield(event)
+                sinks.events.yield(event)
+            case .answer(let answer):
+                sinks.answers.yield(answer)
             case .unknown(let type):
                 logger.debug("ignoring unknown frame type: \(type, privacy: .public)")
             }

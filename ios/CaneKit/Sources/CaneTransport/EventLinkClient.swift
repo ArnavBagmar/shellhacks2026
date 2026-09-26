@@ -27,7 +27,10 @@ import os
 /// for why, and `deinit` below for the deallocation guarantee that buys.
 public actor EventLinkClient {
     public nonisolated let events: AsyncStream<AwarenessEvent>
-    let eventContinuation: AsyncStream<AwarenessEvent>.Continuation
+    /// Step 20: the laptop's replies to `send(_:)`, matched by `queryId`.
+    /// Same lifetime rules as `events`.
+    public nonisolated let answers: AsyncStream<SceneAnswer>
+    let sinks: InboundSinks
     let url: URL
     let session: URLSession
     let now: @Sendable () -> Int64
@@ -45,10 +48,30 @@ public actor EventLinkClient {
         self.url = url
         self.session = session
         self.now = now
-        var continuation: AsyncStream<AwarenessEvent>.Continuation!
-        self.events = AsyncStream { continuation = $0 }
-        self.eventContinuation = continuation
+        let (events, eventContinuation) = AsyncStream<AwarenessEvent>.makeStream()
+        let (answers, answerContinuation) = AsyncStream<SceneAnswer>.makeStream(bufferingPolicy: .bufferingNewest(4))
+        self.events = events
+        self.answers = answers
+        self.sinks = InboundSinks(events: eventContinuation, answers: answerContinuation)
     }
+
+    /// Sends one `query` frame on the live connection. Throws
+    /// `TransportError.notConnected` when there is none -- the caller tells
+    /// the wearer right away instead of waiting out a timeout.
+    public func send(_ query: SceneQuery) async throws {
+        guard let task else { throw TransportError.notConnected }
+        try await task.send(.data(query.encoded()))
+    }
+
+    /// Best effort: one black-box line to the laptop. Throws
+    /// `notConnected` with no link; callers keep their own copy anyway.
+    public func send(_ event: DiagnosticEvent) async throws {
+        guard let task else { throw TransportError.notConnected }
+        try await task.send(.data(event.encoded()))
+    }
+
+    /// True while a socket is registered (connecting or open).
+    public var hasConnection: Bool { task != nil }
 
     /// Starts the connect/reconnect loop. Idempotent: a second call while
     /// already connecting/connected is a no-op. Safe to call without
@@ -75,16 +98,16 @@ public actor EventLinkClient {
     deinit {
         runLoopTask?.cancel()
         task?.cancel(with: .goingAway, reason: nil)
-        eventContinuation.finish()
+        sinks.finish()
     }
 
     private func startIfNeeded() {
         guard runLoopTask == nil else { return }
         isUserDisconnected = false
-        runLoopTask = Task { [weak self, url, session, now, logger, eventContinuation] in
+        runLoopTask = Task { [weak self, url, session, now, logger, sinks] in
             await EventLinkClient.runReconnectLoop(
                 url: url, session: session, now: now, logger: logger,
-                eventContinuation: eventContinuation, weakClient: self
+                sinks: sinks, weakClient: self
             )
         }
     }
@@ -103,5 +126,16 @@ public actor EventLinkClient {
 
     func register(_ webSocketTask: URLSessionWebSocketTask?) {
         task = webSocketTask
+    }
+}
+
+/// Where decoded inbound frames go. Both streams outlive any one connection.
+struct InboundSinks: Sendable {
+    let events: AsyncStream<AwarenessEvent>.Continuation
+    let answers: AsyncStream<SceneAnswer>.Continuation
+
+    func finish() {
+        events.finish()
+        answers.finish()
     }
 }

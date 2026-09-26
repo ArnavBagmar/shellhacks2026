@@ -11,4 +11,9 @@ public enum TransportError: Error, Equatable, Sendable {
     /// The frame decoded as an `event` envelope, but its nested
     /// `AwarenessEvent` payload failed contract validation.
     case invalidEvent(AwarenessEventError)
+    /// A `query`/`answer` frame (step 20) with a missing, unknown or
+    /// out-of-range field; the associated value names the field.
+    case invalidFrame(String)
+    /// `EventLinkClient.send` was called with no live connection.
+    case notConnected
 }

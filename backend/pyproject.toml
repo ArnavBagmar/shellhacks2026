@@ -33,6 +33,9 @@ yolo = ["ultralytics>=8.3"]
 # (step-07-design A11). Not used by docker/Dockerfile — the NGC image supplies
 # torch and TensorRT; the PyPI tensorrt sdist must never be built on a Mac (A4).
 gpu = ["ultralytics>=8.3; sys_platform == 'linux'", "tensorrt; sys_platform == 'linux'"]
+# Step 20 -- "Hey Cane, is there a bathroom around?": the laptop asks Gemini
+# about the dewarped 360 crops. Key from GEMINI_API_KEY, never in the repo.
+scene = ["google-genai>=1.0"]
 
 [project.scripts]
 cane-link = "cane.transport.__main__:main"

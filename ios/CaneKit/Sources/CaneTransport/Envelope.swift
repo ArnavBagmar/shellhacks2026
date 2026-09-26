@@ -6,11 +6,13 @@ import Foundation
 public enum InboundMessage: Equatable, Sendable {
     case ping(t1: Int64)
     case event(AwarenessEvent)
+    case answer(SceneAnswer)
     case unknown(type: String)
 
     /// Decodes one wire frame. Throws `TransportError.malformed` for bad
     /// JSON or a missing/malformed field, `TransportError.invalidEvent`
-    /// when an `event` frame's nested payload fails contract validation.
+    /// when an `event` frame's nested payload fails contract validation,
+    /// `TransportError.invalidFrame` for a bad `answer` frame (step 20).
     /// An unrecognised (but well-formed) `type` -- including the reserved
     /// `health`/`location` -- decodes to `.unknown` rather than throwing.
     public static func decode(_ data: Data) throws -> InboundMessage {
@@ -27,6 +29,8 @@ public enum InboundMessage: Equatable, Sendable {
             return try decodePing(object)
         case "event":
             return try decodeEvent(object)
+        case "answer":
+            return .answer(try SceneAnswer.decode(object))
         default:
             return .unknown(type: type)
         }
