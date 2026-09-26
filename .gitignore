@@ -6,3 +6,10 @@ __pycache__/
 .build/
 *.xcuserstate
 .swiftpm/
+
+# step 7: local YOLO env, weights and TensorRT engines are never committed
+.venv-yolo/
+*.engine
+*.engine.json
+yolo11s.pt
+*.mlpackage

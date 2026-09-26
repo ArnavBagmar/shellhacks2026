@@ -14,7 +14,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.9",
-    "supervision>=0.25",
+    "supervision>=0.25,<0.31",  # pinned per step-07-design A7/H9; do not re-lock
     "pydantic-settings>=2.4",
 ]
 
@@ -29,8 +29,10 @@ mac = [
 ]
 # Real YOLO11s inference on the dev laptop (PyTorch CPU/MPS). Not needed for tests.
 yolo = ["ultralytics>=8.3"]
-# Cloud L4 only: the TensorRT engine is exported on the serving GPU (step 7 §F5).
-gpu = ["ultralytics>=8.3", "tensorrt"]
+# Cloud L4 only (linux): the TensorRT engine is exported on the serving GPU
+# (step-07-design A11). Not used by docker/Dockerfile — the NGC image supplies
+# torch and TensorRT; the PyPI tensorrt sdist must never be built on a Mac (A4).
+gpu = ["ultralytics>=8.3; sys_platform == 'linux'", "tensorrt; sys_platform == 'linux'"]
 
 [project.scripts]
 cane-link = "cane.transport.__main__:main"
