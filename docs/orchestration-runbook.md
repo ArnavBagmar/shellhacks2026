@@ -13,6 +13,21 @@
 > is no fuzzy matching. Two of the three lanes write Swift; using `code-reviewer` for all of it
 > would have been the worse trade.
 
+## Build status — 2026-09-26
+
+| Step | State | Where |
+|---|---|---|
+| 2 · Event contract + golden fixtures | **built, reviewed, on `main`** — schema, fixture (11 valid / 27 invalid / 7 malformed), Pydantic + Swift models, drift tests | `contracts/`, `backend/src/cane/contracts`, `ios/CaneKit/Sources/CaneContracts` |
+| 3 · NTP handshake + WebSocket transport | **built, reviewed, on `main`** — offset estimator, Python event-link server + CLI, Swift actor client with reconnect; real phone↔laptop round-trip test | `backend/src/cane/transport`, `ios/CaneKit/Sources/CaneTransport` |
+| 6 · X4 bridge | brief ready, defines the bridge↔cloud API | `docs/steps/step-06-brief.md` |
+| 7 · Cloud L4 service | brief ready; architect pass still to run | `docs/steps/step-07-brief.md` |
+| 9 · Feedback manager | brief + architect design ready — **P3 can start now against the fixture** | `docs/steps/step-09-*.md` |
+| 10 · Haptics + TTS | brief + accessibility design ready | `docs/steps/step-10-*.md` |
+| 1 · Spikes | **not started — hardware, team must run**; spike 1 is largely answered by `insta360feed.md` (X4 is UVC; use the AVFoundation source, not OpenCV, for 2880×1440 on macOS) | §6 of `camera-sync-design.md` |
+| 4, 5, 8, 11–19 | runbook entry only | below |
+
+Rules of the road: `contracts/` is frozen (a change = re-running step 2 in both languages); every step's binding spec is its `docs/steps/step-NN-brief.md` plus `-design.md` where present, and the design's amendments override the brief.
+
 ---
 
 ## Steps overview

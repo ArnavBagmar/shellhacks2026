@@ -11,7 +11,7 @@ An assistive extension to the white cane. A chest-mounted iPhone detects front h
 | `contracts/` | The integration surface: `awareness_event.schema.json` (the 11-field contract, single source of truth), `transport_envelope.schema.json` (ping/pong/event frames), the golden fixture both test suites run, and a README with field semantics + the COCO→class mapping | **Done, frozen** — any change means re-running step 2 in both languages |
 | `backend/` | Python 3.12 `uv` project, package `cane`: `cane.contracts` (Pydantic model + parser), `cane.transport` (NTP offset estimator, WebSocket event-link server, CLI) | **Done** (steps 2–3) |
 | `ios/CaneKit/` | SwiftPM package: `CaneContracts` (Codable model + validation), `CaneTransport` (WebSocket client, pong responder, reconnect) | **Done** (steps 2–3) |
-| `docs/steps/` | Per-step build briefs and architect design reviews — far more detailed than the runbook; each is the binding spec for that step | Steps 2, 3, 6, 9, 10 (see its README) |
+| `docs/steps/` | Per-step build briefs and architect design reviews — far more detailed than the runbook; each is the binding spec for that step | Steps 2, 3, 6, 7, 9, 10 (see its README) |
 
 ## Quick start
 
@@ -29,7 +29,7 @@ cd backend && uv run python -m cane.transport.server --port 8765 --demo-event-ev
 ## Where each lane starts
 
 - **P1 · perception (iOS)** — step 4 in `docs/orchestration-runbook.md`. Produce `AwarenessEvent(source: .phone)` and send it through `CaneTransport`. Bearings are torso-relative and must be normalized into `(-180, 180]`; the phone needs a frame-stable `track_id` (see `docs/steps/step-09-design.md` hazard H1). Add new Swift targets to `ios/CaneKit`, never a sibling package.
-- **P2 · X4 bridge + cloud (Python)** — start from `docs/steps/step-06-brief.md` (grab thread, 6-crop dewarp, one-in-flight sender, and the bridge↔cloud inference API it defines for step 7). The prototype capture code it references lives in the separate `insta360` folder documented in `docs/insta360feed.md`.
+- **P2 · X4 bridge + cloud (Python)** — start from `docs/steps/step-06-brief.md` (grab thread, 6-crop dewarp, one-in-flight sender, and the bridge↔cloud inference API it defines for step 7), then `docs/steps/step-07-brief.md` for the L4 service. The prototype capture code it references lives in the separate `insta360` folder documented in `docs/insta360feed.md`.
 - **P3 · experience (iOS)** — start from `docs/steps/step-09-brief.md` + `step-09-design.md` (feedback manager gauntlet, buildable today against `contracts/fixtures/` with no hardware), then `step-10-brief.md` + `step-10-design.md` (haptics, speech, audio session).
 
 ## Rules that keep three lanes from colliding
