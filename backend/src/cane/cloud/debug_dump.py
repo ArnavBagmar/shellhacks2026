@@ -10,6 +10,7 @@ counter, never stamped with a local time.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Final, Sequence
 
@@ -18,6 +19,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from cane.cloud.api_models import InferenceResponse
+
+logger = logging.getLogger(__name__)
 
 TILE_PX: Final = 400
 COLUMNS: Final = 3
@@ -84,4 +87,26 @@ def write_contact_sheet(
         quality -= QUALITY_STEP
     path = dump_dir / f"sheet-{index:06d}.jpg"
     path.write_bytes(encoded)
+    return path
+
+
+def maybe_write_sheet(
+    dump_dir: Path | None,
+    every_n: int,
+    frames_seen: int,
+    images: Sequence[NDArray[np.uint8]],
+    response: InferenceResponse,
+) -> Path | None:
+    """The whole on/off decision, so the request handler carries none of it.
+
+    Never fatal: a debug sheet that fails to write is not a failed request.
+    """
+    if dump_dir is None or frames_seen % every_n:
+        return None
+    try:
+        path = write_contact_sheet(dump_dir, images, response, frames_seen)
+    except Exception:  # noqa: BLE001 - diagnostics must never break serving
+        logger.exception("debug contact sheet failed")
+        return None
+    logger.info("wrote debug contact sheet %s", path)
     return path

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import os
 import statistics
 import time
 from typing import Any, Callable, Sequence
@@ -337,7 +338,18 @@ async def test_non_inference_overhead_p50_under_budget(
     ordered = sorted(samples)
     p50 = statistics.median(ordered)
     p95 = ordered[int(0.95 * (len(ordered) - 1))]
-    print(f"\nnon-inference overhead: p50 {p50:.2f} ms, p95 {p95:.2f} ms")
+    load = os.getloadavg()[0]
+    cores = os.cpu_count() or 1
+    # Measured and printed unconditionally, so the number is visible even
+    # when the budget is not enforced.
+    print(f"\nnon-inference overhead: p50 {p50:.2f} ms, p95 {p95:.2f} ms "
+          f"(load {load:.1f} on {cores} cores)")
+    if load > cores:
+        pytest.skip(
+            f"machine saturated (1-min load {load:.1f} > {cores} cores): measured "
+            f"p50 {p50:.2f} ms against the {NON_INFERENCE_BUDGET_MS} ms budget, but a "
+            "teammate's parallel build must not turn this red"
+        )
     assert p50 < NON_INFERENCE_BUDGET_MS
 
 

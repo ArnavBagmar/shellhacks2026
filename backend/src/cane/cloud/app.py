@@ -30,6 +30,7 @@ from cane.cloud.api_models import (
     InferenceMeta,
     InferenceResponse,
 )
+from cane.cloud.debug_dump import maybe_write_sheet
 from cane.cloud.detector.base import FrameDetector
 from cane.cloud.detector.factory import build_detector
 from cane.cloud.service import MS_PER_S, InferenceService
@@ -141,29 +142,14 @@ def _decode_and_infer(
     images = [_decode(index, raw, meta.crop_px) for index, raw in enumerate(raws)]
     decode_ms = (time.perf_counter() - started) * MS_PER_S
     response = state.service.infer(meta, images, decode_ms=decode_ms)
-    _maybe_dump(state, images, response)
-    return response
-
-
-def _maybe_dump(
-    state: AppState, images: Sequence[NDArray[np.uint8]], response: InferenceResponse
-) -> None:
-    """Debug contact sheets, off unless CANE_DUMP_DIR is set. Deliberately
-    after `infer` has stamped `inference_ms`, so enabling it cannot move the
-    number, and never fatal: a failed debug write is not a failed request.
-    """
     state.frames_seen += 1
-    if state.settings.dump_dir is None or state.frames_seen % state.settings.dump_every_n:
-        return
-    try:
-        from cane.cloud.debug_dump import write_contact_sheet
-
-        path = write_contact_sheet(
-            state.settings.dump_dir, images, response, state.frames_seen
-        )
-        logger.info("wrote debug contact sheet %s", path)
-    except Exception:  # noqa: BLE001 - diagnostics must never break serving
-        logger.exception("debug contact sheet failed")
+    # After `infer` has stamped `inference_ms`, so switching the dump on can
+    # never move the number step 8 and step 16 read.
+    maybe_write_sheet(
+        state.settings.dump_dir, state.settings.dump_every_n,
+        state.frames_seen, images, response,
+    )
+    return response
 
 
 def _warm(state: AppState, shapes: Sequence[int]) -> list[dict[str, float | int]]:
