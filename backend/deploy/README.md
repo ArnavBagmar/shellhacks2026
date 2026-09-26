@@ -7,8 +7,8 @@
 > TensorRT mode; the model runs in **12 ms at 640 and 20 ms at 512** (warm
 > `/warmup`), and the service's decode-inclusive `inference_ms` is ~30 ms.
 > PyTorch-on-CUDA mode (no engine) measured 42 ms model / ~59 ms service and
-> round trip p50 91 ms. `create_l4_vm.sh` and `startup.sh` were **not
-> executed** — the VM pre-existed and the steps below were run by hand.
+> round trip p50 91 ms. `create_l4_vm.sh` and `startup.sh` were **not executed**
+> — the VM pre-existed and the steps below were run by hand.
 
 ## What was actually done on 2026-09-26 (repeatable)
 
