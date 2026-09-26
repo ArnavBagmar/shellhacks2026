@@ -476,6 +476,27 @@ measured 3.12 / 3.65 / 4.04 case); an unanchored one-side-blocked scene inside C
 correctly; the anchored path is untouched; `gap_bearing_deg` stays within C0's ±30 when unanchored.
 **Out of scope:** the anchored path; re-deriving `relative_freedom`.
 
+## Step 30 — Cross-check the X4's scale against the phone's TrueDepth (closes §3.5 ruling 4)
+
+The merge brought in `CaneCamera.TrueDepthProbe`: the phone's front camera is a TrueDepth sensor, and
+it reports **a measured distance in metres straight ahead** — the only real metre anywhere in this
+project. That is exactly what §3.5 ruling 4 says the affine fit is missing. The fit's residual is
+blind to the three errors most likely at a venue (a wrong `MOUNT_HEIGHT_M`, a tilted camera, a floor
+hidden by a crowd) because all three fit the ground rows *perfectly* while every distance is wrong —
+the crowd case reported everything **4× farther** at a residual inside the ceiling.
+
+TrueDepth cannot be fooled that way, and "straight ahead" is the centre of crop C0. So: send the
+phone's reading up with the `health` frame (or a new one), compare it to the anchored distance at C0's
+centre column, and reject the frame's anchor when they disagree by more than a set factor. One real
+metre is worth more than any amount of self-consistency checking.
+
+**Acceptance:** a planted 20% mount-height error is *caught* (it currently scores residual 0.000); the
+occluded-floor case that inflated `a` 4× is caught; agreement within the tolerance leaves the anchor
+accepted and changes no behaviour; a phone with no TrueDepth (SE, pre-X) degrades to today's path
+rather than refusing to anchor.
+**Out of scope:** using TrueDepth for steering itself — its useful range is short and it sees only
+ahead, which is the phone's sector already; this is a *guard*, not a second depth source.
+
 ---
 
 ## Risks, ordered by how much they threaten the demo

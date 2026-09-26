@@ -157,6 +157,7 @@ These supersede the older commands below for steps 6, 7, 8, 9 and 12: the plan p
 | 27 | Two-parameter affine scale fit (unblocks `proximityFactor`) | P2 | impl | `ecc:tdd-guide,ecc:mle-reviewer,ecc:python-reviewer` |
 | 28 | 🔶 Navigation cue names the passable side (phone) | P3 | impl | `ecc:tdd-guide,ecc:swift-reviewer` |
 | 29 | Unanchored ring restricted to the front crop | P2 | impl | `ecc:tdd-guide,ecc:python-reviewer` |
+| 30 | Cross-check the X4 scale against phone TrueDepth | P1+P2 | impl | `ecc:tdd-guide,ecc:swift-reviewer,ecc:python-reviewer` |
 
 **Steps 21–26 (added 2026-09-26)** port the sensing & steering half of
 [tonywangs/shepherd](https://github.com/tonywangs/shepherd#sensing--steering-pipeline) onto our
