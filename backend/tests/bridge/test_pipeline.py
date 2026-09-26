@@ -276,7 +276,7 @@ async def test_an_overrun_tick_still_yields_to_the_event_loop() -> None:
     task = asyncio.get_running_loop().create_task(pending_request())
     overrun_due = time.monotonic() - 1.0
 
-    next_due = await pipeline._sleep_until_next_tick(overrun_due)
+    next_due = await pipeline._sleep_until_next_tick(overrun_due, 1.0 / SEND_FPS)
 
     assert started == ["ran"], "the overrun branch returned without yielding"
     assert next_due <= time.monotonic()

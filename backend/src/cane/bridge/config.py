@@ -16,7 +16,10 @@ from cane.cloud.api_models import SESSION_ID_PATTERN
 DEFAULT_WS_HOST = "0.0.0.0"
 DEFAULT_WS_PORT = 8765
 DEFAULT_INFERENCE_URL = "http://127.0.0.1:8000/infer"
-DEFAULT_REQUEST_TIMEOUT_S = 2.0
+# Step 8 E1: a request slower than this is a *timeout outcome*, not a
+# slow RTT, so the health monitor and the uplink must agree on one
+# number -- `backends.DEFAULT_BACKEND_TIMEOUT_S` is the same 1.0 s.
+DEFAULT_REQUEST_TIMEOUT_S = 1.0
 DEFAULT_STATS_INTERVAL_S = 5.0
 DEFAULT_SOURCE_SPEC = "synthetic"
 MAX_DELTA_DEG = 360.0

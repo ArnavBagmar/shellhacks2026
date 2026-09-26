@@ -55,8 +55,10 @@ def test_to_wire_dict_uses_schema_alias(golden_valid_event):
 
 
 def test_unknown_type_decodes_to_unknown():
-    decoded = decode('{"type": "health", "battery_pct": 80}')
-    assert decoded == Unknown(type="health")
+    # `health` was the example here until step 8 defined it; anything still
+    # outside ping/pong/event/health has to keep taking this path.
+    decoded = decode('{"type": "battery", "battery_pct": 80}')
+    assert decoded == Unknown(type="battery")
 
 
 def test_reserved_location_type_also_decodes_to_unknown():

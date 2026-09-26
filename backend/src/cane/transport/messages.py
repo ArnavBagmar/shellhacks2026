@@ -14,7 +14,7 @@ import json
 from dataclasses import dataclass
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from cane.contracts.awareness_event import (
     T_CAPTURE_MS_MAX,
@@ -87,8 +87,10 @@ class Unknown:
     type: str
 
 
+HEALTH_TYPE = "health"
+
 OutboundMessage = Ping | Pong | EventMessage
-InboundMessage = Ping | Pong | EventMessage | Unknown
+InboundMessage = Ping | Pong | EventMessage | PhoneHealth | Unknown
 
 
 def to_wire_dict(event: AwarenessEvent) -> dict[str, Any]:
@@ -142,6 +144,18 @@ def _decode_event(data: dict[str, Any]) -> EventMessage:
     return EventMessage(event=event)
 
 
+def _decode_health(data: dict[str, Any]) -> PhoneHealth:
+    """``type`` is the envelope's, not the payload's: it is stripped before
+    validation so ``extra="forbid"`` still means "no unknown keys".
+    """
+    payload = {key: value for key, value in data.items() if key != "type"}
+    try:
+        return PhoneHealth.model_validate(payload)
+    except ValidationError as exc:
+        fields = sorted({".".join(str(p) for p in e["loc"]) or "health" for e in exc.errors()})
+        raise MalformedMessageError(f"invalid 'health' frame fields: {fields}") from exc
+
+
 def decode(text: str) -> InboundMessage:
     """Parse one wire frame. Raises :class:`MalformedMessageError` for bad
     JSON, a missing/wrong-typed field, or an invalid ``event`` payload. An
@@ -165,6 +179,8 @@ def decode(text: str) -> InboundMessage:
         return _decode_pong(data)
     if msg_type == "event":
         return _decode_event(data)
+    if msg_type == HEALTH_TYPE:
+        return _decode_health(data)
     if isinstance(msg_type, str):
         return Unknown(type=msg_type)
     raise MalformedMessageError(f"'type' must be a string, got {msg_type!r}")

@@ -1,6 +1,11 @@
 """The bridge loop: grab -> dewarp -> encode -> send -> events -> phone.
 
-Paced at the rung's fps. Every tick takes the *newest* frame (rule 1) and
+Paced at the *current* rung's fps, re-read every tick: step 8's health
+monitor may step a rung or flip to the local detector between any two
+frames, and the size, quality and rate on the wire follow it without
+anything being rebuilt (E3).
+
+Every tick takes the *newest* frame (rule 1) and
 sends only if the uplink slot is free (rule 2); both of those failing silently
 is what design Sec 3.3 warns about, so the 5-second stats line prints the
 numbers that would expose it: grab fps, send fps, dropped_busy, frame age at
@@ -26,15 +31,20 @@ from cane.bridge.config import BridgeConfig
 from cane.bridge.deadline import FRAME_DEADLINE_MS, past_deadline
 from cane.bridge.dewarp import CROP_YAWS_DEG, CropSet, encode_cropset, dewarp_equirect
 from cane.bridge.events import events_from_response
+from cane.bridge.health import HealthMonitor
 from cane.bridge.log_throttle import LogThrottle
 from cane.bridge.sender import OneInFlightSender, SendOutcome
+# Re-exported for callers that imported them from here before step 8 split
+# the stats line out of this module.
+from cane.bridge.stats import PipelineStats, format_stats_line, health_snapshot
+from cane.bridge.uplink import RungPlan, RungPlanner
 from cane.cloud.api_models import (
     SCHEMA_VERSION,
     InferenceMeta,
     InferenceRequest,
     InferenceResponse,
 )
-from cane.contracts.awareness_event import AwarenessEvent
+from cane.contracts.awareness_event import AwarenessEvent, Source
 from cane.transport.clock_sync import ClockNotSyncedError
 from cane.transport.wall_clock import now_ms
 
@@ -108,56 +118,6 @@ class LaptopClock:
         return t_arrival_laptop_ms - self.pipeline_delay_d_ms
 
 
-@dataclass(frozen=True)
-class PipelineStats:
-    """An immutable snapshot of one run (or one 5-second window)."""
-
-    elapsed_s: float
-    grabbed: int
-    ticks: int
-    sent: int
-    dropped_busy: int
-    skipped_unsynced: int
-    skipped_no_frame: int
-    skipped_deadline: int
-    succeeded: int
-    failed: int
-    rejected: int
-    events_delivered: int
-    events_undelivered: int
-    max_in_flight: int
-    frame_age_p50_ms: float | None
-    frame_age_p95_ms: float | None
-    rtt_p50_ms: float | None
-    rtt_p95_ms: float | None
-
-    @property
-    def grab_fps(self) -> float:
-        return self.grabbed / self.elapsed_s if self.elapsed_s > 0 else 0.0
-
-    @property
-    def send_fps(self) -> float:
-        return self.sent / self.elapsed_s if self.elapsed_s > 0 else 0.0
-
-
-def _ms(value: float | None) -> str:
-    return "n/a" if value is None else f"{value:.0f}ms"
-
-
-def format_stats_line(stats: PipelineStats) -> str:
-    """The one-line 5-second summary (F5)."""
-    return (
-        f"grab {stats.grab_fps:.1f} fps | send {stats.send_fps:.1f} fps | "
-        f"dropped_busy {stats.dropped_busy} | "
-        f"frame_age p50 {_ms(stats.frame_age_p50_ms)} p95 {_ms(stats.frame_age_p95_ms)} | "
-        f"rtt p50 {_ms(stats.rtt_p50_ms)} p95 {_ms(stats.rtt_p95_ms)} | "
-        f"in_flight_max {stats.max_in_flight} | events {stats.events_delivered} | "
-        f"failed {stats.failed} rejected {stats.rejected} "
-        f"unsynced {stats.skipped_unsynced} no_frame {stats.skipped_no_frame} "
-        f"deadline {stats.skipped_deadline}"
-    )
-
-
 class BridgePipeline:
     """One run of the bridge. Construct, ``start`` the grab thread, ``run``."""
 
@@ -170,13 +130,19 @@ class BridgePipeline:
         event_sink: EventSink | None = None,
         crop_px: int | None = None,
         stats_hook: Callable[[PipelineStats], None] | None = None,
+        monitor: HealthMonitor | None = None,
+        source_provider: Callable[[], Source] | None = None,
     ) -> None:
         self._config = config
         self._grab = grab
         self._sender = sender
         self._clock_provider = clock_provider
         self._event_sink = event_sink
-        self._crop_px = crop_px if crop_px is not None else config.rung.crop_px
+        self._monitor = monitor
+        self._planner = RungPlanner(config, monitor, crop_px)
+        # Which backend answered the response now being handled. Constant
+        # for a run with no monitor, which is every pre-step-8 caller.
+        self._source_provider = source_provider
         self._stats_hook = stats_hook
         sender.set_response_handler(self._handle_response)
         self._last_seq = 0
@@ -198,17 +164,21 @@ class BridgePipeline:
         next_due = started
         try:
             while duration_s is None or time.monotonic() - started < duration_s:
-                await self._tick()
-                next_due = await self._sleep_until_next_tick(next_due)
+                plan = self._planner.current()
+                await self._tick(plan)
+                next_due = await self._sleep_until_next_tick(next_due, plan.period_s)
                 self._maybe_log_stats(started, grabbed_at_start)
         finally:
             await self._sender.drain()
         return self._snapshot(time.monotonic() - started, self._grab.frames_grabbed - grabbed_at_start)
 
-    async def _sleep_until_next_tick(self, next_due: float) -> float:
-        """Fixed-rate pacing that never tries to catch up on a missed tick."""
-        period = self._config.tick_period_s
-        next_due += period
+    async def _sleep_until_next_tick(self, next_due: float, period_s: float) -> float:
+        """Fixed-rate pacing that never tries to catch up on a missed tick.
+
+        The period is passed in rather than read from the config: a rung
+        step changes the send rate, and the very next sleep must use it.
+        """
+        next_due += period_s
         delay = next_due - time.monotonic()
         if delay > 0:
             await asyncio.sleep(delay)
@@ -220,7 +190,7 @@ class BridgePipeline:
         await asyncio.sleep(0)
         return time.monotonic()
 
-    async def _tick(self) -> None:
+    async def _tick(self, plan: RungPlan) -> None:
         self._ticks += 1
         # Rule 2 first: if the uplink slot is busy this frame is dropped, so
         # there is no point spending 6 remaps and 6 JPEG encodes on it.
@@ -230,7 +200,7 @@ class BridgePipeline:
         # One hop into a worker thread for the whole cv2 half of the tick:
         # every extra round-trip through the event loop is milliseconds added
         # to frame age at send, which is the number this step is judged on.
-        work = await asyncio.to_thread(self._take_and_build)
+        work = await asyncio.to_thread(self._take_and_build, plan)
         if work.skip is not None:
             self._count_skip(work.skip)
             return
@@ -261,7 +231,7 @@ class BridgePipeline:
             self._skipped_unsynced += 1
             self._log_unsynced()
 
-    def _take_and_build(self) -> TickWork:
+    def _take_and_build(self, plan: RungPlan) -> TickWork:
         """Worker thread: freshest frame -> stamp -> dewarp -> JPEG.
 
         The deadline is re-checked after every stage, because those stages
@@ -277,19 +247,19 @@ class BridgePipeline:
             t_capture_ms = self._clock_provider().capture_time_ms(frame.t_arrival_laptop_ms)
         except ClockNotSyncedError:
             return TickWork(skip=TickSkip.UNSYNCED, frame_seq=frame.seq)
-        cropset = self._dewarp(frame)
+        cropset = self._dewarp(frame, plan.crop_px)
         if cropset is None:
             return TickWork(skip=TickSkip.ENCODE_FAILED, frame_seq=frame.seq)
         if (expired := self._expired(frame)) is not None:
             return expired
-        crops = self._encode(cropset, frame.seq)
+        crops = self._encode(cropset, frame.seq, plan.jpeg_quality)
         if crops is None:
             return TickWork(skip=TickSkip.ENCODE_FAILED, frame_seq=frame.seq)
         if (expired := self._expired(frame)) is not None:
             return expired
         return TickWork(
             skip=None,
-            request=InferenceRequest(meta=self._meta(t_capture_ms), crops=crops),
+            request=InferenceRequest(meta=self._meta(t_capture_ms, plan), crops=crops),
             frame_seq=frame.seq,
             t_arrival_laptop_ms=frame.t_arrival_laptop_ms,
         )
@@ -322,35 +292,41 @@ class BridgePipeline:
             FRAME_DEADLINE_MS,
         )
 
-    def _dewarp(self, frame: Frame) -> CropSet | None:
+    def _dewarp(self, frame: Frame, crop_px: int) -> CropSet | None:
         """Six perspective crops. Worker thread; never raises into the loop."""
         try:
-            return dewarp_equirect(frame.image, self._crop_px, frame.t_arrival_laptop_ms)
+            return dewarp_equirect(frame.image, crop_px, frame.t_arrival_laptop_ms)
         except (ValueError, RuntimeError) as exc:
             logger.warning("dropping frame %d in dewarp: %s", frame.seq, exc)
             return None
 
-    def _encode(self, cropset: CropSet, frame_seq: int) -> tuple[bytes, ...] | None:
+    def _encode(
+        self, cropset: CropSet, frame_seq: int, jpeg_quality: int
+    ) -> tuple[bytes, ...] | None:
         """JPEG at the rung's quality. Worker thread; never raises."""
         try:
-            return encode_cropset(cropset, self._config.rung.jpeg_quality)
+            return encode_cropset(cropset, jpeg_quality)
         except (ValueError, RuntimeError) as exc:
             logger.warning("dropping frame %d in encode: %s", frame_seq, exc)
             return None
 
-    def _meta(self, t_capture_ms: int) -> InferenceMeta:
-        meta = InferenceMeta(
+    def _meta(self, t_capture_ms: int, plan: RungPlan) -> InferenceMeta:
+        """The rung and crop size are the ones this frame actually used --
+        never the ones the run started with (E3).
+        """
+        return InferenceMeta(
             schema=SCHEMA_VERSION,
             t_capture_ms=t_capture_ms,
-            rung=self._config.rung.index,
-            crop_px=self._crop_px,
+            rung=plan.index,
+            crop_px=plan.crop_px,
             yaws_deg=CROP_YAWS_DEG,
             session_id=self._config.session_id,
         )
-        return meta
 
     async def _handle_response(self, response: InferenceResponse) -> None:
-        events = events_from_response(response, CROP_YAWS_DEG, self._config.delta_deg)
+        events = events_from_response(
+            response, CROP_YAWS_DEG, self._config.delta_deg, self._source()
+        )
         if self._event_sink is None:
             self._events_undelivered += len(events)
             return
@@ -359,6 +335,13 @@ class BridgePipeline:
                 self._events_delivered += 1
             else:
                 self._events_undelivered += 1
+
+    def _source(self) -> Source:
+        """Who answered *this* response. The sender holds one request at a
+        time and calls this handler in the same task, so the provider is
+        never reporting some other frame's backend.
+        """
+        return Source.X4_CLOUD if self._source_provider is None else self._source_provider()
 
     def _maybe_log_stats(self, started: float, grabbed_at_start: int) -> None:
         elapsed = time.monotonic() - started
@@ -396,5 +379,6 @@ class BridgePipeline:
             frame_age_p95_ms=sender.frame_age_p95_ms,
             rtt_p50_ms=sender.rtt_p50_ms,
             rtt_p95_ms=sender.rtt_p95_ms,
+            health=health_snapshot(self._monitor),
         )
 

@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import logging
 from types import TracebackType
+from typing import Callable
 
 import websockets
 from websockets.asyncio.server import Server, ServerConnection
@@ -22,6 +23,7 @@ from cane.transport.clock_sync import PING_INTERVAL_S, NtpSample, OffsetEstimato
 from cane.transport.messages import (
     EventMessage,
     MalformedMessageError,
+    PhoneHealth,
     Ping,
     Pong,
     Unknown,
@@ -46,11 +48,17 @@ class EventLinkServer:
         port: int,
         ping_interval_s: float = PING_INTERVAL_S,
         pipeline_delay_d_ms: int = 0,
+        on_health: Callable[[PhoneHealth], None] | None = None,
     ) -> None:
         self._host = host
         self._port = port
         self._ping_interval_s = ping_interval_s
         self._pipeline_delay_d_ms = pipeline_delay_d_ms
+        # Step 8's health monitor, when there is one. Synchronous by
+        # design: folding one report into an immutable state is a handful
+        # of integer compares, and the inbound frame loop must not await
+        # anything that could stall the pong stream behind it.
+        self._on_health = on_health
         self._estimator = OffsetEstimator()
         self._connection: ServerConnection | None = None
         self._server: Server | None = None
@@ -138,6 +146,8 @@ class EventLinkServer:
 
         if isinstance(msg, Pong):
             self._apply_pong(msg)
+        elif isinstance(msg, PhoneHealth):
+            self._apply_health(msg)
         elif isinstance(msg, Unknown):
             logger.debug("ignoring unknown frame type from phone: %s", msg.type)
         else:
@@ -145,6 +155,23 @@ class EventLinkServer:
             # (both flow laptop -> phone only); never worth dropping the
             # connection over, so it is logged and ignored like Unknown.
             logger.debug("ignoring unexpected %s frame from phone", type(msg).__name__)
+
+    def _apply_health(self, health: PhoneHealth) -> None:
+        """The phone's stale-drop signal (Sec 4.4). A hook that raises is a
+        bug in the monitor, never a reason to drop the phone -- the link is
+        the only thing carrying warnings to the wearer.
+        """
+        logger.debug(
+            "phone health: %d/%d dropped stale (rate %.2f over %d buckets)",
+            health.stale_dropped, health.received, health.stale_drop_rate,
+            health.complete_buckets,
+        )
+        if self._on_health is None:
+            return
+        try:
+            self._on_health(health)
+        except Exception:  # noqa: BLE001 - the connection outlives the hook
+            logger.exception("the on_health hook raised; ignoring this report")
 
     def _apply_pong(self, pong: Pong) -> None:
         t4 = now_ms()

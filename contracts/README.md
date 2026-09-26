@@ -79,16 +79,19 @@ rebuilt iOS app; treat it as re-running this step, not a patch.
 
 ## Transport envelope
 
-`transport_envelope.schema.json` (draft 2020-12) documents the three
+`transport_envelope.schema.json` (draft 2020-12) documents the four
 WebSocket frame shapes the laptop (server) and phone (client) exchange —
-see `docs/camera-sync-design.md` §4.2 and `cane.transport.messages` /
-`CaneTransport`'s `Envelope.swift` for the code. Every frame is a JSON text
+see `docs/camera-sync-design.md` §4.2 and §4.4 and `cane.transport.messages`
+/ `CaneTransport`'s `Envelope.swift` for the code. Every frame is a JSON text
 object with a `type` string:
 
 ```json
 {"type": "ping", "t1": 1790000000000}
 {"type": "pong", "t1": 1790000000000, "t2": 1790000000012, "t3": 1790000000013}
 {"type": "event", "event": { "...": "the 11-field AwarenessEvent, untouched" }}
+{"type": "health", "t_phone_ms": 1790000000000, "window_ms": 10000,
+ "received": 27, "stale_dropped": 7, "stale_drop_rate": 0.26,
+ "complete_buckets": 10}
 ```
 
 - The laptop initiates every `ping`; the phone only answers with `pong`,
@@ -100,16 +103,28 @@ object with a `type` string:
   validated against `awareness_event.schema.json` directly (only the
   nested `event` value is, via the `$ref` in
   `transport_envelope.schema.json`).
-- The types `health` and `location` are **reserved** (phone → laptop,
-  defined in later steps). A receiver that sees an unrecognised `type`
-  logs at debug level and ignores the frame — never errors, never
-  disconnects. Malformed JSON, or an `event` payload that fails contract
-  validation, is logged (warning) and dropped; the connection stays up.
+- `health` is the phone's stale-drop signal (§4.4), sent phone → laptop.
+  It carries one report of the feedback manager's ring of ten one-second
+  `{received, staleDropped}` buckets: `stale_drop_rate` at or above **0.2**
+  over at least **2** complete buckets is the §3.4 trigger that flips the
+  laptop to its local detector. `t_phone_ms` is PHONE-clock time like every
+  other phone-produced stamp here; the laptop converts before judging
+  freshness and **ignores a report older than 3 s**, so a signal that has
+  died cannot drive a switch. The frame is advisory: the health monitor
+  also steps rungs and flips on its own RTT and timeout evidence, and a
+  phone that never sends `health` changes nothing.
+- The type `location` is **reserved** (phone → laptop, defined in a later
+  step). A receiver that sees an unrecognised `type` logs at debug level
+  and ignores the frame — never errors, never disconnects. Malformed JSON,
+  an `event` payload that fails contract validation, or a `health` frame
+  with a missing, out-of-range or unknown field, is logged (warning) and
+  dropped; the connection stays up.
 - One event per frame. Batching (`{"events": [...]}`) is a future envelope
   decision, not part of this schema.
 
 Both language test suites do not validate against
 `transport_envelope.schema.json` directly; it is documentation, checked by
-one Python unit test (`backend/tests/transport/test_messages.py`) that
+two Python unit tests — `backend/tests/transport/test_messages.py`, that
 every message `cane.transport.messages.encode` produces validates against
-it.
+it, and `backend/tests/transport/test_health_message.py`, that the
+`health` definition's own `examples` validate and decode.

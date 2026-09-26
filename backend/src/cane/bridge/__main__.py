@@ -5,12 +5,20 @@
 
 Sources: ``synthetic`` (no hardware), ``file:PATH``, ``index:N``, ``x4``
 (macOS AVFoundation, the stitched 2880x1440 panorama mode).
+
+Step 8 adds the silent fallback: the health monitor steps rungs, flips to
+the in-process local detector and probes its way back, all without a
+keystroke. ``--local-detector`` / ``--local-weights`` choose what the local
+half runs (defaults: ultralytics on MPS when torch is importable, the
+scripted detector otherwise), and ``--start-mode local`` starts there --
+useful when the venue's uplink is known-bad before the walk begins.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import sys
 from typing import Sequence
@@ -18,6 +26,12 @@ from typing import Sequence
 from cane.bridge.capture.base import FrameSource
 from cane.bridge.capture.grab_thread import GrabThread
 from cane.bridge.capture.opencv_source import open_file, open_index
+from cane.bridge.backends import (
+    CloudBackend,
+    LocalBackend,
+    SwitchingBackend,
+    local_settings,
+)
 from cane.bridge.capture.synthetic_source import SyntheticEquirectSource
 from cane.bridge.config import (
     DEFAULT_INFERENCE_URL,
@@ -26,11 +40,17 @@ from cane.bridge.config import (
     DEFAULT_WS_PORT,
     BridgeConfig,
 )
+from cane.bridge.health import HealthMonitor, Mode
 from cane.bridge.pipeline import BridgePipeline, CaptureClock, LaptopClock, format_stats_line
+from cane.bridge.probe import CloudProbe, HttpHealthz, healthz_url_for
 from cane.bridge.rungs import RUNGS, rung_by_index
 from cane.bridge.sender import OneInFlightSender
 from cane.bridge.transport_http import HttpInferenceTransport
+from cane.bridge.uplink import MonitoredUplink
+from cane.cloud.settings import CloudSettings
+from cane.transport.messages import PhoneHealth
 from cane.transport.server import EventLinkServer
+from cane.transport.wall_clock import now_ms
 
 logger = logging.getLogger("cane.bridge")
 
@@ -39,6 +59,9 @@ SOURCE_X4 = "x4"
 FILE_PREFIX = "file:"
 INDEX_PREFIX = "index:"
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+LOCAL_DETECTORS = ("fake", "ultralytics")
+START_MODES = ("cloud", "local")
+FALLBACK_DETECTOR = "fake"
 # httpx logs one INFO line per request; at 3 fps that buries the 5 s stats line.
 NOISY_LOGGERS = ("httpx", "httpcore")
 UNSYNCED_BANNER = (
@@ -65,6 +88,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="run with no phone: stamp with the laptop clock instead of skipping frames",
     )
+    parser.add_argument(
+        "--local-detector",
+        default=None,
+        choices=LOCAL_DETECTORS,
+        help="what the local fallback runs (default: CANE_LOCAL_DETECTOR, "
+        "else ultralytics when torch is importable, else fake)",
+    )
+    parser.add_argument(
+        "--local-weights",
+        default=None,
+        help="weights for the local fallback (default: CANE_LOCAL_WEIGHTS, "
+        "else yolo11s.mlpackage if present, else yolo11s.pt)",
+    )
+    parser.add_argument(
+        "--start-mode",
+        default=START_MODES[0],
+        choices=START_MODES,
+        help="start on the cloud (default) or straight on the local detector",
+    )
     parser.add_argument("--duration-s", type=float, default=None, help="stop after N seconds")
     parser.add_argument("--log-level", default="INFO")
     return parser.parse_args(argv)
@@ -87,6 +129,45 @@ def build_config(args: argparse.Namespace) -> BridgeConfig:
     )
 
 
+def build_monitor(args: argparse.Namespace) -> HealthMonitor:
+    """The monitor starts where ``--start-mode`` says, on ``--rung``."""
+    rung = rung_by_index(args.rung).index
+    start = Mode.local(rung) if args.start_mode == "local" else Mode.cloud(rung)
+    return HealthMonitor(start)
+
+
+def build_local_backend(args: argparse.Namespace) -> LocalBackend:
+    """Load the fallback detector now, not at the moment of the flip.
+
+    A model that cannot load must not stop the bridge starting: the cloud
+    path is the one carrying the walk, and a scripted fallback that emits
+    nothing is still better than no bridge at all. Loud, never silent.
+    """
+    try:
+        return LocalBackend.build(local_settings(args.local_detector, args.local_weights))
+    except Exception as exc:  # noqa: BLE001 - any loader fault, torch included
+        logger.error(
+            "could not build the local detector (%s: %s); the local fallback "
+            "will emit nothing until this is fixed",
+            type(exc).__name__, exc,
+        )
+        return LocalBackend.build(CloudSettings(detector=FALLBACK_DETECTOR))
+
+
+def build_uplink(
+    config: BridgeConfig, monitor: HealthMonitor, args: argparse.Namespace
+) -> tuple[MonitoredUplink, CloudProbe]:
+    """Cloud + local behind one switch, plus the prober that recovers."""
+    transport = HttpInferenceTransport(config.inference_url, config.request_timeout_s)
+    switching = SwitchingBackend(
+        monitor,
+        cloud=CloudBackend(transport, timeout_s=config.request_timeout_s),
+        local=build_local_backend(args),
+    )
+    healthz = HttpHealthz(healthz_url_for(config.inference_url), config.request_timeout_s)
+    return MonitoredUplink(switching, monitor), CloudProbe(healthz, monitor)
+
+
 def open_source(spec: str) -> FrameSource:
     """Resolve a ``--source`` string into a live :class:`FrameSource`."""
     if spec == SOURCE_SYNTHETIC:
@@ -106,33 +187,77 @@ def open_source(spec: str) -> FrameSource:
     )
 
 
-async def run_bridge(config: BridgeConfig, duration_s: float | None = None) -> None:
+async def run_bridge(
+    config: BridgeConfig, args: argparse.Namespace, duration_s: float | None = None
+) -> None:
     """Wire everything up and run until the duration elapses or Ctrl-C."""
-    source = open_source(config.source_spec)
-    grab = GrabThread(source)
-    transport = HttpInferenceTransport(config.inference_url, config.request_timeout_s)
-    sender = OneInFlightSender(transport)
+    grab = GrabThread(open_source(config.source_spec))
+    monitor = build_monitor(args)
+    uplink, probe = build_uplink(config, monitor, args)
+    sender = OneInFlightSender(uplink)
+    health_hook = PhoneHealthHook(monitor)
     async with EventLinkServer(
-        config.ws_host, config.ws_port, pipeline_delay_d_ms=config.pipeline_delay_d_ms
+        config.ws_host, config.ws_port,
+        pipeline_delay_d_ms=config.pipeline_delay_d_ms,
+        on_health=health_hook,
     ) as server:
-        clock_provider = _clock_provider(config, server)
+        health_hook.server = server
         pipeline = BridgePipeline(
             config=config, grab=grab, sender=sender,
-            clock_provider=clock_provider, event_sink=server,
+            clock_provider=_clock_provider(config, server), event_sink=server,
+            monitor=monitor, source_provider=lambda: uplink.last_source,
         )
         grab.start()
-        logger.info(
-            "bridge up: source=%s rung=%d crop=%dpx q%d %.1f fps -> %s (ws :%d)",
-            config.source_spec, config.rung.index, config.rung.crop_px,
-            config.rung.jpeg_quality, config.effective_send_fps,
-            config.inference_url, config.ws_port,
-        )
+        _log_banner(config, args)
+        # Outside the one-in-flight sender on purpose: the prober must never
+        # occupy the slot a frame needs, and it only fires while local.
+        prober = asyncio.create_task(probe.run())
         try:
             stats = await pipeline.run(duration_s=duration_s)
         finally:
+            prober.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await prober
+            await probe.aclose()
             await sender.aclose()
             grab.stop()
     logger.info("final: %s", format_stats_line(stats))
+
+
+def _log_banner(config: BridgeConfig, args: argparse.Namespace) -> None:
+    logger.info(
+        "bridge up: source=%s rung=%d crop=%dpx q%d %.1f fps -> %s (ws :%d) "
+        "fallback=%s start=%s",
+        config.source_spec, config.rung.index, config.rung.crop_px,
+        config.rung.jpeg_quality, config.effective_send_fps,
+        config.inference_url, config.ws_port,
+        local_settings(args.local_detector, args.local_weights).detector,
+        args.start_mode,
+    )
+
+
+class PhoneHealthHook:
+    """Feeds `health` frames to the monitor in the laptop's clock domain.
+
+    The phone stamps its report with its own clock, so the freshness test
+    (rule 4) needs the same NTP offset the capture stamps use. The server
+    is attached after construction because it does not exist until the
+    listener is up, and the offset is 0 until the first pong lands -- which
+    is correct: with no handshake the two clocks are all we can assume.
+    """
+
+    def __init__(self, monitor: HealthMonitor) -> None:
+        self._monitor = monitor
+        self.server: EventLinkServer | None = None
+
+    def __call__(self, health: PhoneHealth) -> None:
+        self._monitor.observe_phone_health(health, now_ms(), self.offset_ms())
+
+    def offset_ms(self) -> int:
+        if self.server is None:
+            return 0
+        estimator = self.server.phone_clock.estimator
+        return int(estimator.offset_ms) if estimator.is_synced else 0
 
 
 def _clock_provider(config: BridgeConfig, server: EventLinkServer):
@@ -154,7 +279,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         logger.error("bad configuration: %s", exc)
         return 2
     try:
-        asyncio.run(run_bridge(config, duration_s=args.duration_s))
+        asyncio.run(run_bridge(config, args, duration_s=args.duration_s))
     except KeyboardInterrupt:
         logger.info("interrupted; shutting down")
     except (OSError, ValueError, RuntimeError) as exc:
