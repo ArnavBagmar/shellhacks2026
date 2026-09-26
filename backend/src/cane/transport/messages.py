@@ -12,9 +12,20 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
 
-from cane.contracts.awareness_event import AwarenessEvent, AwarenessEventError, parse_awareness_event
+from pydantic import BaseModel, ConfigDict, Field
+
+from cane.contracts.awareness_event import (
+    T_CAPTURE_MS_MAX,
+    T_CAPTURE_MS_MIN,
+    AwarenessEvent,
+    AwarenessEventError,
+    parse_awareness_event,
+)
+
+STALE_DROP_RATE_MIN = 0.0
+STALE_DROP_RATE_MAX = 1.0
 
 
 class MalformedMessageError(ValueError):
@@ -40,10 +51,36 @@ class EventMessage:
     event: AwarenessEvent
 
 
+class PhoneHealth(BaseModel):
+    """The phone's stale-drop signal (``health`` frame, phone -> laptop).
+
+    One counter, two jobs (``docs/camera-sync-design.md`` Sec 4.4): the
+    feedback manager already drops warnings that arrived too late to be
+    true, and the *rate* of those drops is the cleanest trigger for the
+    Sec 3.4 fallback -- no separate probe needed. The ring is 10 one-second
+    buckets on the phone; this is one report of it.
+
+    ``t_phone_ms`` is PHONE-clock time, like every other phone-produced
+    stamp on this wire: the laptop converts before judging freshness.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    t_phone_ms: Annotated[int, Field(ge=T_CAPTURE_MS_MIN, le=T_CAPTURE_MS_MAX)]
+    window_ms: Annotated[int, Field(ge=0)]
+    received: Annotated[int, Field(ge=0)]
+    stale_dropped: Annotated[int, Field(ge=0)]
+    stale_drop_rate: Annotated[
+        float,
+        Field(ge=STALE_DROP_RATE_MIN, le=STALE_DROP_RATE_MAX, allow_inf_nan=False),
+    ]
+    complete_buckets: Annotated[int, Field(ge=0)]
+
+
 @dataclass(frozen=True)
 class Unknown:
-    """A frame whose ``type`` is not one of ``ping``/``pong``/``event``
-    (e.g. the reserved ``health``/``location``). Logged and ignored by
+    """A frame whose ``type`` is not one of ``ping``/``pong``/``event``/
+    ``health`` (e.g. the reserved ``location``). Logged and ignored by
     callers, per D2 -- never an error.
     """
 
