@@ -19,17 +19,20 @@ DOCKERFILE = BACKEND_ROOT / "docker" / "Dockerfile"
 STARTUP = BACKEND_ROOT / "deploy" / "startup.sh"
 README = BACKEND_ROOT / "deploy" / "README.md"
 
-UNVERIFIED_LINE = (
-    "# UNVERIFIED as of 2026-09-26: no GPU, no gcloud, no GCP project. "
-    "Nothing here has been executed."
-)
-TIER_2_SCRIPTS = (
-    "docker/Dockerfile",
-    "docker/entrypoint.sh",
-    "deploy/create_l4_vm.sh",
-    "deploy/startup.sh",
-    "deploy/warmup_loop.sh",
-)
+VERIFIED_PREFIX = "# Verified on an NVIDIA L4 (us-east1-d, 2026-09-26)"
+UNVERIFIED_PREFIX = "# UNVERIFIED as of 2026-09-26: not executed."
+# What actually ran on the L4 on 2026-09-26 versus what did not: the image
+# was built and served there, and the entrypoint's export path was exercised;
+# the VM-creation and startup scripts were not used (a pre-existing VM was
+# configured by hand, as deploy/README.md records).
+TIER_2_STATUS = {
+    "docker/Dockerfile": VERIFIED_PREFIX,
+    "docker/entrypoint.sh": VERIFIED_PREFIX,
+    "deploy/warmup_loop.sh": VERIFIED_PREFIX,
+    "deploy/create_l4_vm.sh": UNVERIFIED_PREFIX,
+    "deploy/startup.sh": UNVERIFIED_PREFIX,
+}
+TIER_2_SCRIPTS = tuple(TIER_2_STATUS)
 
 
 def _env(name: str) -> str:
@@ -48,7 +51,7 @@ def _container_mount() -> str:
 def test_every_tier_2_script_carries_the_unverified_header(relative: str) -> None:
     """A1: an unexecuted artefact that does not say so reads as a deliverable."""
     lines = (BACKEND_ROOT / relative).read_text(encoding="utf-8").splitlines()
-    assert UNVERIFIED_LINE in lines[:2]
+    assert any(line.startswith(TIER_2_STATUS[relative]) for line in lines[:2]), relative
 
 
 def test_the_baked_weights_survive_the_persistent_mount() -> None:
@@ -84,4 +87,4 @@ def test_the_engine_cache_still_lives_on_the_persistent_disk() -> None:
 def test_the_readme_describes_the_mount_as_the_engine_cache_only() -> None:
     text = README.read_text(encoding="utf-8")
     assert _env("CANE_WEIGHTS_PATH") in text
-    assert "UNVERIFIED as of 2026-09-26" in text
+    assert "Verified on the L4" in text and "not executed" in text

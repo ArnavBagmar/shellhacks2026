@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# UNVERIFIED as of 2026-09-26: no GPU, no gcloud, no GCP project. Nothing here has been executed.
+# UNVERIFIED as of 2026-09-26: not executed. The 2026-09-26 deploy used a pre-existing VM and the manual steps in deploy/README.md.
 set -euo pipefail
 
 # An open port to a GPU VM that decodes attacker-supplied JPEGs is the one

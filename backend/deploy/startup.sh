@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# UNVERIFIED as of 2026-09-26: no GPU, no gcloud, no GCP project. Nothing here has been executed.
+# UNVERIFIED as of 2026-09-26: not executed. The 2026-09-26 deploy used a pre-existing VM and the manual steps in deploy/README.md.
 # VM startup script referenced by create_l4_vm.sh: mount the persistent engine
 # cache, then run the container with all GPUs.
 set -euo pipefail
