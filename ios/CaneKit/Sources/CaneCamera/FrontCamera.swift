@@ -46,7 +46,24 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
     private var sensorFOVDeg = 70.0
     private var sensorAspect = 4.0 / 3.0
     private var configured = false
+    private let depthOutput = AVCaptureDepthDataOutput()
+    private let depthQueue = DispatchQueue(label: "cane.camera.depth", qos: .userInitiated)
     private let logger = Logger(subsystem: "cane", category: "camera")
+
+    /// True when this phone has a TrueDepth sensor *and* a format pairing it
+    /// with video was available. Every Face ID iPhone (X and later) has the
+    /// sensor; older and SE models do not, and fall back to plain video with
+    /// no distance readings.
+    public private(set) var hasDepth = false
+
+    /// Measured distance straight ahead, or nil on a phone without TrueDepth,
+    /// before the first depth frame, or when depth was not requested.
+    public var depth: DepthSample? { probe?.latest }
+
+    private var probe: TrueDepthProbe?
+    /// Set before `start()`. Off by default so nothing pays for the sensor
+    /// until something asks for it.
+    public var wantsDepth = false
 
     public override init() {
         super.init()
@@ -99,9 +116,11 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
     private func configure() throws {
         AVCaptureDevice.centerStageControlMode = .app
         AVCaptureDevice.isCenterStageEnabled = false
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) else {
-            throw CameraError.noFrontCamera
-        }
+        // TrueDepth first: on a Face ID phone it is the same lens plus the
+        // infrared depth sensor, so nothing about the picture changes.
+        let device = AVCaptureDevice.default(.builtInTrueDepthCamera, for: .video, position: .front)
+            ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
+        guard let device else { throw CameraError.noFrontCamera }
         session.beginConfiguration()
         defer { session.commitConfiguration() }
         session.sessionPreset = session.canSetSessionPreset(.hd1280x720) ? .hd1280x720 : .high
@@ -114,6 +133,8 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
         output.setSampleBufferDelegate(self, queue: queue)
         guard session.canAddOutput(output) else { throw CameraError.cannotAddOutput }
         session.addOutput(output)
+
+        if wantsDepth { configureDepth(device) }
 
         if let connection = output.connection(with: .video) {
             connection.automaticallyAdjustsVideoMirroring = false
@@ -139,6 +160,63 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
             self?.applyRotation(c.videoRotationAngleForHorizonLevelCapture)
         }
         logger.info("front camera: \(dims.width)x\(dims.height), fov \(formatFOV, format: .fixed(precision: 1)) deg, zoom \(zoom)")
+    }
+
+    /// Depth is strictly additive: every failure here leaves the video path
+    /// exactly as it was, because video already feeds the scene questions and
+    /// must not regress for a sensor that may not exist.
+    private func configureDepth(_ device: AVCaptureDevice) {
+        guard session.canAddOutput(depthOutput) else {
+            logger.info("truedepth: session will not take a depth output; continuing without distances")
+            return
+        }
+        // A format only yields depth if it declares a paired depth format, and
+        // the default active format often does not. Pick the pairing with the
+        // largest depth map among the video formats we can live with.
+        let candidates = device.formats.filter { !$0.supportedDepthDataFormats.isEmpty }
+        guard let format = candidates.max(by: { left, right in
+            depthPixels(left) < depthPixels(right)
+        }), let depthFormat = format.supportedDepthDataFormats.max(by: { left, right in
+            CMVideoFormatDescriptionGetDimensions(left.formatDescription).width
+                < CMVideoFormatDescriptionGetDimensions(right.formatDescription).width
+        }) else {
+            logger.info("truedepth: no video format pairs with depth on this device; continuing without distances")
+            return
+        }
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            device.activeFormat = format
+            device.activeDepthDataFormat = depthFormat
+        } catch {
+            logger.error("truedepth: cannot lock the device for depth (\(error.localizedDescription)); continuing without distances")
+            return
+        }
+        session.addOutput(depthOutput)
+        // Filtering interpolates over pixels the sensor could not resolve,
+        // which would invent values and inflate coverage. A hole must stay a
+        // hole so sunlight shows up as low coverage rather than wrong metres.
+        depthOutput.isFilteringEnabled = false
+        depthOutput.alwaysDiscardsLateDepthData = true
+        let probe = TrueDepthProbe()
+        self.probe = probe
+        depthOutput.setDelegate(probe, callbackQueue: depthQueue)
+        if let connection = depthOutput.connection(with: .depthData) {
+            // The same mirroring rule as video: a mirrored map flips which
+            // side of the frame a distance belongs to.
+            connection.automaticallyAdjustsVideoMirroring = false
+            if connection.isVideoMirroringSupported { connection.isVideoMirrored = false }
+        }
+        hasDepth = true
+        let dims = CMVideoFormatDescriptionGetDimensions(depthFormat.formatDescription)
+        logger.info("truedepth enabled: depth map \(dims.width)x\(dims.height), filtering off")
+    }
+
+    private func depthPixels(_ format: AVCaptureDevice.Format) -> Int32 {
+        format.supportedDepthDataFormats.reduce(0) { best, depth in
+            let dims = CMVideoFormatDescriptionGetDimensions(depth.formatDescription)
+            return max(best, dims.width * dims.height)
+        }
     }
 
     private func applyRotation(_ angle: CGFloat) {
