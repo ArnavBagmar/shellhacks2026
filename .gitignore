@@ -29,3 +29,8 @@ xcuserdata/
 
 # walk logs (laptop + the phone's diag stream) -- local only, may hold transcripts
 backend/logs/
+
+# local secrets (GEMINI_API_KEY etc.) -- never committed
+.env
+.env.*
+!.env.example
