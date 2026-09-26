@@ -1,4 +1,4 @@
-"""The WebSocket wire envelope: three frame shapes plus JSON encode/decode.
+"""The WebSocket wire envelope: the frame shapes plus JSON encode/decode.
 
 See ``contracts/README.md`` "Transport envelope" and
 ``contracts/transport_envelope.schema.json`` for the documented shape.
@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from cane.contracts.awareness_event import (
     T_CAPTURE_MS_MAX,
@@ -77,6 +77,110 @@ class PhoneHealth(BaseModel):
     complete_buckets: Annotated[int, Field(ge=0)]
 
 
+QUERY_ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+#: ~2 MB of JPEG once decoded; keeps one query frame well inside the
+#: server's WebSocket ``max_size``.
+PHONE_FRAME_B64_MAX_CHARS = 2_800_000
+#: Same half-open range as ``AwarenessEvent.bearing_deg``.
+BEARING_MIN_EXCLUSIVE = -180.0
+BEARING_MAX = 180.0
+
+QueryKind = Literal["find", "describe_around", "describe_front"]
+AnswerStatus = Literal["found", "not_found", "described", "unavailable"]
+Confidence = Literal["low", "medium", "high"]
+
+
+class PhoneFrame(BaseModel):
+    """One rectilinear front-camera JPEG, base64. Mirroring is off on the
+    phone, so image-left is the wearer's left.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    jpeg_b64: Annotated[str, Field(min_length=4, max_length=PHONE_FRAME_B64_MAX_CHARS)]
+    hfov_deg: Annotated[float, Field(gt=0, lt=180, allow_inf_nan=False)]
+    width: Annotated[int, Field(ge=1, le=8192)]
+    height: Annotated[int, Field(ge=1, le=8192)]
+
+
+class SceneQuery(BaseModel):
+    """``query`` frame, phone -> laptop (step 20): a spoken question about
+    the surroundings. Every key is required, nullable ones as explicit
+    ``null`` -- the same rule the event contract follows.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    query_id: Annotated[str, Field(pattern=QUERY_ID_PATTERN)]
+    kind: QueryKind
+    target: Annotated[str | None, Field(min_length=1, max_length=60)]
+    utterance: Annotated[str, Field(max_length=300)]
+    t_phone_ms: int
+    phone_frame: PhoneFrame | None
+
+    @model_validator(mode="after")
+    def _target_iff_find(self) -> SceneQuery:
+        if (self.kind == "find") != (self.target is not None):
+            raise ValueError("'target' is required for kind 'find' and must be null otherwise")
+        return self
+
+
+class SceneAnswer(BaseModel):
+    """``answer`` frame, laptop -> phone: the one reply to a ``query``.
+    ``subject``/``detail`` are noun phrases; direction travels only as
+    ``bearing_deg`` so the phone speaks it in its own vocabulary.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    query_id: Annotated[str, Field(pattern=QUERY_ID_PATTERN)]
+    status: AnswerStatus
+    subject: Annotated[str | None, Field(min_length=1, max_length=80)]
+    bearing_deg: Annotated[
+        float | None, Field(gt=BEARING_MIN_EXCLUSIVE, le=BEARING_MAX, allow_inf_nan=False)
+    ]
+    detail: Annotated[str | None, Field(min_length=1, max_length=240)]
+    confidence: Confidence | None
+    latency_ms: Annotated[int, Field(ge=0)]
+
+    @model_validator(mode="after")
+    def _status_rules(self) -> SceneAnswer:
+        if self.status == "found" and self.subject is None:
+            raise ValueError("a 'found' answer needs a subject")
+        if self.status == "described" and self.detail is None:
+            raise ValueError("a 'described' answer needs a detail")
+        if self.status != "found" and self.bearing_deg is not None:
+            raise ValueError("only a 'found' answer carries a bearing")
+        return self
+
+
+DIAG_KIND_PATTERN = r"^[a-z][a-z0-9_-]{0,39}$"
+DIAG_MAX_FIELDS = 24
+DIAG_MAX_VALUE_CHARS = 500
+DiagValue = str | int | float | bool | None
+
+
+class PhoneDiagnostic(BaseModel):
+    """``diag`` frame, phone -> laptop: one line of the phone's black-box
+    recorder (what the mic heard, what the wake-word gate decided, what was
+    said, link changes). Advisory and write-only: the laptop just records it
+    so a failed walk can be read afterwards. Never audio, only text/numbers.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    t_phone_ms: int
+    kind: Annotated[str, Field(pattern=DIAG_KIND_PATTERN)]
+    data: Annotated[dict[str, DiagValue], Field(max_length=DIAG_MAX_FIELDS)]
+
+    @model_validator(mode="after")
+    def _short_values(self) -> PhoneDiagnostic:
+        for key, value in self.data.items():
+            if len(key) > 40 or (isinstance(value, str) and len(value) > DIAG_MAX_VALUE_CHARS):
+                raise ValueError(f"diag field {key[:40]!r} is too long")
+        return self
+
+
 @dataclass(frozen=True)
 class Unknown:
     """A frame whose ``type`` is not one of ``ping``/``pong``/``event``/
@@ -88,9 +192,14 @@ class Unknown:
 
 
 HEALTH_TYPE = "health"
+DIAG_TYPE = "diag"
+QUERY_TYPE = "query"
+ANSWER_TYPE = "answer"
 
-OutboundMessage = Ping | Pong | EventMessage
-InboundMessage = Ping | Pong | EventMessage | PhoneHealth | Unknown
+OutboundMessage = Ping | Pong | EventMessage | SceneAnswer
+InboundMessage = (
+    Ping | Pong | EventMessage | PhoneHealth | SceneQuery | SceneAnswer | PhoneDiagnostic | Unknown
+)
 
 
 def to_wire_dict(event: AwarenessEvent) -> dict[str, Any]:
@@ -101,13 +210,15 @@ def to_wire_dict(event: AwarenessEvent) -> dict[str, Any]:
 
 
 def encode(msg: OutboundMessage) -> str:
-    """Serialize a ``Ping``, ``Pong``, or ``EventMessage`` to wire JSON."""
+    """Serialize a ``Ping``, ``Pong``, ``EventMessage`` or ``SceneAnswer`` to wire JSON."""
     if isinstance(msg, Ping):
         payload: dict[str, Any] = {"type": "ping", "t1": msg.t1}
     elif isinstance(msg, Pong):
         payload = {"type": "pong", "t1": msg.t1, "t2": msg.t2, "t3": msg.t3}
     elif isinstance(msg, EventMessage):
         payload = {"type": "event", "event": to_wire_dict(msg.event)}
+    elif isinstance(msg, SceneAnswer):
+        payload = {"type": ANSWER_TYPE, **msg.model_dump()}
     else:
         raise TypeError(f"unencodable message: {msg!r}")
     return json.dumps(payload)
@@ -156,6 +267,15 @@ def _decode_health(data: dict[str, Any]) -> PhoneHealth:
         raise MalformedMessageError(f"invalid 'health' frame fields: {fields}") from exc
 
 
+def _decode_model(data: dict[str, Any], model: type[BaseModel], frame_type: str) -> Any:
+    payload = {key: value for key, value in data.items() if key != "type"}
+    try:
+        return model.model_validate(payload)
+    except ValidationError as exc:
+        fields = sorted({".".join(str(p) for p in e["loc"]) or frame_type for e in exc.errors()})
+        raise MalformedMessageError(f"invalid '{frame_type}' frame fields: {fields}") from exc
+
+
 def decode(text: str) -> InboundMessage:
     """Parse one wire frame. Raises :class:`MalformedMessageError` for bad
     JSON, a missing/wrong-typed field, or an invalid ``event`` payload. An
@@ -181,6 +301,12 @@ def decode(text: str) -> InboundMessage:
         return _decode_event(data)
     if msg_type == HEALTH_TYPE:
         return _decode_health(data)
+    if msg_type == QUERY_TYPE:
+        return _decode_model(data, SceneQuery, QUERY_TYPE)
+    if msg_type == DIAG_TYPE:
+        return _decode_model(data, PhoneDiagnostic, DIAG_TYPE)
+    if msg_type == ANSWER_TYPE:
+        return _decode_model(data, SceneAnswer, ANSWER_TYPE)
     if isinstance(msg_type, str):
         return Unknown(type=msg_type)
     raise MalformedMessageError(f"'type' must be a string, got {msg_type!r}")

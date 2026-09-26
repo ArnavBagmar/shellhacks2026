@@ -1,0 +1,351 @@
+{
+  "fixture_version": 1,
+  "note": "query/answer frames (docs/steps/step-20-brief.md). Both suites run every case: valid decodes, invalid is rejected, never crashes.",
+  "cases": [
+    {
+      "name": "query_find_no_frame",
+      "expect": "valid",
+      "frame": {
+        "type": "query",
+        "query_id": "q-0001",
+        "kind": "find",
+        "target": "bathroom",
+        "utterance": "is there a bathroom around",
+        "t_phone_ms": 1790000000000,
+        "phone_frame": null
+      }
+    },
+    {
+      "name": "query_find_with_phone_frame",
+      "expect": "valid",
+      "frame": {
+        "type": "query",
+        "query_id": "q-0001",
+        "kind": "find",
+        "target": "bathroom",
+        "utterance": "is there a bathroom around",
+        "t_phone_ms": 1790000000000,
+        "phone_frame": {
+          "jpeg_b64": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP8=",
+          "hfov_deg": 68.0,
+          "width": 1280,
+          "height": 960
+        }
+      }
+    },
+    {
+      "name": "query_describe_around",
+      "expect": "valid",
+      "frame": {
+        "type": "query",
+        "query_id": "q-0001",
+        "kind": "describe_around",
+        "target": null,
+        "utterance": "what's around me",
+        "t_phone_ms": 1790000000000,
+        "phone_frame": null
+      }
+    },
+    {
+      "name": "query_describe_front_with_frame",
+      "expect": "valid",
+      "frame": {
+        "type": "query",
+        "query_id": "q-0001",
+        "kind": "describe_front",
+        "target": null,
+        "utterance": "what's in front of me",
+        "t_phone_ms": 1790000000000,
+        "phone_frame": {
+          "jpeg_b64": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP8=",
+          "hfov_deg": 68.0,
+          "width": 1280,
+          "height": 960
+        }
+      }
+    },
+    {
+      "name": "query_find_null_target",
+      "expect": "invalid",
+      "note": "find needs a target",
+      "frame": {
+        "type": "query",
+        "query_id": "q-0001",
+        "kind": "find",
+        "target": null,
+        "utterance": "is there a bathroom around",
+        "t_phone_ms": 1790000000000,
+        "phone_frame": null
+      }
+    },
+    {
+      "name": "query_describe_with_target",
+      "expect": "invalid",
+      "note": "only find carries a target",
+      "frame": {
+        "type": "query",
+        "query_id": "q-0001",
+        "kind": "describe_around",
+        "target": "bathroom",
+        "utterance": "is there a bathroom around",
+        "t_phone_ms": 1790000000000,
+        "phone_frame": null
+      }
+    },
+    {
+      "name": "query_unknown_kind",
+      "expect": "invalid",
+      "frame": {
+        "type": "query",
+        "query_id": "q-0001",
+        "kind": "navigate",
+        "target": "bathroom",
+        "utterance": "is there a bathroom around",
+        "t_phone_ms": 1790000000000,
+        "phone_frame": null
+      }
+    },
+    {
+      "name": "query_bad_id",
+      "expect": "invalid",
+      "frame": {
+        "type": "query",
+        "query_id": "has space",
+        "kind": "find",
+        "target": "bathroom",
+        "utterance": "is there a bathroom around",
+        "t_phone_ms": 1790000000000,
+        "phone_frame": null
+      }
+    },
+    {
+      "name": "query_missing_phone_frame_key",
+      "expect": "invalid",
+      "note": "all keys always present",
+      "frame": {
+        "type": "query",
+        "query_id": "q-0001",
+        "kind": "find",
+        "target": "bathroom",
+        "utterance": "is there a bathroom around",
+        "t_phone_ms": 1790000000000
+      }
+    },
+    {
+      "name": "query_extra_key",
+      "expect": "invalid",
+      "frame": {
+        "type": "query",
+        "query_id": "q-0001",
+        "kind": "find",
+        "target": "bathroom",
+        "utterance": "is there a bathroom around",
+        "t_phone_ms": 1790000000000,
+        "phone_frame": null,
+        "urgency": 3
+      }
+    },
+    {
+      "name": "query_frame_zero_fov",
+      "expect": "invalid",
+      "frame": {
+        "type": "query",
+        "query_id": "q-0001",
+        "kind": "find",
+        "target": "bathroom",
+        "utterance": "is there a bathroom around",
+        "t_phone_ms": 1790000000000,
+        "phone_frame": {
+          "jpeg_b64": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP8=",
+          "hfov_deg": 0,
+          "width": 1280,
+          "height": 960
+        }
+      }
+    },
+    {
+      "name": "query_float_t_phone_ms",
+      "expect": "invalid",
+      "frame": {
+        "type": "query",
+        "query_id": "q-0001",
+        "kind": "find",
+        "target": "bathroom",
+        "utterance": "is there a bathroom around",
+        "t_phone_ms": 1.5,
+        "phone_frame": null
+      }
+    },
+    {
+      "name": "answer_found",
+      "expect": "valid",
+      "frame": {
+        "type": "answer",
+        "query_id": "q-0001",
+        "status": "found",
+        "subject": "restroom sign",
+        "bearing_deg": 72.5,
+        "detail": "past the elevators",
+        "confidence": "medium",
+        "latency_ms": 2140
+      }
+    },
+    {
+      "name": "answer_found_directly_behind",
+      "expect": "valid",
+      "frame": {
+        "type": "answer",
+        "query_id": "q-0001",
+        "status": "found",
+        "subject": "restroom sign",
+        "bearing_deg": 180.0,
+        "detail": null,
+        "confidence": "low",
+        "latency_ms": 2140
+      }
+    },
+    {
+      "name": "answer_not_found",
+      "expect": "valid",
+      "frame": {
+        "type": "answer",
+        "query_id": "q-0001",
+        "status": "not_found",
+        "subject": null,
+        "bearing_deg": null,
+        "detail": null,
+        "confidence": null,
+        "latency_ms": 2140
+      }
+    },
+    {
+      "name": "answer_described",
+      "expect": "valid",
+      "frame": {
+        "type": "answer",
+        "query_id": "q-0001",
+        "status": "described",
+        "subject": null,
+        "bearing_deg": null,
+        "detail": "a wide hallway with doors on both sides",
+        "confidence": null,
+        "latency_ms": 2140
+      }
+    },
+    {
+      "name": "answer_unavailable",
+      "expect": "valid",
+      "frame": {
+        "type": "answer",
+        "query_id": "q-0001",
+        "status": "unavailable",
+        "subject": null,
+        "bearing_deg": null,
+        "detail": null,
+        "confidence": null,
+        "latency_ms": 8000
+      }
+    },
+    {
+      "name": "answer_found_without_subject",
+      "expect": "invalid",
+      "frame": {
+        "type": "answer",
+        "query_id": "q-0001",
+        "status": "found",
+        "subject": null,
+        "bearing_deg": 72.5,
+        "detail": "past the elevators",
+        "confidence": "medium",
+        "latency_ms": 2140
+      }
+    },
+    {
+      "name": "answer_not_found_with_bearing",
+      "expect": "invalid",
+      "note": "bearing only with found",
+      "frame": {
+        "type": "answer",
+        "query_id": "q-0001",
+        "status": "not_found",
+        "subject": null,
+        "bearing_deg": 72.5,
+        "detail": null,
+        "confidence": "medium",
+        "latency_ms": 2140
+      }
+    },
+    {
+      "name": "answer_bearing_minus_180",
+      "expect": "invalid",
+      "note": "contract range is (-180, 180]",
+      "frame": {
+        "type": "answer",
+        "query_id": "q-0001",
+        "status": "found",
+        "subject": "restroom sign",
+        "bearing_deg": -180.0,
+        "detail": "past the elevators",
+        "confidence": "medium",
+        "latency_ms": 2140
+      }
+    },
+    {
+      "name": "answer_described_without_detail",
+      "expect": "invalid",
+      "frame": {
+        "type": "answer",
+        "query_id": "q-0001",
+        "status": "described",
+        "subject": null,
+        "bearing_deg": null,
+        "detail": null,
+        "confidence": "medium",
+        "latency_ms": 2140
+      }
+    },
+    {
+      "name": "answer_bad_status",
+      "expect": "invalid",
+      "frame": {
+        "type": "answer",
+        "query_id": "q-0001",
+        "status": "maybe",
+        "subject": "restroom sign",
+        "bearing_deg": 72.5,
+        "detail": "past the elevators",
+        "confidence": "medium",
+        "latency_ms": 2140
+      }
+    },
+    {
+      "name": "answer_negative_latency",
+      "expect": "invalid",
+      "frame": {
+        "type": "answer",
+        "query_id": "q-0001",
+        "status": "found",
+        "subject": "restroom sign",
+        "bearing_deg": 72.5,
+        "detail": "past the elevators",
+        "confidence": "medium",
+        "latency_ms": -1
+      }
+    },
+    {
+      "name": "answer_extra_key",
+      "expect": "invalid",
+      "frame": {
+        "type": "answer",
+        "query_id": "q-0001",
+        "status": "found",
+        "subject": "restroom sign",
+        "bearing_deg": 72.5,
+        "detail": "past the elevators",
+        "confidence": "medium",
+        "latency_ms": 2140,
+        "urgency": 2
+      }
+    }
+  ]
+}

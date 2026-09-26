@@ -1,0 +1,7 @@
+// Committed defaults. Put your signing team, a unique bundle id and the
+// Maps key in Local.xcconfig (copy Local.xcconfig.example) -- never here.
+CANE_BUNDLE_ID = org.shellhacks.cane.app
+DEVELOPMENT_TEAM =
+GOOGLE_MAPS_API_KEY =
+
+#include? "Local.xcconfig"

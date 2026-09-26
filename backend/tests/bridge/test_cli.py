@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
-from cane.bridge.__main__ import build_config, open_source, parse_args
+from cane.bridge.__main__ import SceneHook, build_config, build_scene_vlm, open_source, parse_args
 from cane.bridge.capture.opencv_source import SourceOpenError
 from cane.bridge.capture.synthetic_source import SyntheticEquirectSource
 from cane.bridge.rungs import RUNG_1, RUNG_3
+from cane.scene.frames import StillProvider
+from cane.scene.service import SceneQueryService
+from cane.scene.vlm import FakeVLM, VlmUnavailableError
+from cane.transport.messages import SceneQuery
 
 INFERENCE_URL = "http://127.0.0.1:8000/infer"
 
@@ -227,3 +232,34 @@ def test_the_health_hook_converts_the_phone_clock_before_the_monitor_sees_it() -
 
     assert monitor.is_local is True
     assert monitor.state.counters.flips_to_local == 1
+
+
+def test_scene_is_off_by_default_and_builds_nothing() -> None:
+    args = parse_args([])
+    assert args.scene is False
+    assert build_scene_vlm(args) is None
+
+
+def test_scene_without_a_key_is_a_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    with pytest.raises(VlmUnavailableError, match="GEMINI_API_KEY"):
+        build_scene_vlm(parse_args(["--scene"]))
+
+
+async def test_the_scene_hook_sends_the_answer_to_the_phone() -> None:
+    sent = []
+
+    class FakeServer:
+        async def send_answer(self, answer):
+            sent.append(answer)
+            return True
+
+    service = SceneQueryService(
+        FakeVLM(), StillProvider(np.zeros((32, 64, 3), np.uint8)), settle_s=0.0, crop_px=16
+    )
+    hook = SceneHook(service)
+    hook.server = FakeServer()  # type: ignore[assignment]
+    await hook(SceneQuery(query_id="q-1", kind="find", target="door", utterance="find a door",
+                          t_phone_ms=1_790_000_000_000, phone_frame=None))
+
+    assert [a.status for a in sent] == ["not_found"]

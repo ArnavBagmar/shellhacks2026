@@ -2,12 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://cane.shellhacks/contracts/transport_envelope.schema.json",
   "title": "TransportEnvelope",
-  "description": "The four WebSocket frame shapes exchanged between the laptop (server) and the phone (client); see docs/camera-sync-design.md Sec 4.2 and Sec 4.4 and contracts/README.md 'Transport envelope'. The reserved type 'location' (phone -> laptop, defined in a later step) and any other unrecognised 'type' are valid JSON that a receiver logs and ignores -- they are deliberately out of scope for this schema, which only documents the shapes the laptop and phone actually exchange today.",
+  "description": "The six WebSocket frame shapes exchanged between the laptop (server) and the phone (client); see docs/camera-sync-design.md Sec 4.2 and Sec 4.4, docs/steps/step-20-brief.md (query/answer) and contracts/README.md 'Transport envelope'. The reserved type 'location' (phone -> laptop, defined in a later step) and any other unrecognised 'type' are valid JSON that a receiver logs and ignores -- they are deliberately out of scope for this schema, which only documents the shapes the laptop and phone actually exchange today.",
   "oneOf": [
     { "$ref": "#/$defs/ping" },
     { "$ref": "#/$defs/pong" },
     { "$ref": "#/$defs/event" },
-    { "$ref": "#/$defs/health" }
+    { "$ref": "#/$defs/health" },
+    { "$ref": "#/$defs/query" },
+    { "$ref": "#/$defs/answer" },
+    { "$ref": "#/$defs/diag" }
   ],
   "$defs": {
     "ping": {
@@ -111,6 +114,239 @@
           "stale_drop_rate": 0.0,
           "complete_buckets": 1
         }
+      ]
+    },
+    "phone_frame": {
+      "type": "object",
+      "description": "One rectilinear JPEG from the phone's front camera, captured when the query was asked. Mirroring is off, so image-left is the wearer's left.",
+      "additionalProperties": false,
+      "required": ["jpeg_b64", "hfov_deg", "width", "height"],
+      "properties": {
+        "jpeg_b64": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 2800000,
+          "description": "Standard base64 of the JPEG bytes (<= ~2 MB decoded)."
+        },
+        "hfov_deg": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 180,
+          "description": "Horizontal field of view of the image as sent, degrees."
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8192
+        }
+      }
+    },
+    "query": {
+      "type": "object",
+      "description": "Phone -> laptop. A spoken question about the surroundings ('Hey Cane, is there a bathroom around?'). The laptop answers with exactly one 'answer' frame carrying the same query_id; a newer query supersedes an older one still in flight.",
+      "additionalProperties": false,
+      "required": ["type", "query_id", "kind", "target", "utterance", "t_phone_ms", "phone_frame"],
+      "properties": {
+        "type": {
+          "const": "query"
+        },
+        "query_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$"
+        },
+        "kind": {
+          "enum": ["find", "describe_around", "describe_front"],
+          "description": "find: look for 'target' all around. describe_around: summarise the 360 view. describe_front: describe the phone frame (X4 crops optional)."
+        },
+        "target": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "What to find ('bathroom'); required for kind 'find', null otherwise."
+        },
+        "utterance": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "The recognised words after the wake word, verbatim."
+        },
+        "t_phone_ms": {
+          "type": "integer",
+          "description": "When the phone sent the query, PHONE-clock Unix-epoch ms."
+        },
+        "phone_frame": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/phone_frame"
+            }
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "find"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "target": {
+            "type": "string"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "target": {
+            "type": "null"
+          }
+        }
+      },
+      "examples": [
+        {
+          "type": "query",
+          "query_id": "q-7f3a",
+          "kind": "find",
+          "target": "bathroom",
+          "utterance": "is there a bathroom around",
+          "t_phone_ms": 1790000000000,
+          "phone_frame": null
+        }
+      ]
+    },
+    "answer": {
+      "type": "object",
+      "description": "Laptop -> phone. The one reply to a 'query'. The phone turns bearing_deg into its own direction words; subject and detail are short noun phrases, never directions.",
+      "additionalProperties": false,
+      "required": ["type", "query_id", "status", "subject", "bearing_deg", "detail", "confidence", "latency_ms"],
+      "properties": {
+        "type": {
+          "const": "answer"
+        },
+        "query_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$"
+        },
+        "status": {
+          "enum": ["found", "not_found", "described", "unavailable"]
+        },
+        "subject": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "What was found ('restroom sign'). Required when status is 'found'."
+        },
+        "bearing_deg": {
+          "type": ["number", "null"],
+          "exclusiveMinimum": -180,
+          "maximum": 180,
+          "description": "Torso-relative, same convention as AwarenessEvent.bearing_deg (0 ahead, negative left). Only with status 'found'."
+        },
+        "detail": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 240,
+          "description": "Extra context ('past the elevators'), or the whole description when status is 'described'."
+        },
+        "confidence": {
+          "enum": ["low", "medium", "high", null]
+        },
+        "latency_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Laptop-side time from receiving the query to sending this answer."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "found"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "subject": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "described"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "detail": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "not": {
+                  "const": "found"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "bearing_deg": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ],
+      "examples": [
+        {
+          "type": "answer",
+          "query_id": "q-7f3a",
+          "status": "found",
+          "subject": "restroom sign",
+          "bearing_deg": 72.5,
+          "detail": "past the elevators",
+          "confidence": "medium",
+          "latency_ms": 2140
+        }
+      ]
+    },
+    "diag": {
+      "type": "object",
+      "description": "Phone -> laptop. One line of the phone's black-box recorder (what the mic heard, wake-word and intent decisions, what was spoken, link changes, mic level). Advisory and write-only: the laptop appends it to logs/phone-YYYYMMDD.jsonl. Text and numbers only, never audio.",
+      "additionalProperties": false,
+      "required": ["type", "t_phone_ms", "kind", "data"],
+      "properties": {
+        "type": { "const": "diag" },
+        "t_phone_ms": { "type": "integer", "description": "PHONE-clock Unix-epoch ms." },
+        "kind": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,39}$" },
+        "data": {
+          "type": "object",
+          "maxProperties": 24,
+          "additionalProperties": { "type": ["string", "number", "boolean", "null"], "maxLength": 500 }
+        }
+      },
+      "examples": [
+        { "type": "diag", "t_phone_ms": 1790000000000, "kind": "transcript", "data": { "text": "hey cane is there a bathroom", "final": false } }
       ]
     }
   }

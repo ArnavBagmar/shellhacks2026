@@ -12,6 +12,10 @@ keystroke. ``--local-detector`` / ``--local-weights`` choose what the local
 half runs (defaults: ultralytics on MPS when torch is importable, the
 scripted detector otherwise), and ``--start-mode local`` starts there --
 useful when the venue's uplink is known-bad before the walk begins.
+
+Step 20 adds ``--scene``: the phone's spoken questions ("Hey Cane, is there a
+bathroom around?") are answered by Gemini over the freshest X4 frame, on the
+same WebSocket. Needs the ``scene`` extra and ``GEMINI_API_KEY``.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ import asyncio
 import contextlib
 import logging
 import sys
+from pathlib import Path
 from typing import Sequence
 
 from cane.bridge.capture.base import FrameSource
@@ -48,7 +53,11 @@ from cane.bridge.rungs import RUNGS, rung_by_index
 from cane.bridge.sender import OneInFlightSender
 from cane.bridge.transport_http import HttpInferenceTransport
 from cane.bridge.uplink import MonitoredUplink
-from cane.transport.messages import PhoneHealth
+from cane.scene.frames import GrabProvider
+from cane.scene.service import SceneQueryService
+from cane.scene.vlm import GeminiVLM, VlmUnavailableError
+from cane.transport.file_logging import configure_file_logging
+from cane.transport.messages import PhoneHealth, SceneQuery
 from cane.transport.server import EventLinkServer
 from cane.transport.wall_clock import now_ms
 
@@ -66,6 +75,7 @@ START_MODES = ("cloud", "local")
 EXIT_RUN_FAILED = 1
 EXIT_BAD_CONFIG = 2
 EXIT_NO_LOCAL_DETECTOR = 3
+EXIT_NO_SCENE_MODEL = 4
 # httpx logs one INFO line per request; at 3 fps that buries the 5 s stats line.
 NOISY_LOGGERS = ("httpx", "httpcore")
 UNSYNCED_BANNER = (
@@ -111,8 +121,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         choices=START_MODES,
         help="start on the cloud (default) or straight on the local detector",
     )
+    parser.add_argument(
+        "--scene",
+        action="store_true",
+        help="answer the phone's spoken questions with Gemini over the X4 view "
+        "(needs the scene extra and GEMINI_API_KEY)",
+    )
     parser.add_argument("--duration-s", type=float, default=None, help="stop after N seconds")
     parser.add_argument("--log-level", default="INFO")
+    parser.add_argument(
+        "--log-dir", default="logs",
+        help="also write laptop-YYYYMMDD.log and the phone's phone-YYYYMMDD.jsonl here ('' to disable)",
+    )
     return parser.parse_args(argv)
 
 
@@ -206,18 +226,32 @@ async def run_bridge(
     config: BridgeConfig, args: argparse.Namespace, duration_s: float | None = None
 ) -> None:
     """Wire everything up and run until the duration elapses or Ctrl-C."""
+    # Before the camera opens: a --scene that cannot work fails the run
+    # without leaving a capture device held open.
+    scene_vlm = build_scene_vlm(args)
     grab = GrabThread(open_source(config.source_spec))
     monitor = build_monitor(args)
     local = build_local_backend(args, timeout_s=config.local_timeout_s)
     uplink, probe = build_uplink(config, monitor, local)
     sender = OneInFlightSender(uplink)
     health_hook = PhoneHealthHook(monitor)
+    scene_hook = None
+    if scene_vlm is not None:
+        scene_hook = SceneHook(
+            SceneQueryService(scene_vlm, GrabProvider(grab), delta_deg=config.delta_deg)
+        )
     async with EventLinkServer(
         config.ws_host, config.ws_port,
         pipeline_delay_d_ms=config.pipeline_delay_d_ms,
         on_health=health_hook,
+        on_query=scene_hook,
     ) as server:
         health_hook.server = server
+        warm: asyncio.Task[None] | None = None
+        if scene_hook is not None and scene_vlm is not None:
+            scene_hook.server = server
+            # Never let the wearer's first question pay for the TLS handshake.
+            warm = asyncio.create_task(scene_vlm.warm_up())
         pipeline = BridgePipeline(
             config=config, grab=grab, sender=sender,
             clock_provider=_clock_provider(config, server), event_sink=server,
@@ -233,6 +267,8 @@ async def run_bridge(
         try:
             stats = await pipeline.run(duration_s=duration_s)
         finally:
+            if warm is not None:
+                warm.cancel()
             prober.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await prober
@@ -284,6 +320,35 @@ class PhoneHealthHook:
         return int(estimator.offset_ms) if estimator.is_synced else 0
 
 
+class SceneHook:
+    """Answers `query` frames (step 20). Like :class:`PhoneHealthHook`, the
+    server is attached once it exists; an answer computed with no phone left
+    to hear it is dropped by ``send_answer``.
+    """
+
+    def __init__(self, service: SceneQueryService) -> None:
+        self._service = service
+        self.server: EventLinkServer | None = None
+
+    async def __call__(self, query: SceneQuery) -> None:
+        answer = await self._service.handle(query)
+        if answer is not None and self.server is not None:
+            await self.server.send_answer(answer)
+
+
+def build_scene_vlm(args: argparse.Namespace) -> GeminiVLM | None:
+    """``None`` without ``--scene``. Raises :class:`VlmUnavailableError` when
+    asked for but impossible (no key, no SDK) -- a flag the operator set must
+    not silently do nothing.
+    """
+    if not args.scene:
+        return None
+    try:
+        return GeminiVLM.from_env()
+    except ImportError as exc:
+        raise VlmUnavailableError("the scene extra is not installed (uv sync --extra scene)") from exc
+
+
 def _clock_provider(config: BridgeConfig, server: EventLinkServer):
     if not config.allow_unsynced:
         return lambda: server.phone_clock
@@ -297,6 +362,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=args.log_level.upper(), format=LOG_FORMAT, stream=sys.stderr)
     for name in NOISY_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
+    if args.log_dir:
+        configure_file_logging(Path(args.log_dir))
     try:
         config = build_config(args)
     except ValueError as exc:
@@ -304,6 +371,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_BAD_CONFIG
     try:
         asyncio.run(run_bridge(config, args, duration_s=args.duration_s))
+    except VlmUnavailableError as exc:
+        logger.error("--scene: %s", exc)
+        return EXIT_NO_SCENE_MODEL
     except KeyboardInterrupt:
         logger.info("interrupted; shutting down")
     except (OSError, ValueError, RuntimeError) as exc:

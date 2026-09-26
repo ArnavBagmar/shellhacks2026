@@ -21,6 +21,30 @@ enum FixturePaths {
         repoRoot.appendingPathComponent("contracts/fixtures/awareness_events.golden.json")
     }
 
+    /// Step 20's `query`/`answer` frames: `{name, expect, frame}` cases.
+    static var queryAnswerFixtureURL: URL {
+        repoRoot.appendingPathComponent("contracts/fixtures/transport_query_answer.golden.json")
+    }
+
+    static func queryAnswerCases() throws -> [(name: String, valid: Bool, frame: [String: Any])] {
+        let data = try Data(contentsOf: queryAnswerFixtureURL)
+        guard
+            let fixture = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let cases = fixture["cases"] as? [[String: Any]]
+        else {
+            throw FixturePathsError.malformedFixture(path: queryAnswerFixtureURL.path)
+        }
+        return try cases.map { item in
+            guard let name = item["name"] as? String,
+                  let expect = item["expect"] as? String,
+                  let frame = item["frame"] as? [String: Any]
+            else {
+                throw FixturePathsError.malformedFixture(path: queryAnswerFixtureURL.path)
+            }
+            return (name, expect == "valid", frame)
+        }
+    }
+
     /// The fixture's first `expect: valid` case's raw `event` object
     /// (`phone_metric_both_range_fields`, task-3-brief.md G).
     static func firstValidEventObject() throws -> [String: Any] {

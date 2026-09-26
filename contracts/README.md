@@ -79,7 +79,7 @@ rebuilt iOS app; treat it as re-running this step, not a patch.
 
 ## Transport envelope
 
-`transport_envelope.schema.json` (draft 2020-12) documents the four
+`transport_envelope.schema.json` (draft 2020-12) documents the six
 WebSocket frame shapes the laptop (server) and phone (client) exchange —
 see `docs/camera-sync-design.md` §4.2 and §4.4 and `cane.transport.messages`
 / `CaneTransport`'s `Envelope.swift` for the code. Every frame is a JSON text
@@ -121,6 +121,25 @@ object with a `type` string:
   dropped; the connection stays up.
 - One event per frame. Batching (`{"events": [...]}`) is a future envelope
   decision, not part of this schema.
+- `query` (phone → laptop) and `answer` (laptop → phone) are step 20's
+  spoken questions ("Hey Cane, is there a bathroom around?", see
+  `docs/steps/step-20-brief.md`). One `answer` per `query_id`; a newer
+  query supersedes an older one. `target` is required exactly when `kind`
+  is `find`; `bearing_deg` is present exactly when `status` is `found`
+  (same `(-180, 180]` torso-relative convention as events). The optional
+  `phone_frame` is one base64 front-camera JPEG, unmirrored. As everywhere
+  else, every key is present and unknown keys are rejected:
+
+  ```json
+  {"type": "query", "query_id": "q-7f3a", "kind": "find", "target": "bathroom",
+   "utterance": "is there a bathroom around", "t_phone_ms": 1790000000000, "phone_frame": null}
+  {"type": "answer", "query_id": "q-7f3a", "status": "found", "subject": "restroom sign",
+   "bearing_deg": 72.5, "detail": "past the elevators", "confidence": "medium", "latency_ms": 2140}
+  ```
+
+  `fixtures/transport_query_answer.golden.json` holds valid and invalid
+  frames; the Python decoder, the Swift decoder and the schema itself are
+  all tested against it.
 
 Both language test suites do not validate against
 `transport_envelope.schema.json` directly; it is documentation, checked by

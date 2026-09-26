@@ -13,7 +13,7 @@ import asyncio
 import contextlib
 import logging
 from types import TracebackType
-from typing import Callable
+from typing import Awaitable, Callable
 
 import websockets
 from websockets.asyncio.server import Server, ServerConnection
@@ -24,9 +24,12 @@ from cane.transport.log_throttle import LogThrottle
 from cane.transport.messages import (
     EventMessage,
     MalformedMessageError,
+    PhoneDiagnostic,
     PhoneHealth,
     Ping,
     Pong,
+    SceneAnswer,
+    SceneQuery,
     Unknown,
     decode,
     encode,
@@ -34,11 +37,19 @@ from cane.transport.messages import (
 from cane.transport.wall_clock import now_ms
 
 logger = logging.getLogger(__name__)
+#: The phone's black-box recorder lines, one JSON object per log record, so a
+#: file handler on this logger alone yields a clean JSONL of the walk.
+phone_logger = logging.getLogger("cane.phone")
 
 #: Both of the events below fire once per frame when they fire at all -- a
 #: phone from another build, or a phone that is not there. One line per
 #: window each; the counters beside them stay exact.
 IGNORED_LOG_INTERVAL_S = 5.0
+#: A ``query`` frame carries one base64 phone JPEG (<= ~2.8 MB of text);
+#: the websockets default of 1 MiB would close the connection on it.
+MAX_FRAME_BYTES = 4 * 1024 * 1024
+
+QueryHandler = Callable[[SceneQuery], Awaitable[None]]
 
 
 class EventLinkServer:
@@ -55,6 +66,7 @@ class EventLinkServer:
         ping_interval_s: float = PING_INTERVAL_S,
         pipeline_delay_d_ms: int = 0,
         on_health: Callable[[PhoneHealth], None] | None = None,
+        on_query: QueryHandler | None = None,
     ) -> None:
         self._host = host
         self._port = port
@@ -65,6 +77,10 @@ class EventLinkServer:
         # of integer compares, and the inbound frame loop must not await
         # anything that could stall the pong stream behind it.
         self._on_health = on_health
+        # Step 20's scene service. Async and slow (a VLM call), so it runs
+        # as its own task: the inbound loop keeps answering pongs meanwhile.
+        self._on_query = on_query
+        self._query_tasks: set[asyncio.Task[None]] = set()
         self._estimator = OffsetEstimator()
         self._frames_ignored = 0
         self._events_dropped_no_phone = 0
@@ -104,7 +120,9 @@ class EventLinkServer:
         return PhoneClock.from_estimator(self._estimator, self._pipeline_delay_d_ms)
 
     async def __aenter__(self) -> EventLinkServer:
-        self._server = await websockets.serve(self._handle_connection, self._host, self._port)
+        self._server = await websockets.serve(
+            self._handle_connection, self._host, self._port, max_size=MAX_FRAME_BYTES
+        )
         self._ping_task = asyncio.create_task(self._ping_loop())
         return self
 
@@ -118,6 +136,10 @@ class EventLinkServer:
             self._ping_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._ping_task
+        for task in list(self._query_tasks):
+            task.cancel()
+        if self._query_tasks:
+            await asyncio.gather(*self._query_tasks, return_exceptions=True)
         if self._server is not None:
             self._server.close()
             await self._server.wait_closed()
@@ -133,10 +155,23 @@ class EventLinkServer:
         if connection is None:
             self._count_no_phone()
             return False
+        return await self._send_on(connection, encode(EventMessage(event=event)), "send_event")
+
+    async def send_answer(self, answer: SceneAnswer) -> bool:
+        """Send one ``answer`` frame to the connected phone. Never raises,
+        like :meth:`send_event`; ``False`` when there is no phone.
+        """
+        connection = self._connection
+        if connection is None:
+            logger.warning("send_answer: no phone connected; answer %s dropped", answer.query_id)
+            return False
+        return await self._send_on(connection, encode(answer), "send_answer")
+
+    async def _send_on(self, connection: ServerConnection, text: str, what: str) -> bool:
         try:
-            await connection.send(encode(EventMessage(event=event)))
+            await connection.send(text)
         except websockets.ConnectionClosed:
-            logger.warning("send_event: connection closed mid-send")
+            logger.warning("%s: connection closed mid-send", what)
             # Only clear if `connection` is still the *current* one: a
             # second phone may already have replaced it (D4) while this
             # send was in flight, and clearing unconditionally would drop
@@ -187,6 +222,10 @@ class EventLinkServer:
             self._apply_pong(msg)
         elif isinstance(msg, PhoneHealth):
             self._apply_health(msg)
+        elif isinstance(msg, PhoneDiagnostic):
+            phone_logger.info(msg.model_dump_json())
+        elif isinstance(msg, SceneQuery):
+            self._apply_query(msg)
         elif isinstance(msg, Unknown):
             self._count_ignored(msg.type)
         else:
@@ -225,6 +264,28 @@ class EventLinkServer:
             self._on_health(health)
         except Exception:  # noqa: BLE001 - the connection outlives the hook
             logger.exception("the on_health hook raised; ignoring this report")
+
+    def _apply_query(self, query: SceneQuery) -> None:
+        """Hand a spoken question to the scene service on its own task. With
+        no service attached the frame is counted as ignored: the phone's own
+        timeout then tells the wearer the feature is unavailable.
+        """
+        if self._on_query is None:
+            self._count_ignored("query")
+            return
+        logger.info("query %s (%s %r)", query.query_id, query.kind, query.target)
+        task = asyncio.create_task(self._run_query(self._on_query, query))
+        self._query_tasks.add(task)
+        task.add_done_callback(self._query_tasks.discard)
+
+    @staticmethod
+    async def _run_query(handler: QueryHandler, query: SceneQuery) -> None:
+        try:
+            await handler(query)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - the connection outlives the hook
+            logger.exception("the on_query hook raised for %s", query.query_id)
 
     def _apply_pong(self, pong: Pong) -> None:
         t4 = now_ms()
