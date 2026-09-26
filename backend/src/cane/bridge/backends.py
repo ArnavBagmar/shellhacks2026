@@ -20,6 +20,7 @@ import importlib.util
 import logging
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Final, Protocol, Sequence
@@ -220,11 +221,11 @@ class LocalBackend:
     queued frame is the failure this whole step exists to avoid.
 
     One sharp edge follows from `timeout_s` (below): a forward pass that
-    overran its budget is abandoned, not cancelled, so it can still be
-    inside `service.infer` when the next frame enters it. Only a detector
-    that is already failing its budget can reach that state, and the
-    consequence is a confused tracker rather than a crash -- but it is the
-    reason the budget is seconds, not milliseconds.
+    overran its budget is abandoned, not cancelled, so it may still be
+    inside `service.infer` when the next frame arrives. A non-blocking
+    worker lock turns that frame into an immediate, counted `BackendError`
+    -- never a queue, never a concurrent entry -- and the backend stays
+    "busy" until the abandoned worker finishes and releases it.
     """
 
     def __init__(
@@ -236,6 +237,8 @@ class LocalBackend:
         self.source = Source.X4_LOCAL
         self._service = service
         self._timeout_s = timeout_s
+        # Taken on the event loop, released only by the worker thread.
+        self._worker_lock = threading.Lock()
 
     @classmethod
     def build(
@@ -285,13 +288,29 @@ class LocalBackend:
         walk and every frame after it would be dropped as `dropped_busy`:
         the fallback's own version of the failure the fallback exists for.
         """
+        if not self._worker_lock.acquire(blocking=False):
+            raise BackendError(
+                "local inference from the previous frame is still running; frame dropped"
+            )
         try:
             async with asyncio.timeout(self._timeout_s):
-                return await asyncio.to_thread(self._infer_sync, meta, jpegs)
+                return await asyncio.to_thread(self._infer_guarded, meta, jpegs)
         except TimeoutError as exc:
             raise BackendTimeout(
                 f"local inference exceeded {self._timeout_s:.2f}s"
             ) from exc
+
+    def _infer_guarded(
+        self, meta: InferenceMeta, jpegs: tuple[bytes, ...]
+    ) -> InferenceResponse:
+        """Worker-thread side of `infer`; releases the lock here and only here.
+        An executor never drops a submitted callable, so an abandoned pass
+        always ends by freeing the backend; until then frames are rejected.
+        """
+        try:
+            return self._infer_sync(meta, jpegs)
+        finally:
+            self._worker_lock.release()
 
     def _infer_sync(
         self, meta: InferenceMeta, jpegs: tuple[bytes, ...]

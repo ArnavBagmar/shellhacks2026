@@ -168,10 +168,42 @@ async def test_a_local_inference_over_its_budget_is_a_timeout_and_frees_the_slot
     elapsed = time.monotonic() - started
 
     assert elapsed < SLOW_DETECT_S
-    # Nothing is wedged: the next request is answered normally.
+    # Nothing is wedged once the abandoned worker has finished: the next
+    # request is answered normally.
+    await asyncio.sleep(SLOW_DETECT_S)
     slow.sleep_s = 0.0
     response = await backend.infer(make_meta(), six_jpegs())
     assert response.t_capture_ms == T_CAPTURE_MS
+
+
+async def test_a_frame_arriving_while_an_abandoned_worker_still_runs_is_rejected_not_run(
+    six_jpegs: Callable[..., Jpegs],
+) -> None:
+    """`asyncio.timeout` frees the slot but cannot stop the thread. The
+    service is not thread-safe, so the next frame must be *rejected* (a
+    counted error) rather than entered concurrently -- and never queued.
+    """
+    slow = CountingDetector(sleep_s=SLOW_DETECT_S)
+    backend = LocalBackend.build(
+        CloudSettings(detector="fake"),
+        detector=slow,
+        warm_up_px=None,
+        timeout_s=LOCAL_BUDGET_S,
+    )
+    with pytest.raises(BackendTimeout):
+        await backend.infer(make_meta(), six_jpegs())
+
+    started = time.monotonic()
+    with pytest.raises(BackendError):
+        await backend.infer(make_meta(), six_jpegs())
+    assert time.monotonic() - started < LOCAL_BUDGET_S, "rejected immediately, not queued"
+    assert len(slow.batches) == 1, "the service was never entered concurrently"
+
+    await asyncio.sleep(SLOW_DETECT_S)
+    slow.sleep_s = 0.0
+    response = await backend.infer(make_meta(), six_jpegs())
+    assert response.t_capture_ms == T_CAPTURE_MS
+    assert len(slow.batches) == 2
 
 
 def test_the_local_budget_default_is_the_configurable_one() -> None:
