@@ -125,6 +125,27 @@ class SceneQuery(BaseModel):
         return self
 
 
+class PhoneBox(BaseModel):
+    """Where a found thing sits in the phone's photo, as fractions of its
+    width and height from the top-left corner. The phone measures the
+    TrueDepth distance inside it; only the phone photo has depth, so an
+    answer found in a 360 view never carries one.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    x_min: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+    y_min: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+    x_max: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+    y_max: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+
+    @model_validator(mode="after")
+    def _ordered(self) -> PhoneBox:
+        if not (self.x_min < self.x_max and self.y_min < self.y_max):
+            raise ValueError("a phone box needs x_min < x_max and y_min < y_max")
+        return self
+
+
 class SceneAnswer(BaseModel):
     """``answer`` frame, laptop -> phone: the one reply to a ``query``.
     ``subject``/``detail`` are noun phrases; direction travels only as
@@ -142,6 +163,9 @@ class SceneAnswer(BaseModel):
     detail: Annotated[str | None, Field(min_length=1, max_length=240)]
     confidence: Confidence | None
     latency_ms: Annotated[int, Field(ge=0)]
+    #: Optional on the wire (older phones reject unknown keys, so it is
+    #: omitted rather than sent as null).
+    phone_box: PhoneBox | None = None
 
     @model_validator(mode="after")
     def _status_rules(self) -> SceneAnswer:
@@ -151,6 +175,8 @@ class SceneAnswer(BaseModel):
             raise ValueError("a 'described' answer needs a detail")
         if self.status != "found" and self.bearing_deg is not None:
             raise ValueError("only a 'found' answer carries a bearing")
+        if self.status != "found" and self.phone_box is not None:
+            raise ValueError("only a 'found' answer carries a phone box")
         return self
 
 
@@ -263,6 +289,8 @@ def encode(msg: OutboundMessage) -> str:
         payload = {"type": "event", "event": to_wire_dict(msg.event)}
     elif isinstance(msg, SceneAnswer):
         payload = {"type": ANSWER_TYPE, **msg.model_dump()}
+        if payload["phone_box"] is None:
+            del payload["phone_box"]
     elif isinstance(msg, VoiceClip):
         payload = {"type": VOICE_TYPE, **msg.model_dump()}
     else:

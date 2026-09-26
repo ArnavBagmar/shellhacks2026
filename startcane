@@ -2,14 +2,18 @@
 # One entry point for running the cane from this laptop. Keep it current:
 # when a run command changes anywhere in the repo, change it here too.
 #
-#   ./startcane            laptop serve over the still test image (no X4 needed)
-#   ./startcane x4         laptop serve over the live Insta360 X4 (saves every question's views)
+#   ./startcane            laptop serve, phone camera only (no X4 needed; what testing at a desk wants)
+#   ./startcane x4         laptop serve over the live Insta360 X4 + the phone camera
+#   ./startcane still      laptop serve over the repo's old test photo as a fake 360 view
+#                          (Gemini then describes that photo's room, not yours)
 #   ./startcane phone      build the iPhone app and install it on every plugged-in iPhone
 #   ./startcane test       run both test suites
 #   ./startcane logs       follow today's laptop log and phone log
 #
-# Extra arguments after `still`/`x4` go straight to `python -m cane.scene`.
+# Every mode saves what Gemini saw per question under backend/logs/views/.
+# Extra arguments after `front`/`still`/`x4` go straight to `python -m cane.scene`.
 # A second phone needs its own port: CANE_PORT=8766 ./startcane
+# Backpack, lid closed: run `sudo pmset -a disablesleep 1` once first (undo: 0).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,6 +66,17 @@ free_port() {
   die "port $PORT is used by something else: $cmd  (try CANE_PORT=8766 ./startcane)"
 }
 
+# Closing the lid sleeps a Mac whatever caffeinate says, unless sleep is
+# disabled system-wide. Only warns: changing it needs sudo and is the user's call.
+check_sleep() {
+  if [[ "$(pmset -g 2>/dev/null | awk '/SleepDisabled/ {print $2}')" != "1" ]]; then
+    say "tip: to run with the lid closed (laptop in the backpack), first run: sudo pmset -a disablesleep 1"
+    say "     undo after the walk with: sudo pmset -a disablesleep 0"
+  else
+    say "lid-closed OK: sleep is disabled (undo after the walk: sudo pmset -a disablesleep 0)"
+  fi
+}
+
 laptop_ip() {
   ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "unknown (not on Wi-Fi?)"
 }
@@ -73,9 +88,11 @@ serve() {
   say "syncing Python deps"
   uv sync --quiet --extra mac --extra scene
   free_port
+  check_sleep
   say "phone app settings -> Address: $(laptop_ip)   Port: $PORT"
   say "logs -> backend/logs/laptop-$(date +%Y%m%d).log and backend/logs/phone-$(date +%Y%m%d).jsonl"
-  PYTHONPATH=src exec uv run --env-file .env python -m cane.scene --serve --ws-port "$PORT" "$@"
+  # caffeinate -i: no idle sleep while the serve runs (lid open or closed).
+  PYTHONPATH=src exec caffeinate -i uv run --env-file .env python -m cane.scene --serve --ws-port "$PORT" "$@"
 }
 
 phone() {
@@ -121,14 +138,15 @@ logs() {
   exec tail -n 40 -F "$BACKEND/logs/laptop-$day.log" "$BACKEND/logs/phone-$day.jsonl"
 }
 
-cmd="${1:-still}"
+cmd="${1:-front}"
 [[ $# -gt 0 ]] && shift
 case "$cmd" in
-  still)          serve --equirect "$STILL" "$@" ;;
+  front)          serve --save-views logs/views "$@" ;;
+  still)          serve --equirect "$STILL" --save-views logs/views "$@" ;;
   x4)             serve --source x4 --save-views logs/views "$@" ;;
   phone|install)  phone ;;
   test|tests)     tests ;;
   logs|log)       logs ;;
-  -h|--help|help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h|--help|help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//' ;;
   *)              die "unknown command '$cmd' (try ./startcane help)" ;;
 esac

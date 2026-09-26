@@ -1,3 +1,4 @@
+import CaneCamera
 import CaneOutput
 import CaneTransport
 import CaneVoice
@@ -10,6 +11,18 @@ public protocol QueryLink: Sendable {
 }
 
 extension EventLinkClient: QueryLink {}
+
+/// What the front camera saw when a question was asked: the photo sent to
+/// the laptop, and the TrueDepth map kept here to measure the answer's box.
+public struct FrontCapture: Sendable {
+    public var frame: PhoneFrame?
+    public var depth: DepthMap?
+
+    public init(frame: PhoneFrame? = nil, depth: DepthMap? = nil) {
+        self.frame = frame
+        self.depth = depth
+    }
+}
 
 /// Speaks on a non-hazard channel. `OutputArbiter` is the real one.
 public protocol AssistSpeaker: Sendable {
@@ -48,26 +61,34 @@ public actor QueryCoordinator {
 
     private let link: QueryLink
     private let speaker: AssistSpeaker
-    private let snapshot: @Sendable () -> PhoneFrame?
+    private let snapshot: @Sendable () -> FrontCapture
     private let clock: @Sendable () -> Int64
     private let makeId: @Sendable () -> String
     private let userGain: @Sendable () -> Float
     private let timeoutMs: Int
+    private let locale: Locale
+    private let onDistance: @Sendable (DistanceOutcome) -> Void
     private let logger = Logger(subsystem: "cane", category: "assist")
 
     public private(set) var state: State = .idle
     private var target: String?
+    /// The depth map from the current question's photo, and whether the
+    /// wearer asked "how far".
+    private var depth: DepthMap?
+    private var distanceAsked = false
     private var timeoutTask: Task<Void, Never>?
     private var stateObserver: (@Sendable (State) -> Void)?
 
     public init(
         link: QueryLink,
         speaker: AssistSpeaker,
-        snapshot: @escaping @Sendable () -> PhoneFrame? = { nil },
+        snapshot: @escaping @Sendable () -> FrontCapture = { FrontCapture() },
         clock: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
         makeId: @escaping @Sendable () -> String = { "q-" + UUID().uuidString.prefix(8).lowercased() },
         userGain: @escaping @Sendable () -> Float = { 1.0 },
-        timeoutMs: Int = QueryCoordinator.answerTimeoutMs
+        timeoutMs: Int = QueryCoordinator.answerTimeoutMs,
+        locale: Locale = .current,
+        onDistance: @escaping @Sendable (DistanceOutcome) -> Void = { _ in }
     ) {
         self.link = link
         self.speaker = speaker
@@ -76,6 +97,8 @@ public actor QueryCoordinator {
         self.makeId = makeId
         self.userGain = userGain
         self.timeoutMs = timeoutMs
+        self.locale = locale
+        self.onDistance = onDistance
     }
 
     public func observeState(_ observer: @escaping @Sendable (State) -> Void) {
@@ -89,6 +112,8 @@ public actor QueryCoordinator {
         switch intent {
         case .find(let target):
             await ask(.find, target: target, utterance: utterance ?? "is there a \(target) around")
+        case .howFar(let target):
+            await ask(.find, target: target, utterance: utterance ?? "how far is the \(target)", distanceAsked: true)
         case .describeAround:
             await ask(.describeAround, target: nil, utterance: utterance ?? "what is around me")
         case .describeFront:
@@ -112,7 +137,15 @@ public actor QueryCoordinator {
         }
         timeoutTask?.cancel()
         setState(.answering)
-        let text = AnswerPhrasing.phrase(for: answer, target: target)
+        var distance: DistanceOutcome?
+        if answer.status == .found {
+            let outcome = DistanceOutcome.evaluate(box: answer.phoneBox, depth: depth)
+            onDistance(outcome)
+            distance = outcome
+        }
+        depth = nil
+        let text = AnswerPhrasing.phrase(for: answer, target: target, distance: distance, asked: distanceAsked,
+                                         locale: locale)
         let haptic = HapticScript.navigation(side: AnswerPhrasing.side(for: answer), userGain: Double(userGain()))
         logger.info("answer \(answer.queryId, privacy: .public) \(answer.status.rawValue, privacy: .public) in \(answer.latencyMs) ms: \(text, privacy: .public)")
         speaker.cancel(upTo: .prompt)
@@ -122,14 +155,15 @@ public actor QueryCoordinator {
 
     // MARK: - Internals
 
-    private func ask(_ kind: SceneQueryKind, target: String?, utterance: String) async {
+    private func ask(_ kind: SceneQueryKind, target: String?, utterance: String, distanceAsked: Bool = false) async {
         finish()
         let id = makeId()
+        let capture = snapshot()
         let query: SceneQuery
         do {
             query = try SceneQuery(
                 queryId: id, kind: kind, target: target, utterance: String(utterance.prefix(300)),
-                tPhoneMs: clock(), phoneFrame: snapshot()
+                tPhoneMs: clock(), phoneFrame: capture.frame
             )
         } catch {
             logger.error("could not build query: \(String(describing: error), privacy: .public)")
@@ -138,6 +172,10 @@ public actor QueryCoordinator {
         // Recorded before sending: `send` suspends, and the answer must
         // find this question current however fast it comes back.
         self.target = target
+        // Only a map that belongs to the photo sent: a box drawn on one
+        // photo means nothing on another.
+        self.depth = capture.frame == nil ? nil : capture.depth
+        self.distanceAsked = distanceAsked
         setState(.looking(queryId: id))
         do {
             try await link.send(query)
@@ -188,6 +226,8 @@ public actor QueryCoordinator {
         timeoutTask?.cancel()
         timeoutTask = nil
         target = nil
+        depth = nil
+        distanceAsked = false
         setState(.idle)
     }
 

@@ -28,6 +28,8 @@ final class AppModel {
     /// Live TrueDepth reading for the debug panel; nil when this phone
     /// has no depth sensor or none has arrived yet.
     private(set) var depthLine: String?
+    /// The laptop link is down: shown as a banner on the chest screen.
+    private(set) var linkProblem: Runtime.LinkProblem?
 
     private var runtime: Runtime?
     private var hazardClear: Task<Void, Never>?
@@ -66,6 +68,7 @@ final class AppModel {
         runtime = nil
         mode = .setup
         connected = false
+        linkProblem = nil
         speaking = false
         level = 0
         lastHeard = ""
@@ -98,7 +101,8 @@ final class AppModel {
             onLevel: { [weak self] value in Task { @MainActor in self?.level = value } },
             onAssist: { [weak self] state in Task { @MainActor in self?.assist = state } },
             onNote: { [weak self] text in Task { @MainActor in self?.note(text) } },
-            onDepth: { [weak self] line in Task { @MainActor in self?.showDepth(line) } }
+            onDepth: { [weak self] line in Task { @MainActor in self?.showDepth(line) } },
+            onLinkProblem: { [weak self] problem in Task { @MainActor in self?.linkProblem = problem } }
         )
     }
 

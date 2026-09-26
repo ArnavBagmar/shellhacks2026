@@ -29,6 +29,13 @@ final class Runtime {
         var onNote: @Sendable (String) -> Void
         /// A live TrueDepth reading for the debug panel, once a second.
         var onDepth: @Sendable (String) -> Void
+        /// The laptop link is down (banner title + what to check), or nil.
+        var onLinkProblem: @Sendable (LinkProblem?) -> Void
+    }
+
+    struct LinkProblem: Equatable, Sendable {
+        let title: String
+        let detail: String
     }
 
     static let tickMs = 100
@@ -46,6 +53,7 @@ final class Runtime {
     private let callbacks: Callbacks
     let diagnostics: Diagnostics
     private let laptopURL: URL
+    private let network = NetworkWatch()
     private var tasks: [Task<Void, Never>] = []
     private var interruptionObserver: NSObjectProtocol?
     private let logger = Logger(subsystem: "cane", category: "runtime")
@@ -102,11 +110,22 @@ final class Runtime {
             link: client,
             speaker: arbiter,
             snapshot: {
-                guard let shot = camera.snapshotJPEG() else { return nil }
-                return try? PhoneFrame(jpeg: shot.jpeg, hfovDeg: shot.hfovDeg, width: shot.width, height: shot.height)
+                guard let shot = camera.snapshotJPEG(withDepth: true) else { return FrontCapture() }
+                let frame = try? PhoneFrame(jpeg: shot.jpeg, hfovDeg: shot.hfovDeg, width: shot.width, height: shot.height)
+                return FrontCapture(frame: frame, depth: shot.depth)
             },
             clock: Self.now,
-            userGain: { settings.current.hapticGain }
+            userGain: { settings.current.hapticGain },
+            onDistance: { outcome in
+                var fields: [String: DiagnosticEvent.Value] = ["outcome": .text(outcome.label)]
+                if let sample = outcome.sample {
+                    fields["metres"] = .number(sample.metres)
+                    fields["nearest_m"] = .number(sample.nearestMetres)
+                    fields["coverage"] = .number(sample.coverage)
+                    fields["accuracy"] = .text(sample.accuracy.rawValue)
+                }
+                diagnostics.record("distance", fields)
+            }
         )
         let navigation = NavigationController(arbiter: arbiter, userGain: { settings.current.hapticGain })
         self.navigation = navigation
@@ -131,7 +150,11 @@ final class Runtime {
             onAssist: { state in diag.record("assist", ["state": .text(String(describing: state))]); ui.onAssist(state) },
             onNote: { text in diag.record("note", ["text": .text(text)]); ui.onNote(text) },
             // Already recorded by the depth loop itself; this only drives the panel.
-            onDepth: { line in ui.onDepth(line) }
+            onDepth: { line in ui.onDepth(line) },
+            onLinkProblem: { problem in
+                diag.record("link_alert", ["problem": .text(problem?.title ?? "none")])
+                ui.onLinkProblem(problem)
+            }
         )
     }
 
@@ -173,6 +196,7 @@ final class Runtime {
         tasks.forEach { $0.cancel() }
         tasks.removeAll()
         listener.stop()
+        network.stop()
         camera.stop()
         navigation.stop()
         client.disconnect()
@@ -192,6 +216,8 @@ final class Runtime {
     private func startLoops() {
         let client = client, feedback = feedback, coordinator = coordinator, voice = voice, callbacks = callbacks
         let diagnostics = diagnostics, laptopVoice = laptopVoice
+        let network = network, arbiter = arbiter
+        let host = laptopURL.host ?? "", address = "\(laptopURL.host ?? "?"):\(laptopURL.port ?? 0)"
         tasks.append(Task {
             for await clip in client.voices {
                 await laptopVoice.receive(clip)
@@ -226,12 +252,28 @@ final class Runtime {
                 try? await Task.sleep(for: .milliseconds(Self.gateTickMs))
             }
         })
+        // The link, once a second: the orb's state, and -- past a short
+        // grace -- a spoken warning and a banner with the likeliest cause.
         tasks.append(Task {
             var last: Bool?
+            var alert = LinkAlert()
             while !Task.isCancelled {
                 let connected = await client.hasConnection
                 if connected != last { callbacks.onConnected(connected) }
                 last = connected
+                let net = network.state
+                let reason = LinkAlert.reason(networkUp: net.networkUp, onWiFi: net.onWiFi, laptopHost: host)
+                switch alert.update(connected: connected, reason: reason, nowMs: Self.now()) {
+                case .none:
+                    break
+                case .lost(let reason):
+                    let banner = LinkAlert.banner(reason, address: address)
+                    callbacks.onLinkProblem(LinkProblem(title: banner.title, detail: banner.detail))
+                    await arbiter.say(SpokenPhrase(text: LinkAlert.spoken(reason)), on: .prompt, maxWaitMs: 3_000)
+                case .restored:
+                    callbacks.onLinkProblem(nil)
+                    await arbiter.say(SpokenPhrase(text: LinkAlert.restoredPhrase), on: .prompt, maxWaitMs: 3_000)
+                }
                 try? await Task.sleep(for: .seconds(1))
             }
         })

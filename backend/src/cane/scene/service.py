@@ -36,7 +36,7 @@ from cane.scene.frames import EquirectProvider
 from cane.scene.prompt import build_prompt, crop_label, phone_label
 from cane.scene.vlm import LabeledImage, VisionLanguageModel, VlmReply
 from cane.scene.weather import WeatherSource, is_weather_question
-from cane.transport.messages import Confidence, SceneAnswer, SceneQuery
+from cane.transport.messages import Confidence, PhoneBox, SceneAnswer, SceneQuery
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,8 @@ DEFAULT_CROP_PX = 512
 DEFAULT_JPEG_QUALITY = 75
 MAX_SUBJECT_CHARS = 80
 MAX_DETAIL_CHARS = 240
+#: Gemini's box_2d scale.
+BOX_SCALE = 1000.0
 #: Where the wearer is, for ``ask`` questions ("how's the weather?"), e.g.
 #: "FIU Graham Center, Miami, Florida". Optional.
 LOCATION_ENV = "CANE_LOCATION"
@@ -63,6 +65,8 @@ class View:
     image: LabeledImage
     centre_deg: float
     fov_deg: float
+    #: The phone photo: the only image with depth behind it.
+    is_phone: bool = False
 
     def bearing_at(self, x_center: float) -> float:
         x = min(max(x_center, 0.0), 1.0)
@@ -153,10 +157,12 @@ class SceneQueryService:
         answer = self._to_answer(query, reply, views, started)
         if self._dump_dir is not None:
             await asyncio.to_thread(self._dump, query, views, reply, answer, facts)
+        index = reply.image_index
+        where = "phone" if index is not None and 0 <= index < len(views) and views[index].is_phone else index
         logger.info(
-            "query %s -> %s %r bearing=%s in %d ms",
+            "query %s -> %s %r bearing=%s image=%s box=%s in %d ms",
             query.query_id, answer.status, answer.subject or answer.detail,
-            answer.bearing_deg, answer.latency_ms,
+            answer.bearing_deg, where, "yes" if answer.phone_box else "no", answer.latency_ms,
         )
         return answer
 
@@ -213,6 +219,7 @@ class SceneQueryService:
             image=LabeledImage(phone_label(index, frame.hfov_deg), jpeg),
             centre_deg=0.0,
             fov_deg=frame.hfov_deg,
+            is_phone=True,
         )
 
     def _dump(
@@ -245,7 +252,8 @@ class SceneQueryService:
         detail = _clean(reply.detail, MAX_DETAIL_CHARS)
         if query.kind == "ask":
             located = (
-                status == "found" and reply.image_index is not None and reply.x_center is not None
+                status == "found" and reply.image_index is not None
+                and (reply.x_center is not None or _box(reply.box_2d) is not None)
                 and 0 <= reply.image_index < len(views) and _clean(reply.subject, MAX_SUBJECT_CHARS)
             )
             if located:
@@ -266,9 +274,19 @@ class SceneQueryService:
         self, query: SceneQuery, reply: VlmReply, views: list[View], started: float, detail: str | None
     ) -> SceneAnswer:
         bearing = None
+        phone_box = None
         index = reply.image_index
-        if index is not None and 0 <= index < len(views) and reply.x_center is not None:
-            bearing = views[index].bearing_at(reply.x_center)
+        box = _box(reply.box_2d)
+        if index is not None and 0 <= index < len(views):
+            # The box first: it is Gemini's native format and was right every
+            # time live, while x_center sometimes came back on the box's
+            # 0-1000 scale (221 for 0.221) and clamped to the right edge --
+            # "everything is to the right" (2026-09-26).
+            x_center = (box.x_min + box.x_max) / 2 if box is not None else _fraction(reply.x_center)
+            if x_center is not None:
+                bearing = views[index].bearing_at(x_center)
+            if views[index].is_phone:
+                phone_box = box
         confidence = (reply.confidence or "").strip().lower()
         return self._build(
             query,
@@ -278,6 +296,7 @@ class SceneQueryService:
             bearing_deg=bearing,
             detail=detail,
             confidence=confidence if confidence in _CONFIDENCES else None,
+            phone_box=phone_box,
         )
 
     def _unavailable(self, query: SceneQuery, started: float) -> SceneAnswer:
@@ -295,6 +314,36 @@ class SceneQueryService:
         }
         values.update(fields)
         return SceneAnswer.model_validate(values)
+
+
+def _fraction(x: float | None) -> float | None:
+    """x_center as 0-1, accepting the 0-1000 scale Gemini sometimes uses."""
+    if x is None or x != x:
+        return None
+    return x / BOX_SCALE if 1.0 < x <= BOX_SCALE else x
+
+
+def _box(raw: Sequence[float] | None) -> PhoneBox | None:
+    """Gemini's [ymin, xmin, ymax, xmax] on 0-1000 -> fractions, or None
+    for anything that is not a usable box (wrong length, zero size).
+    Swapped corners are put right; values past the edges are clamped.
+    """
+    if raw is None or len(raw) != 4:
+        return None
+    try:
+        values = [min(max(float(v) / BOX_SCALE, 0.0), 1.0) for v in raw]
+    except (TypeError, ValueError):
+        return None
+    if any(v != v for v in values):  # NaN
+        return None
+    y0, x0, y1, x1 = values
+    x_min, x_max = sorted((x0, x1))
+    y_min, y_max = sorted((y0, y1))
+    if x_max - x_min < 0.005 or y_max - y_min < 0.005:
+        return None
+    return PhoneBox(
+        x_min=round(x_min, 3), y_min=round(y_min, 3), x_max=round(x_max, 3), y_max=round(y_max, 3)
+    )
 
 
 def _clean(text: str | None, max_chars: int) -> str | None:

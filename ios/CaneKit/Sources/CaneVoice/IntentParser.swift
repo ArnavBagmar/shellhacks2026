@@ -4,6 +4,9 @@ import Foundation
 public enum VoiceIntent: Equatable, Sendable {
     /// "Is there a bathroom around?" -> `.find("bathroom")`.
     case find(String)
+    /// "How far is the Sprite can?" -> `.howFar("sprite can")`: a find
+    /// whose answer must carry a distance (TrueDepth, front camera only).
+    case howFar(String)
     /// "What's around me?"
     case describeAround
     /// "What's in front of me?"
@@ -47,6 +50,7 @@ public enum IntentParser {
         if timePhrases.contains(where: text.contains) { return .time }
         if text == "help" || helpPhrases.contains(where: text.contains) { return .help }
         if let place = after(navigatePrefixes, in: text).flatMap(clean) { return .navigate(place) }
+        if let target = after(howFarPrefixes, in: text).flatMap(clean) { return .howFar(target) }
         if let target = after(findPrefixes, in: text).flatMap(clean) {
             if genericTargets.contains(where: { target == $0 || target.hasPrefix($0 + " ") }) {
                 return frontPhrases.contains(where: text.contains) ? .describeFront : .describeAround
@@ -104,6 +108,15 @@ public enum IntentParser {
         "stop", "cancel", "never mind", "nevermind", "forget it", "be quiet", "quiet", "stop talking",
     ]
 
+    static let howFarPrefixes = [
+        "how far away is the ", "how far away is ", "how far is the ", "how far is ",
+        "how far am i from the ", "how far am i from ", "how close is the ", "how close is ",
+        "how close am i to the ", "how close am i to ", "distance to the ", "distance to ",
+        "how far away are the ", "how far are the ", "how far are ",
+        // "can you tell me how far the bench is" (filler already stripped).
+        "how far away the ", "how far the ",
+    ]
+
     static let navigatePrefixes = [
         "take me to ", "navigate to ", "directions to ", "guide me to ", "walk me to ", "get me to ",
     ]
@@ -124,7 +137,7 @@ public enum IntentParser {
     ]
 
     static let trailingNoise = [
-        "in front of me", "ahead of me", "ahead", "on this floor", "in here", "in this building",
+        "away from me", "from me", "from here", "away", "in front of me", "ahead of me", "ahead", "on this floor", "in here", "in this building",
         "around here", "around me", "near me", "close by", "nearby", "around", "near", "here", "close", "please",
         "anywhere", "for me", "located", "is", "are", "at",
     ]
@@ -145,8 +158,14 @@ public enum IntentParser {
                 changed = true
             }
         }
-        return text.isEmpty ? nil : String(text.prefix(60))
+        // "how far is the" mid-sentence: a determiner is not a thing yet.
+        if text.isEmpty || danglingWords.contains(text) { return nil }
+        return String(text.prefix(60))
     }
+
+    static let danglingWords: Set<String> = [
+        "the", "a", "an", "some", "any", "this", "that", "these", "those", "my", "your", "our", "their",
+    ]
 
     /// Lowercase, straight apostrophes, no punctuation, contractions
     /// expanded, single spaces.

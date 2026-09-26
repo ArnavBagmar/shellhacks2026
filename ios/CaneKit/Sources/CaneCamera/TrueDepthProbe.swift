@@ -24,6 +24,10 @@ import os
 public final class TrueDepthProbe: NSObject, AVCaptureDepthDataOutputDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var sample: DepthSample?
+    /// The newest frame itself, kept (not copied) so a question's photo can
+    /// take the whole map with it; copying it every frame would cost
+    /// ~1.2 MB at 30 fps for maps nobody reads.
+    private var newest: (data: AVDepthData, accuracy: DepthAccuracy, timestampMs: Int64)?
     private var onSample: (@Sendable (DepthSample) -> Void)?
     private let logger = Logger(subsystem: "cane", category: "depth")
     private var loggedFirst = false
@@ -53,6 +57,7 @@ public final class TrueDepthProbe: NSObject, AVCaptureDepthDataOutputDelegate, @
 
         let handler = lock.withLock { () -> (@Sendable (DepthSample) -> Void)? in
             sample = reading
+            newest = (depth, accuracy, ms)
             return onSample
         }
         if !loggedFirst {
@@ -63,6 +68,25 @@ public final class TrueDepthProbe: NSObject, AVCaptureDepthDataOutputDelegate, @
                 """)
         }
         handler?(reading)
+    }
+
+    /// The whole newest map, copied once, in the sensor's own orientation.
+    public func latestMap() -> DepthMap? {
+        guard let newest = lock.withLock({ newest }) else { return nil }
+        let map = newest.data.depthDataMap
+        CVPixelBufferLockBaseAddress(map, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(map, .readOnly) }
+        let width = CVPixelBufferGetWidth(map)
+        let height = CVPixelBufferGetHeight(map)
+        guard width > 0, height > 0, let base = CVPixelBufferGetBaseAddress(map) else { return nil }
+        let rowBytes = CVPixelBufferGetBytesPerRow(map)
+        var values = [Float](repeating: .nan, count: width * height)
+        for y in 0..<height {
+            let row = base.advanced(by: y * rowBytes).assumingMemoryBound(to: Float32.self)
+            for x in 0..<width { values[y * width + x] = row[x] }
+        }
+        return DepthMap(values: values, width: width, height: height,
+                        accuracy: newest.accuracy, timestampMs: newest.timestampMs)
     }
 
     /// Copies only the central probe region out of the depth map.

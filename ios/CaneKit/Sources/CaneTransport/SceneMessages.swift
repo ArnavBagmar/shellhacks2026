@@ -135,6 +135,35 @@ public struct SceneQuery: Sendable, Equatable {
     }
 }
 
+/// Where a found thing sits in the phone's photo, as fractions of its width
+/// and height from the top-left corner. The phone measures the TrueDepth
+/// distance inside it; only the phone photo has depth behind it.
+public struct PhoneBox: Sendable, Equatable {
+    public let xMin: Double
+    public let yMin: Double
+    public let xMax: Double
+    public let yMax: Double
+
+    public init(xMin: Double, yMin: Double, xMax: Double, yMax: Double) throws {
+        for value in [xMin, yMin, xMax, yMax] where !(value.isFinite && (0...1).contains(value)) {
+            throw TransportError.invalidFrame("phone_box")
+        }
+        guard xMin < xMax, yMin < yMax else { throw TransportError.invalidFrame("phone_box") }
+        self.xMin = xMin
+        self.yMin = yMin
+        self.xMax = xMax
+        self.yMax = yMax
+    }
+
+    static func decode(_ raw: [String: Any]) throws -> PhoneBox {
+        let object = try StrictObject(object: raw, keys: ["x_min", "y_min", "x_max", "y_max"])
+        return try PhoneBox(
+            xMin: try object.double("x_min"), yMin: try object.double("y_min"),
+            xMax: try object.double("x_max"), yMax: try object.double("y_max")
+        )
+    }
+}
+
 /// Laptop -> phone. Direction travels only as `bearingDeg` (torso-relative,
 /// 0 ahead, negative left), so the phone speaks it in the same words it
 /// uses for hazards.
@@ -146,6 +175,8 @@ public struct SceneAnswer: Sendable, Equatable {
     public let detail: String?
     public let confidence: SceneConfidence?
     public let latencyMs: Int64
+    /// Only on a `found` answer located in the phone photo.
+    public let phoneBox: PhoneBox?
 
     public init(
         queryId: String,
@@ -154,7 +185,8 @@ public struct SceneAnswer: Sendable, Equatable {
         bearingDeg: Double?,
         detail: String?,
         confidence: SceneConfidence?,
-        latencyMs: Int64
+        latencyMs: Int64,
+        phoneBox: PhoneBox? = nil
     ) throws {
         try SceneLimits.checkQueryId(queryId)
         if let subject, !(1...80).contains(subject.count) { throw TransportError.invalidFrame("subject") }
@@ -166,6 +198,7 @@ public struct SceneAnswer: Sendable, Equatable {
         if status == .found, subject == nil { throw TransportError.invalidFrame("subject") }
         if status == .described, detail == nil { throw TransportError.invalidFrame("detail") }
         if status != .found, bearingDeg != nil { throw TransportError.invalidFrame("bearing_deg") }
+        if status != .found, phoneBox != nil { throw TransportError.invalidFrame("phone_box") }
         self.queryId = queryId
         self.status = status
         self.subject = subject
@@ -173,12 +206,13 @@ public struct SceneAnswer: Sendable, Equatable {
         self.detail = detail
         self.confidence = confidence
         self.latencyMs = latencyMs
+        self.phoneBox = phoneBox
     }
 
     static func decode(_ raw: [String: Any]) throws -> SceneAnswer {
         let object = try StrictObject(object: raw, keys: [
             "type", "query_id", "status", "subject", "bearing_deg", "detail", "confidence", "latency_ms",
-        ])
+        ], optionalKeys: ["phone_box"])
         guard let status = SceneAnswerStatus(rawValue: try object.string("status")) else {
             throw TransportError.invalidFrame("status")
         }
@@ -196,7 +230,8 @@ public struct SceneAnswer: Sendable, Equatable {
             bearingDeg: try object.optionalDouble("bearing_deg"),
             detail: try object.optionalString("detail"),
             confidence: confidence,
-            latencyMs: try object.integer("latency_ms")
+            latencyMs: try object.integer("latency_ms"),
+            phoneBox: try object.optionalObject("phone_box").map(PhoneBox.decode)
         )
     }
 }
@@ -303,9 +338,11 @@ struct StrictObject {
         try self.init(object: object, keys: keys)
     }
 
-    init(object: [String: Any], keys: Set<String>) throws {
+    /// `optionalKeys` may be absent (read as null): fields added after
+    /// phones shipped, which the sender omits when empty.
+    init(object: [String: Any], keys: Set<String>, optionalKeys: Set<String> = []) throws {
         let present = Set(object.keys)
-        if let unknown = present.subtracting(keys).sorted().first {
+        if let unknown = present.subtracting(keys.union(optionalKeys)).sorted().first {
             throw TransportError.invalidFrame(unknown)
         }
         if let missing = keys.subtracting(present).sorted().first {
@@ -314,7 +351,8 @@ struct StrictObject {
         self.object = object
     }
 
-    private func isNull(_ key: String) -> Bool { object[key] is NSNull }
+    /// Absent counts as null: required keys were already checked present.
+    private func isNull(_ key: String) -> Bool { object[key] == nil || object[key] is NSNull }
 
     private func number(_ key: String) throws -> NSNumber {
         guard let number = object[key] as? NSNumber, !Self.isBool(number) else {

@@ -18,6 +18,11 @@ struct ChestDisplayView: View {
             VStack(spacing: 0) {
                 cameraNotice
                     .padding(.top, 12)
+                if let problem = model.linkProblem {
+                    linkBanner(problem)
+                        .padding(.top, 16)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
                 Spacer(minLength: 16)
                 OrbView(activity: model.activity, level: model.level)
                     .frame(maxWidth: 300, maxHeight: 300)
@@ -32,6 +37,7 @@ struct ChestDisplayView: View {
             }
             .padding(.horizontal, 24)
         }
+        .animation(.snappy, value: model.linkProblem)
         .contentShape(Rectangle())
         .onTapGesture(count: 3) { withAnimation(.snappy) { showDebug.toggle() } }
         .onLongPressGesture(minimumDuration: 2) { model.stopWalking() }
@@ -64,6 +70,27 @@ struct ChestDisplayView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(.white.opacity(0.06), in: Capsule())
+    }
+
+    /// Big enough to read from across a room: the wearer cannot see it, so
+    /// it is for whoever is helping (the same warning is also spoken).
+    private func linkBanner(_ problem: Runtime.LinkProblem) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 34, weight: .bold))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("NOT CONNECTED · \(problem.title.uppercased())")
+                    .font(.system(.headline, design: .rounded).weight(.heavy))
+                Text(problem.detail)
+                    .font(.system(.subheadline, design: .rounded))
+                    .opacity(0.9)
+            }
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.white)
+        .padding(16)
+        .frame(maxWidth: 520)
+        .background(Color.red.opacity(0.85), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var statusLine: some View {
@@ -103,7 +130,7 @@ struct ChestDisplayView: View {
 
     private var statusText: String {
         switch model.activity {
-        case .offline: return "CONNECTING"
+        case .offline: return model.linkProblem == nil ? "CONNECTING" : "NO LAPTOP"
         case .idle: return "READY"
         case .listening: return "SAY “HEY CANE”"
         case .thinking: return "LOOKING AROUND"
