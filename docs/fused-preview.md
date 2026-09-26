@@ -43,6 +43,14 @@ PYTHONPATH=src .venv/bin/python -m cane.benchmarks.fused --source /absolute/path
 `--list-cameras` lives on the YOLOE runner and probes indices without loading a
 model. CUDA → MPS → CPU is selected automatically; `--device` forces one.
 
+**Depth runs at `--input-size 196` here, not the 280 the standalone depth
+benchmark uses.** Depth is over half the frame budget in the fused view and 196
+nearly halves it (52 ms → 28 ms measured on an M2 at 1280×720), at the cost of
+fine depth detail: thin poles and railings blur first, and per-box `rel` values
+get noisier for small or distant objects. The standalone runner keeps 280 so its
+recorded baseline stays comparable with every run already taken. Pass
+`--input-size 280` to match it, or `518` for upstream's default.
+
 ## Controls
 
 The toolbar states each layer's name, whether it is **ON** or **off**, and its
@@ -90,9 +98,34 @@ When two labels would overlap, the **nearer** object keeps its text and the
 farther one shows its box without a label. Nothing is hidden from the recorded
 data: `frames.jsonl` still carries every detection.
 
+## Live capture: newest frame only
+
+On a **camera**, a background thread reads continuously and keeps exactly one
+frame. The loop always processes the freshest one; everything the loop was too
+slow for is dropped and counted in `frames_dropped`. Without this the driver's
+own buffering serves a frame from 100-300 ms ago and nothing says so -- the
+failure `camera-sync-design.md` §3.3 rule 1 exists to prevent, and which the X4
+bridge's `capture/grab_thread.py` already solves on its side.
+
+Measured on an iPhone Continuity Camera: read time falls from ~24 ms to ~0,
+because a frame is already waiting rather than being waited for.
+
+**Cameras only.** Files, directories and video keep `Frames`' no-skipping
+guarantee -- every frame processed, in order -- which is what makes two
+benchmark runs comparable frame for frame. `--no-latest-frame` restores the old
+inline behaviour on a camera too: slower and laggier, but nothing is dropped.
+
+Two consequences, both recorded in `summary.json`:
+
+- `frame_id` counts frames **processed**, not frames the camera produced.
+  `identity` carries the camera's grab sequence, so the gap is visible.
+- `read_ms` and `frame_ms` from a latest-frame run are **not comparable** with
+  runs made without it, nor with the file path. `latest_frame_grab` says which
+  mode produced the numbers.
+
 ## Same-frame guarantee
 
-One `cap.read()` per iteration. Both models receive the identical unannotated
+One frame per iteration. Both models receive the identical unannotated
 frame, sequentially, and drawing happens afterwards on a copy. There is no
 interleaving, frame skipping, or reuse of a previous frame's depth, so a box and
 the depth under it always describe the same pixels. `frames.jsonl` records one
@@ -128,7 +161,7 @@ initial camera startup is reported separately as `camera_startup_ms`.
 
 ## Checks executed during implementation
 
-- 152 Python tests pass, including the new merged-view and palette tests.
+- Python tests pass, including the merged-view, palette and latest-frame tests.
 - Real YOLOE-26 Small + Depth Anything V2 Small on Apple MPS over the official
   `demo01.jpg`: 19 detections, all four layer combinations, and the both-layers-off
   flag combination rejected with an explicit message.
