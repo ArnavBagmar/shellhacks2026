@@ -88,6 +88,10 @@ class OneInFlightSender:
         self._rejected = 0
         self._max_in_flight = 0
 
+    def set_response_handler(self, on_response: ResponseHandler) -> None:
+        """Wire the handler after construction (the pipeline owns both ends)."""
+        self._on_response = on_response
+
     @property
     def in_flight(self) -> int:
         return 1 if self._task is not None and not self._task.done() else 0

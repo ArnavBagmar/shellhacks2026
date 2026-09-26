@@ -33,16 +33,19 @@ CROP_FIELD_PREFIX = "crop_"
 CROP_CONTENT_TYPE = "image/jpeg"
 RUNG_MIN = 1
 RUNG_MAX = 4
-CROP_PX_MIN = 64
-CROP_PX_MAX = 2048
-SESSION_ID_MIN_LENGTH = 1
-SESSION_ID_MAX_LENGTH = 64
+CROP_PX_MIN = 256
+CROP_PX_MAX = 1280
+CROP_PX_MULTIPLE_OF = 32
+SESSION_ID_PATTERN = r"^[A-Za-z0-9_.:-]{1,64}$"
 NORM_MIN = 0.0
 NORM_MAX = 1.0
 CROP_INDEX_MIN = 0
 CROP_INDEX_MAX = CROP_COUNT - 1
 
 _STRICT = ConfigDict(extra="forbid", frozen=True, strict=True, populate_by_name=True)
+# Wire numbers are JSON, so an integer literal must be accepted where a float
+# is expected (yaws_deg). Strictness everywhere else stays on.
+LenientFloat = Annotated[float, Field(strict=False)]
 
 
 def crop_field_name(index: int) -> str:
@@ -65,17 +68,13 @@ class InferenceMeta(BaseModel):
     schema_version: Literal[1] = Field(alias="schema")
     t_capture_ms: Annotated[int, Field(ge=T_CAPTURE_MS_MIN, le=T_CAPTURE_MS_MAX)]
     rung: Annotated[int, Field(ge=RUNG_MIN, le=RUNG_MAX)]
-    crop_px: Annotated[int, Field(ge=CROP_PX_MIN, le=CROP_PX_MAX)]
-    # strict=False on the two sequence fields: the wire format is a JSON
-    # array, and strict mode would refuse to build a tuple from a list. The
-    # models stay deeply immutable because the field type is still a tuple.
+    crop_px: Annotated[
+        int, Field(ge=CROP_PX_MIN, le=CROP_PX_MAX, multiple_of=CROP_PX_MULTIPLE_OF)
+    ]
     yaws_deg: Annotated[
-        tuple[float, ...],
-        Field(min_length=CROP_COUNT, max_length=CROP_COUNT, strict=False),
+        tuple[LenientFloat, ...], Field(min_length=CROP_COUNT, max_length=CROP_COUNT)
     ]
-    session_id: Annotated[
-        str, Field(min_length=SESSION_ID_MIN_LENGTH, max_length=SESSION_ID_MAX_LENGTH)
-    ]
+    session_id: Annotated[str, Field(pattern=SESSION_ID_PATTERN)]
 
 
 class Detection(BaseModel):
@@ -109,7 +108,7 @@ class InferenceResponse(BaseModel):
     schema_version: Literal[1] = Field(alias="schema")
     t_capture_ms: Annotated[int, Field(ge=T_CAPTURE_MS_MIN, le=T_CAPTURE_MS_MAX)]
     inference_ms: Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
-    detections: Annotated[tuple[Detection, ...], Field(strict=False)] = ()
+    detections: tuple[Detection, ...] = ()
 
 
 class InferenceRequest(BaseModel):
@@ -118,10 +117,7 @@ class InferenceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     meta: InferenceMeta
-    crops: Annotated[
-        tuple[bytes, ...],
-        Field(min_length=CROP_COUNT, max_length=CROP_COUNT, strict=False),
-    ]
+    crops: Annotated[tuple[bytes, ...], Field(min_length=CROP_COUNT, max_length=CROP_COUNT)]
 
     def multipart_data(self) -> dict[str, str]:
         return {META_FIELD: self.meta.model_dump_json(by_alias=True)}

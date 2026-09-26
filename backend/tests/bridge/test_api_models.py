@@ -24,6 +24,15 @@ T_CAPTURE_MS = 1_790_000_000_123
 YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0)
 
 
+def _meta_json(**patch: object) -> str:
+    """Meta as it arrives on the wire: a JSON string with a JSON array."""
+    return json.dumps({**_meta_dict(), **patch})
+
+
+def _meta() -> InferenceMeta:
+    return InferenceMeta.model_validate_json(_meta_json())
+
+
 def _meta_dict() -> dict[str, object]:
     return {
         "schema": 1,
@@ -51,7 +60,7 @@ def _detection_dict() -> dict[str, object]:
 
 
 def test_meta_round_trips_through_the_schema_alias() -> None:
-    meta = InferenceMeta.model_validate(_meta_dict())
+    meta = _meta()
 
     assert meta.schema_version == 1
     assert meta.yaws_deg == YAWS
@@ -60,11 +69,20 @@ def test_meta_round_trips_through_the_schema_alias() -> None:
 
 
 def test_meta_is_frozen_and_forbids_extras() -> None:
-    meta = InferenceMeta.model_validate(_meta_dict())
+    meta = _meta()
     with pytest.raises(ValidationError):
         meta.rung = 2  # type: ignore[misc]
     with pytest.raises(ValidationError, match="extra"):
-        InferenceMeta.model_validate({**_meta_dict(), "gps": 1})
+        InferenceMeta.model_validate_json(_meta_json(gps=1))
+
+
+def test_meta_sequences_are_tuples_so_the_model_is_deeply_immutable() -> None:
+    assert isinstance(_meta().yaws_deg, tuple)
+
+
+def test_yaws_may_arrive_as_json_integers() -> None:
+    meta = InferenceMeta.model_validate_json(_meta_json(yaws_deg=[0, 60, 120, 180, -120, -60]))
+    assert meta.yaws_deg == YAWS
 
 
 @pytest.mark.parametrize(
@@ -75,12 +93,16 @@ def test_meta_is_frozen_and_forbids_extras() -> None:
         {"rung": 5},
         {"yaws_deg": [0.0, 60.0]},  # must be exactly six
         {"session_id": ""},
+        {"session_id": "has spaces"},
+        {"crop_px": 700},  # not a multiple of 32
+        {"crop_px": 128},  # below the floor
+        {"crop_px": 2048},  # above the ceiling
         {"schema": 2},
     ],
 )
 def test_meta_rejects_out_of_contract_values(patch: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
-        InferenceMeta.model_validate({**_meta_dict(), **patch})
+        InferenceMeta.model_validate_json(_meta_json(**patch))
 
 
 def test_detection_parses_the_closed_enums() -> None:
@@ -136,16 +158,22 @@ def test_response_parses_from_raw_json_bytes() -> None:
 
 
 def test_response_with_no_detections_is_valid() -> None:
-    response = InferenceResponse.model_validate(
-        {"schema": 1, "t_capture_ms": T_CAPTURE_MS, "inference_ms": 0.0, "detections": []}
+    response = InferenceResponse.model_validate_json(
+        json.dumps(
+            {"schema": 1, "t_capture_ms": T_CAPTURE_MS, "inference_ms": 0.0, "detections": []}
+        )
     )
     assert response.detections == ()
 
 
+def test_a_cloud_track_id_with_a_generation_segment_is_accepted() -> None:
+    detection = Detection.model_validate({**_detection_dict(), "track_id": "3:12:7"})
+    assert detection.track_id == "3:12:7"
+
+
 def test_request_carries_exactly_six_crops_and_names_its_fields() -> None:
     request = InferenceRequest(
-        meta=InferenceMeta.model_validate(_meta_dict()),
-        crops=tuple(b"jpeg-%d" % i for i in range(CROP_COUNT)),
+        meta=_meta(), crops=tuple(b"jpeg-%d" % i for i in range(CROP_COUNT))
     )
 
     files = request.multipart_files()
@@ -156,6 +184,4 @@ def test_request_carries_exactly_six_crops_and_names_its_fields() -> None:
 
 def test_request_rejects_the_wrong_number_of_crops() -> None:
     with pytest.raises(ValidationError):
-        InferenceRequest(
-            meta=InferenceMeta.model_validate(_meta_dict()), crops=(b"a", b"b")
-        )
+        InferenceRequest(meta=_meta(), crops=(b"a", b"b"))

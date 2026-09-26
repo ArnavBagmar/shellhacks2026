@@ -6,10 +6,12 @@ described by one frozen object that can be logged verbatim.
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 
 from cane.bridge.rungs import RUNG_1, Rung
+from cane.cloud.api_models import SESSION_ID_PATTERN
 
 DEFAULT_WS_HOST = "0.0.0.0"
 DEFAULT_WS_PORT = 8765
@@ -18,8 +20,8 @@ DEFAULT_REQUEST_TIMEOUT_S = 2.0
 DEFAULT_STATS_INTERVAL_S = 5.0
 DEFAULT_SOURCE_SPEC = "synthetic"
 MAX_DELTA_DEG = 360.0
-SESSION_ID_MAX_LENGTH = 64
 ALLOWED_URL_SCHEMES = ("http://", "https://")
+_SESSION_ID_RE = re.compile(SESSION_ID_PATTERN)
 
 
 def _new_session_id() -> str:
@@ -59,9 +61,11 @@ class BridgeConfig:
             raise ValueError(f"delta_deg must be within +-360, got {self.delta_deg}")
         if self.send_fps is not None and self.send_fps <= 0:
             raise ValueError(f"send_fps must be > 0 when set, got {self.send_fps}")
-        if not 0 < len(self.session_id) <= SESSION_ID_MAX_LENGTH:
+        if _SESSION_ID_RE.fullmatch(self.session_id) is None:
+            # Checked here so a bad --session-id fails at startup rather than
+            # inside every InferenceMeta the pipeline builds.
             raise ValueError(
-                f"session_id must be 1..{SESSION_ID_MAX_LENGTH} characters, got {self.session_id!r}"
+                f"session_id must match {SESSION_ID_PATTERN}, got {self.session_id!r}"
             )
         if self.stats_interval_s <= 0:
             raise ValueError(f"stats_interval_s must be > 0, got {self.stats_interval_s}")
