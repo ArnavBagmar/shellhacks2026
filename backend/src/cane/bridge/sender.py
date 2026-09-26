@@ -8,7 +8,12 @@ hoping the network cooperates.
 
 Every request that is actually sent records ``frame_age_at_send_ms`` (now
 minus the frame's arrival on the laptop) and its RTT into bounded rolling
-windows -- that p95 is the step's acceptance number.
+windows -- that p95 is the step's acceptance number, so it is sampled
+immediately before the wire, not when the request was queued up.
+
+The same instant is the last chance to apply the frame deadline
+(:mod:`cane.bridge.deadline`): a frame that expired while the loop was busy
+is dropped here rather than posted late.
 """
 
 from __future__ import annotations

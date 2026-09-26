@@ -4,7 +4,8 @@ Paced at the rung's fps. Every tick takes the *newest* frame (rule 1) and
 sends only if the uplink slot is free (rule 2); both of those failing silently
 is what design Sec 3.3 warns about, so the 5-second stats line prints the
 numbers that would expose it: grab fps, send fps, dropped_busy, frame age at
-send p50/p95, request RTT p50/p95.
+send p50/p95, request RTT p50/p95, and the frames dropped for missing the
+frame deadline.
 
 ``cv2`` work runs in ``asyncio.to_thread`` so the event loop is never blocked
 while a request is in flight.
