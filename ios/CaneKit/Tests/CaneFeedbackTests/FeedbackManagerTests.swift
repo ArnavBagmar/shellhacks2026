@@ -179,6 +179,29 @@ final class FeedbackManagerTests: XCTestCase {
         XCTAssertEqual(rate, 0.2, accuracy: 1e-9)
     }
 
+    /// H4: the boolean step 8 switches the transport on. Two complete
+    /// seconds of one-in-five stale drops is the §3.4 trigger.
+    func testStaleDropRateTurnsUnhealthyAfterTwoCompleteSeconds() async throws {
+        let sink = RecordingSink()
+        let clock = TestClock(now: t0)
+        let subject = manager(sink: sink, clock: clock)
+
+        for index in 0..<20 {
+            let capture = t0 + Int64(index) * 100
+            let late = try Make.x4(
+                trackId: "late-\(index)", tCaptureMs: capture, cls: .cyclist,
+                bearingDeg: 150.0, rangeBand: .mid, closingMps: 4.0
+            )
+            await subject.ingest(late, now: capture + 600)
+        }
+        await subject.settle()
+
+        let healthyTooSoon = await subject.isStaleDropRateUnhealthy(now: t0 + 600)
+        XCTAssertFalse(healthyTooSoon, "one incomplete bucket is not a trend")
+        let unhealthy = await subject.isStaleDropRateUnhealthy(now: t0 + 2_600)
+        XCTAssertTrue(unhealthy)
+    }
+
     func testFutureDatedIsCountedSeparatelyFromStale() async throws {
         let sink = RecordingSink()
         let clock = TestClock(now: t0)

@@ -103,17 +103,15 @@ public actor FeedbackManager {
             case .idle:
                 break
             case let .present(announcement):
-                startPresenting(announcement)
-            case let .preempt(cancelling, announcement):
-                await cancelInFlight(id: cancelling)
-                startPresenting(announcement)
+                perform(.present(announcement))
+            case let .preempt(_, announcement):
+                await cancelInFlight()
+                perform(.present(announcement))
             }
         } while pumpRequested && rounds < Self.maxPumpRounds
     }
 
-    /// The only place a gauntlet intent reaches the outside world. The two
-    /// announcement intents are performed by the pump path, which also needs
-    /// the task handle; this arm exists so the vocabulary stays total.
+    /// The only place an intent reaches the outside world (A16).
     private func perform(_ effect: Effect) {
         switch effect {
         case let .ambient(event, urgency):
@@ -140,9 +138,12 @@ public actor FeedbackManager {
 
     /// A11's order: cancel the renderer, cancel the task, await it, then
     /// present the next. The await is bounded -- `Presentation.run` resolves
-    /// on cancellation without waiting for a wedged sink.
-    private func cancelInFlight(id: UInt64) async {
-        sink.cancelCurrent()
+    /// on cancellation without waiting for a wedged sink. The cancelled
+    /// announcement's id is not needed: `Pump.decide` has already recorded
+    /// its successor as in flight, which is what makes the old task's
+    /// completion callback a no-op.
+    private func cancelInFlight() async {
+        perform(.cancelCurrent)
         let task = presentTask
         presentTask = nil
         task?.cancel()
