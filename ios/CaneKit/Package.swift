@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "CaneTransport", targets: ["CaneTransport"]),
         .library(name: "CaneFeedback", targets: ["CaneFeedback"]),
         .library(name: "CaneNavigation", targets: ["CaneNavigation"]),
+        .executable(name: "nav-cli", targets: ["NavCLI"]),
     ],
     targets: [
         .target(name: "CaneContracts"),
@@ -25,5 +26,7 @@ let package = Package(
         // independent of CaneContracts: CoreLocation never feeds the awareness path.
         .target(name: "CaneNavigation"),
         .testTarget(name: "CaneNavigationTests", dependencies: ["CaneNavigation"]),
+        // Dev tool: live Routes/Places check once the team has a Maps key (step 12 §F7).
+        .executableTarget(name: "NavCLI", dependencies: ["CaneNavigation"]),
     ]
 )
