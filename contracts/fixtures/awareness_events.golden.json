@@ -1,0 +1,686 @@
+{
+  "fixture_version": 1,
+  "cases": [
+    {
+      "name": "phone_metric_both_range_fields",
+      "expect": "valid",
+      "note": "+12.0 means 12 degrees to the wearer's right",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "phone-person-001",
+        "t_capture_ms": 1790000000000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.92,
+        "bearing_deg": 12.0,
+        "range_m": 3.5,
+        "range_band": "near",
+        "closing_mps": null
+      }
+    },
+    {
+      "name": "phone_unanchored_band_only",
+      "expect": "valid",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "phone-cyclist-002",
+        "t_capture_ms": 1790000001000,
+        "ttl_ms": 500,
+        "cls": "cyclist",
+        "confidence": 0.81,
+        "bearing_deg": -30.0,
+        "range_m": null,
+        "range_band": "mid",
+        "closing_mps": 4.2
+      }
+    },
+    {
+      "name": "x4_cloud_band_positive_closing",
+      "expect": "valid",
+      "event": {
+        "schema": 1,
+        "source": "x4_cloud",
+        "track_id": "x4c-car-003",
+        "t_capture_ms": 1790000002000,
+        "ttl_ms": 400,
+        "cls": "car",
+        "confidence": 0.77,
+        "bearing_deg": 95.0,
+        "range_m": null,
+        "range_band": "far",
+        "closing_mps": 8.1
+      }
+    },
+    {
+      "name": "x4_local_static_pole",
+      "expect": "valid",
+      "event": {
+        "schema": 1,
+        "source": "x4_local",
+        "track_id": "x4l-pole-004",
+        "t_capture_ms": 1790000003000,
+        "ttl_ms": 8000,
+        "cls": "pole",
+        "confidence": 0.6,
+        "bearing_deg": 60.0,
+        "range_m": null,
+        "range_band": "far",
+        "closing_mps": 0.0
+      }
+    },
+    {
+      "name": "x4_local_existence_only",
+      "expect": "valid",
+      "event": {
+        "schema": 1,
+        "source": "x4_local",
+        "track_id": "x4l-wall-005",
+        "t_capture_ms": 1790000004000,
+        "ttl_ms": 8000,
+        "cls": "wall",
+        "confidence": 0.55,
+        "bearing_deg": 170.0,
+        "range_m": null,
+        "range_band": null,
+        "closing_mps": null
+      }
+    },
+    {
+      "name": "bearing_exactly_180",
+      "expect": "valid",
+      "event": {
+        "schema": 1,
+        "source": "x4_cloud",
+        "track_id": "x4c-bus-006",
+        "t_capture_ms": 1790000005000,
+        "ttl_ms": 400,
+        "cls": "bus",
+        "confidence": 0.7,
+        "bearing_deg": 180.0,
+        "range_m": null,
+        "range_band": "far",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "negative_bearing",
+      "expect": "valid",
+      "event": {
+        "schema": 1,
+        "source": "x4_local",
+        "track_id": "x4l-door-007",
+        "t_capture_ms": 1790000006000,
+        "ttl_ms": 8000,
+        "cls": "door",
+        "confidence": 0.65,
+        "bearing_deg": -90.0,
+        "range_m": null,
+        "range_band": "mid",
+        "closing_mps": null
+      }
+    },
+    {
+      "name": "valid_unknown_obstacle",
+      "expect": "valid",
+      "event": {
+        "schema": 1,
+        "source": "x4_cloud",
+        "track_id": "x4c-unknown-008",
+        "t_capture_ms": 1790000007000,
+        "ttl_ms": 1500,
+        "cls": "unknown_obstacle",
+        "confidence": 0.4,
+        "bearing_deg": 45.0,
+        "range_m": null,
+        "range_band": "far",
+        "closing_mps": 2.0
+      }
+    },
+    {
+      "name": "negative_closing_mps",
+      "expect": "valid",
+      "event": {
+        "schema": 1,
+        "source": "x4_local",
+        "track_id": "x4l-car-009",
+        "t_capture_ms": 1790000008000,
+        "ttl_ms": 400,
+        "cls": "car",
+        "confidence": 0.85,
+        "bearing_deg": -150.0,
+        "range_m": null,
+        "range_band": "near",
+        "closing_mps": -5.0
+      }
+    },
+    {
+      "name": "phone_range_and_closing",
+      "expect": "valid",
+      "note": "the only combination (range_m + closing_mps both set) from which time-to-contact can be computed",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "phone-cyclist-010",
+        "t_capture_ms": 1790000009000,
+        "ttl_ms": 500,
+        "cls": "cyclist",
+        "confidence": 0.95,
+        "bearing_deg": 5.0,
+        "range_m": 2.0,
+        "range_band": "near",
+        "closing_mps": 3.0
+      }
+    },
+    {
+      "name": "x4_cloud_existence_only",
+      "expect": "valid",
+      "event": {
+        "schema": 1,
+        "source": "x4_cloud",
+        "track_id": "x4c-scooter-011",
+        "t_capture_ms": 1790000010000,
+        "ttl_ms": 500,
+        "cls": "scooter",
+        "confidence": 0.5,
+        "bearing_deg": 100.0,
+        "range_m": null,
+        "range_band": null,
+        "closing_mps": null
+      }
+    },
+    {
+      "name": "invalid_bearing_negative_180",
+      "expect": "invalid",
+      "reason": "bearing_deg must be > -180 (half-open interval); -180.0 is the disallowed exclusive minimum",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-001",
+        "t_capture_ms": 1790000011000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": -180.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_bearing_181",
+      "expect": "invalid",
+      "reason": "bearing_deg must be <= 180",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-002",
+        "t_capture_ms": 1790000012000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 181.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_ttl_zero",
+      "expect": "invalid",
+      "reason": "ttl_ms must be >= 1",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-003",
+        "t_capture_ms": 1790000013000,
+        "ttl_ms": 0,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_cls_bicycle",
+      "expect": "invalid",
+      "reason": "cls is a closed 12-value enum; 'bicycle' must be mapped to 'cyclist' by the producer, never emitted",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-004",
+        "t_capture_ms": 1790000014000,
+        "ttl_ms": 1500,
+        "cls": "bicycle",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_extra_field_urgency",
+      "expect": "invalid",
+      "reason": "urgency is not on the wire; additionalProperties is false",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-005",
+        "t_capture_ms": 1790000015000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0,
+        "urgency": 1
+      }
+    },
+    {
+      "name": "invalid_x4_cloud_states_range_m",
+      "expect": "invalid",
+      "reason": "range_m must be null unless source is phone",
+      "event": {
+        "schema": 1,
+        "source": "x4_cloud",
+        "track_id": "inv-006",
+        "t_capture_ms": 1790000016000,
+        "ttl_ms": 400,
+        "cls": "car",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 4.2,
+        "range_band": "mid",
+        "closing_mps": 2.0
+      }
+    },
+    {
+      "name": "invalid_confidence_high",
+      "expect": "invalid",
+      "reason": "confidence must be <= 1",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-007",
+        "t_capture_ms": 1790000017000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 1.5,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_missing_track_id",
+      "expect": "invalid",
+      "reason": "track_id is required",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "t_capture_ms": 1790000018000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_schema_version_2",
+      "expect": "invalid",
+      "reason": "schema must be const 1",
+      "event": {
+        "schema": 2,
+        "source": "phone",
+        "track_id": "inv-009",
+        "t_capture_ms": 1790000019000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_range_band_close",
+      "expect": "invalid",
+      "reason": "range_band enum is near|mid|far|null",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-010",
+        "t_capture_ms": 1790000020000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "close",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_empty_track_id",
+      "expect": "invalid",
+      "reason": "track_id minLength is 1",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "",
+        "t_capture_ms": 1790000021000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_source_laptop",
+      "expect": "invalid",
+      "reason": "source enum is phone|x4_cloud|x4_local",
+      "event": {
+        "schema": 1,
+        "source": "laptop",
+        "track_id": "inv-012",
+        "t_capture_ms": 1790000022000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": null,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_t_capture_ms_seconds",
+      "expect": "invalid",
+      "reason": "t_capture_ms below minimum 1600000000000; looks like seconds, not milliseconds",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-013",
+        "t_capture_ms": 1790000000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_t_capture_ms_negative",
+      "expect": "invalid",
+      "reason": "t_capture_ms must be >= 1600000000000",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-014",
+        "t_capture_ms": -1,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_x4_local_states_range_m",
+      "expect": "invalid",
+      "reason": "range_m must be null unless source is phone",
+      "event": {
+        "schema": 1,
+        "source": "x4_local",
+        "track_id": "inv-015",
+        "t_capture_ms": 1790000023000,
+        "ttl_ms": 500,
+        "cls": "scooter",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 4.2,
+        "range_band": "near",
+        "closing_mps": -1.0
+      }
+    },
+    {
+      "name": "invalid_missing_closing_mps",
+      "expect": "invalid",
+      "reason": "closing_mps is required (use explicit null if unknown)",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-016",
+        "t_capture_ms": 1790000024000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near"
+      }
+    },
+    {
+      "name": "invalid_missing_range_band",
+      "expect": "invalid",
+      "reason": "range_band is required (use explicit null if unknown)",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-017",
+        "t_capture_ms": 1790000025000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_missing_t_capture_ms",
+      "expect": "invalid",
+      "reason": "t_capture_ms is required",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-018",
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_ttl_ms_wrong_type",
+      "expect": "invalid",
+      "reason": "ttl_ms must be an integer, not a numeric string",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-019",
+        "t_capture_ms": 1790000026000,
+        "ttl_ms": "500",
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_range_m_negative",
+      "expect": "invalid",
+      "reason": "range_m must be >= 0",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-020",
+        "t_capture_ms": 1790000027000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": -0.5,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_track_id_too_long",
+      "expect": "invalid",
+      "reason": "track_id maxLength is 64",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "t_capture_ms": 1790000028000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_ttl_ms_above_max",
+      "expect": "invalid",
+      "reason": "ttl_ms must be <= 15000",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-022",
+        "t_capture_ms": 1790000029000,
+        "ttl_ms": 15001,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_range_m_above_max",
+      "expect": "invalid",
+      "reason": "range_m must be <= 50",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-023",
+        "t_capture_ms": 1790000030000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 50.5,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_closing_mps_above_max",
+      "expect": "invalid",
+      "reason": "closing_mps must be <= 60",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-024",
+        "t_capture_ms": 1790000031000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 61.0
+      }
+    },
+    {
+      "name": "invalid_t_capture_ms_microseconds",
+      "expect": "invalid",
+      "reason": "t_capture_ms above maximum 4000000000000; looks like microseconds, not milliseconds",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-025",
+        "t_capture_ms": 1790000000000000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_confidence_negative",
+      "expect": "invalid",
+      "reason": "confidence must be >= 0",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-026",
+        "t_capture_ms": 1790000032000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": -0.1,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": 1.0
+      }
+    },
+    {
+      "name": "invalid_closing_mps_below_min",
+      "expect": "invalid",
+      "reason": "closing_mps must be >= -60",
+      "event": {
+        "schema": 1,
+        "source": "phone",
+        "track_id": "inv-027",
+        "t_capture_ms": 1790000033000,
+        "ttl_ms": 1500,
+        "cls": "person",
+        "confidence": 0.9,
+        "bearing_deg": 10.0,
+        "range_m": 3.0,
+        "range_band": "near",
+        "closing_mps": -61.0
+      }
+    }
+  ],
+  "malformed_payloads": [
+    "",
+    "{",
+    "null",
+    "[]",
+    "\"x\"",
+    "42",
+    "{\"schema\":1"
+  ]
+}

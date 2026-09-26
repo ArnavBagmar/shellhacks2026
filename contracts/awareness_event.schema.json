@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cane.shellhacks/contracts/awareness_event.schema.json",
+  "title": "AwarenessEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "source",
+    "track_id",
+    "t_capture_ms",
+    "ttl_ms",
+    "cls",
+    "confidence",
+    "bearing_deg",
+    "range_m",
+    "range_band",
+    "closing_mps"
+  ],
+  "properties": {
+    "schema": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version. Bump on any breaking change; a bump means a simultaneous redeploy of cloud, bridge and a rebuilt iOS app."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["phone", "x4_cloud", "x4_local"],
+      "description": "Producer of this event."
+    },
+    "track_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Stable across frames for the same physical object; unique only within a source. The consumer's refractory key is the pair (source, track_id), never track_id alone. A producer with no tracker (the phone) must still synthesize a key that is stable frame-to-frame for the same object -- e.g. cls plus a quantized bearing bucket -- because the refractory gate is the only anti-flooding mechanism."
+    },
+    "t_capture_ms": {
+      "type": "integer",
+      "minimum": 1600000000000,
+      "maximum": 4000000000000,
+      "description": "Phone-clock Unix epoch milliseconds, D-corrected per camera-sync-design §4.3. Seconds or microseconds here are a bug, not a unit choice. The window deliberately rejects a seconds-valued timestamp (below the minimum) and a microsecond-valued one (above the maximum)."
+    },
+    "ttl_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 15000,
+      "description": "Time-to-live in milliseconds, from the §4.4 staleness table. 15000 is the largest value in that table (scene description)."
+    },
+    "cls": {
+      "type": "string",
+      "enum": [
+        "person",
+        "cyclist",
+        "scooter",
+        "car",
+        "bus",
+        "pole",
+        "bollard",
+        "wall",
+        "parked_car",
+        "door",
+        "overhang",
+        "unknown_obstacle"
+      ],
+      "description": "Closed enum of 12 values. A detector class outside the 12 must be mapped by the producer, never emitted as a new string: bicycle -> cyclist, motorcycle -> scooter, truck -> car, anything else -> unknown_obstacle."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Detector confidence, 0..1."
+    },
+    "bearing_deg": {
+      "type": "number",
+      "exclusiveMinimum": -180.0,
+      "maximum": 180.0,
+      "description": "Torso-relative bearing in degrees, 0 = ahead, + = right. Half-open interval (-180, 180]. atan2 returns exactly -180 for directly behind, so a producer converting radians to degrees can emit exactly -180.0 and be rejected; producers must normalize bearing_deg <= -180 by adding 360 before emitting."
+    },
+    "range_m": {
+      "type": ["number", "null"],
+      "minimum": 0.0,
+      "maximum": 50.0,
+      "description": "Metres. Phone only, and only while §2.2 scale anchoring is healthy. Trustworthy to ~15 m (§4.5); the 50 m ceiling exists to catch a diverged scale factor, not to express policy."
+    },
+    "range_band": {
+      "type": ["string", "null"],
+      "enum": ["near", "mid", "far", null],
+      "description": "near <= 5 m, mid 5-15 m, far > 15 m. Producers pick their own box-height thresholds to hit these; consumers may rely on these numbers. X4 always emits a band; the phone emits one when unanchored."
+    },
+    "closing_mps": {
+      "type": ["number", "null"],
+      "minimum": -60.0,
+      "maximum": 60.0,
+      "description": "Line-of-sight range rate relative to the wearer, positive = closing (approaching), negative = receding. Not the object's ground speed: a cyclist at 6.7 m/s approaching a wearer walking 1.4 m/s toward them is closing_mps ~= 8.1."
+    }
+  },
+  "if": {
+    "properties": { "source": { "const": "phone" } },
+    "required": ["source"]
+  },
+  "else": {
+    "properties": { "range_m": { "type": "null" } }
+  }
+}
