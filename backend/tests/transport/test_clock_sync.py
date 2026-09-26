@@ -5,6 +5,8 @@ sockets, no wall-clock reads. See task-3-brief.md D3 and D6, and
 camera-sync-design.md Sec 4.2-4.3 for the algorithm these pin down.
 """
 
+import statistics
+
 import pytest
 
 from cane.transport.clock_sync import (
@@ -40,32 +42,67 @@ def test_single_sample_becomes_best_and_synced():
     assert est.offset_ms == 100
 
 
-def test_lowest_rtt_sample_wins_over_jittery_offsets_not_median():
-    # 8 jittery samples clustered around an offset ~30 ms away from the
-    # truth, each with a higher (worse) RTT than the 9th, true sample.
-    # A median-of-offsets estimator would land near the jittery cluster;
-    # the spec requires the single lowest-RTT sample to win outright.
-    est = OffsetEstimator()
-    true_offset = 50
-    jitter_signs = [1, -1, 1, -1, 1, -1, 1, -1]
-    for i, sign in enumerate(jitter_signs):
-        offset = true_offset + sign * 30
-        # t1/t4 chosen so offset_ms == `offset` and rtt_ms is large (50 ms).
-        t1 = 2_000_000 + i
-        t4 = t1 + 50
-        t2 = t1 + offset
-        t3 = t4 + offset
-        est = est.add(_sample(t1, t2, t3, t4))
+def _sample_with_offset_and_rtt(t1: int, offset: int, rtt: int) -> NtpSample:
+    """Builds a sample with an *independently* chosen ``offset_ms`` and
+    ``rtt_ms``, unlike a naive construction where ``t3 = t4 + offset``
+    makes ``rtt_ms`` collapse to a value that depends on ``offset`` (and
+    can accidentally come out identical for every sample -- see the
+    docstring on the test this feeds).
 
-    # The 9th sample: true offset, RTT of only 4 ms (much lower than 50).
-    t1 = 2_000_100
-    t4 = t1 + 4
-    t2 = t1 + true_offset
-    t3 = t4 + true_offset
-    est = est.add(_sample(t1, t2, t3, t4))
+    Splits the round trip symmetrically (``rtt // 2`` each way, zero
+    processing time at the phone), which makes ``offset_ms`` land exactly
+    on ``offset`` and ``rtt_ms`` exactly on ``rtt`` for any even ``rtt``.
+    """
+    assert rtt % 2 == 0, "rtt must be even for the symmetric split below to be exact"
+    t4 = t1 + rtt
+    t2 = t1 + rtt // 2 + offset
+    t3 = t2
+    return NtpSample(t1=t1, t2=t2, t3=t3, t4=t4)
+
+
+def test_lowest_rtt_sample_wins_over_jittery_offsets_not_median():
+    """D3/D6: "use the sample with the lowest RTT -- not the median of the
+    offsets." This must fail if `OffsetEstimator.best` is ever changed to
+    pick the median (or the mean, or the most recent) instead.
+
+    The true sample is added FIRST (so a correct implementation is not
+    accidentally rescued by the "ties -> most recent" rule) and carries
+    the lowest RTT by a wide, independently-chosen margin; every jittery
+    sample's offset sits *above* the true one (never below), so the
+    median of all nine offsets is unambiguously different from the truth
+    -- a median-of-offsets estimator would land there instead, and both
+    assertions below would fail.
+    """
+    true_offset = 50
+    true_rtt = 4
+    # Independently-chosen RTTs (bearing no relationship to the offsets
+    # below): all comfortably worse than true_rtt, and distinct from each
+    # other so this test documents a real spread, not one repeated value.
+    jitter_rtts = [50, 52, 54, 56, 58, 60, 62, 64]
+    # All strictly greater than true_offset (never a symmetric +-30 split)
+    # so the median of the 9 offsets cannot coincide with the truth.
+    jitter_offsets = [80, 81, 82, 83, 84, 85, 86, 87]
+
+    est = OffsetEstimator()
+    est = est.add(_sample_with_offset_and_rtt(t1=2_000_000, offset=true_offset, rtt=true_rtt))
+    for i, (offset, rtt) in enumerate(zip(jitter_offsets, jitter_rtts), start=1):
+        est = est.add(_sample_with_offset_and_rtt(t1=2_000_000 + i, offset=offset, rtt=rtt))
 
     assert len(est.samples) == 9
-    assert abs(est.offset_ms - true_offset) < 1
+
+    all_offsets = [s.offset_ms for s in est.samples]
+    all_rtts = [s.rtt_ms for s in est.samples]
+    # Documents the RTT spread this test relies on: the true sample's RTT
+    # is the strict minimum, by a wide margin, over the whole window.
+    assert all_rtts == [true_rtt, *jitter_rtts]
+    assert min(all_rtts) == true_rtt
+    assert all(rtt > true_rtt + 30 for rtt in jitter_rtts)
+
+    median_offset = statistics.median(all_offsets)
+    assert median_offset != true_offset, "test setup bug: median must differ from the truth to be a real regression check"
+
+    assert est.offset_ms == true_offset
+    assert est.offset_ms != median_offset
 
 
 def test_window_evicts_oldest_sample_at_ten_additions():
