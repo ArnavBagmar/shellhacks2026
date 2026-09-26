@@ -201,6 +201,50 @@ async def test_oversize_crop_returns_413(
         assert response.status_code == 413
 
 
+class _SpyUpload:
+    """Records the size `_read_crop` asked for.
+
+    `await upload.read()` with no argument pulls the whole part into memory
+    before the size check can reject it, so the limit does not actually limit
+    anything -- the defence has to be in the read itself.
+    """
+
+    def __init__(self, payload: bytes) -> None:
+        self.payload = payload
+        self.requested: list[int] = []
+
+    async def read(self, size: int = -1) -> bytes:
+        self.requested.append(size)
+        return self.payload if size < 0 else self.payload[:size]
+
+
+async def test_an_oversize_part_is_rejected_without_reading_it_whole() -> None:
+    from fastapi import HTTPException
+
+    from cane.cloud.app import _read_crop
+
+    limit = 1024
+    spy = _SpyUpload(b"x" * (limit + 4096))
+    with pytest.raises(HTTPException) as raised:
+        await _read_crop(3, spy, limit)  # type: ignore[arg-type]
+    assert raised.value.status_code == 413
+    assert spy.requested == [limit + 1], "the read must be bounded by the limit"
+
+
+async def test_an_oversize_crop_never_reaches_the_detector(
+    meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+) -> None:
+    """413 is decided on the first part, before any decode or inference."""
+    limit = 1024
+    async with cloud_harness(max_crop_bytes=limit) as harness:
+        files = list(six_jpegs(640))
+        files[0] = (crop_field_name(0), ("crop_0.jpg", b"\x00" * (limit + 4096), "image/jpeg"))
+        response = await _post(harness, meta_json(), files)
+        assert response.status_code == 413
+        assert isinstance(harness.detector, ScriptedDetector)
+        assert harness.detector.calls == 0
+
+
 async def test_api_key_required_when_configured(
     meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
 ) -> None:

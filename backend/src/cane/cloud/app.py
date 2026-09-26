@@ -111,11 +111,16 @@ def _parse_meta(raw: str) -> InferenceMeta:
 
 
 async def _read_crop(index: int, upload: UploadFile, max_bytes: int) -> bytes:
-    raw = await upload.read()
+    """Read at most one byte past the limit: `await upload.read()` with no
+    argument pulls the whole part into memory (Starlette spools it to the
+    VM's disk past 1 MB) *before* any size check could reject it. One extra
+    byte is enough to tell "at the limit" from "over it".
+    """
+    raw = await upload.read(max_bytes + 1)
     if len(raw) > max_bytes:
         raise HTTPException(
             HTTP_PAYLOAD_TOO_LARGE,
-            detail=f"crop_{index} is {len(raw)} bytes, limit {max_bytes}",
+            detail=f"crop_{index} exceeds the {max_bytes} byte limit",
         )
     return raw
 

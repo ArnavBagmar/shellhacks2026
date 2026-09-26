@@ -19,6 +19,7 @@ REQUEST_PATH_MODULES = (
     "api_models",
     "app",
     "class_map",
+    "debug_dump",
     "motion",
     "service",
     "settings",
@@ -65,6 +66,50 @@ def test_request_path_modules_contain_no_wall_clock_reads(relative: str) -> None
     path, source = _source(relative)
     offences = _offences(ast.parse(source, filename=str(path)))
     assert not offences, f"{path.name} reads a wall clock: {offences}"
+
+
+ENTRY_MODULE = "app"
+# Operator tools, reachable only from a shell, never from a request.
+EXEMPT_MODULES = frozenset({"smoke", "export_engine"})
+
+
+def _cloud_imports(relative: str) -> set[str]:
+    """The `cane.cloud.*` modules this one pulls in, lazy imports included:
+    the AST sees a function-scoped import exactly as well as a top-level one.
+    """
+    _, source = _source(relative)
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        names = []
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names = [node.module]
+        for name in names:
+            if name.startswith("cane.cloud.") and (CLOUD_ROOT / f"{name[11:].replace('.', '/')}.py").is_file():
+                found.add(name[11:].replace(".", "/"))
+    return found
+
+
+def _reachable_from_the_request_path() -> set[str]:
+    seen: set[str] = set()
+    pending = [ENTRY_MODULE]
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        pending.extend(_cloud_imports(current))
+    return seen - EXEMPT_MODULES
+
+
+def test_every_module_the_request_path_imports_is_guarded() -> None:
+    """The list above is hand-written, so it rots the moment someone adds a
+    module to the request path -- `debug_dump.py` ran inside `/infer` for a
+    whole step without being guarded. This walks the real import graph.
+    """
+    unguarded = sorted(_reachable_from_the_request_path() - set(REQUEST_PATH_MODULES))
+    assert not unguarded, f"reachable from /infer but not clock-guarded: {unguarded}"
 
 
 def test_the_guard_would_catch_a_clock_read() -> None:
