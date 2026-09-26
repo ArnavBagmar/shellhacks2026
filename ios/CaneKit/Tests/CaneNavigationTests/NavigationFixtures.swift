@@ -24,6 +24,12 @@ enum NavigationFixtures {
         try Data(contentsOf: fixturesDirectory.appendingPathComponent("routes_two_turns.json"))
     }
 
+    /// The fixture decoded through the real client path, so the tests
+    /// that walk it exercise the same decoding the device will.
+    static func twoTurnsRoute() throws -> Route {
+        try RoutesClient.route(from: HTTPResponse(statusCode: 200, body: try twoTurnsData()))
+    }
+
     /// The four geometry corners of that fixture, as hand-checked
     /// constants: 100 m north, 80 m west, 70 m north.
     static let origin = LatLng(latitude: 25.761_70, longitude: -80.191_80)
