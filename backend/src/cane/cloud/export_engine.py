@@ -26,8 +26,14 @@ logger = logging.getLogger("cane.cloud.export_engine")
 EXPORT_IMGSZ = 640
 # opt = batch // 2, so batch=12 puts the optimisation profile exactly on our
 # real batch of six crops; min=(1,3,32,32) covers 512 as well as 640 (A11).
-EXPORT_BATCH = 12
-WORKSPACE_GIB = 4
+# Both are overridable for a retry without a rebuild (CANE_EXPORT_BATCH,
+# CANE_EXPORT_WORKSPACE_GIB); the sidecar fingerprint carries the batch.
+EXPORT_BATCH = int(os.environ.get("CANE_EXPORT_BATCH", "12"))
+# Verified on an L4 (2026-09-26): at max shape (12, 3, 640, 640) the attention
+# block's best tactic asks for ~8 GB of builder workspace; with the earlier
+# 4 GiB cap TensorRT skipped it and failed with "could not find any
+# implementation" for that node. 14 GiB fits comfortably in the L4's 23 GB.
+WORKSPACE_GIB = int(os.environ.get("CANE_EXPORT_WORKSPACE_GIB", "14"))
 TMP_SUFFIX = ".tmp"
 SIDECAR_SUFFIX = ".json"
 EXIT_FAILED = 1

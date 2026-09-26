@@ -34,11 +34,18 @@ COPY src ./src
 # --no-deps for ultralytics so its torch/opencv pins cannot downgrade the
 # image's CUDA-matched builds. The rest are the project's base deps, listed
 # explicitly because the `gpu` extra must never be installed here.
+# "numpy<2" is load-bearing (verified on an L4, 2026-09-26): the NGC torch is
+# built against NumPy 1.x, and letting opencv/supervision pull NumPy 2 breaks
+# torch's NumPy bridge at predict time ("RuntimeError: Numpy is not available")
+# and destabilises the TensorRT export. opencv-python 5 declares numpy>=2, so it
+# is pinned to 4.x alongside. Pin both last so nothing re-upgrades them.
 RUN pip install --no-deps "ultralytics>=8.3" \
  && pip install fastapi "uvicorn[standard]" python-multipart \
       "supervision>=0.25,<0.31" pydantic-settings "pydantic>=2.7" \
-      opencv-python httpx \
- && pip install --no-deps -e .
+      "opencv-python>=4.10,<5" httpx \
+ && pip install --no-deps -e . \
+ && pip install "numpy<2" "opencv-python>=4.10,<5" \
+ && python -c "import numpy, torch; assert numpy.__version__.startswith('1.'), numpy.__version__; torch.from_numpy(numpy.zeros(1))"
 
 # Bake the weights in, OUTSIDE the /models mount: a fresh boot must never
 # depend on a GitHub asset download, and `settings sync=False` keeps
