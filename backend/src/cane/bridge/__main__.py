@@ -35,6 +35,7 @@ from cane.bridge.backends import (
 from cane.bridge.capture.synthetic_source import SyntheticEquirectSource
 from cane.bridge.config import (
     DEFAULT_INFERENCE_URL,
+    DEFAULT_LOCAL_TIMEOUT_S,
     DEFAULT_REQUEST_TIMEOUT_S,
     DEFAULT_WS_HOST,
     DEFAULT_WS_PORT,
@@ -139,7 +140,9 @@ def build_monitor(args: argparse.Namespace) -> HealthMonitor:
     return HealthMonitor(start)
 
 
-def build_local_backend(args: argparse.Namespace) -> LocalBackend:
+def build_local_backend(
+    args: argparse.Namespace, timeout_s: float = DEFAULT_LOCAL_TIMEOUT_S
+) -> LocalBackend:
     """Load the fallback detector now -- and warm it -- not at the flip.
 
     A loader fault is fatal on purpose. Silently substituting the scripted
@@ -151,7 +154,11 @@ def build_local_backend(args: argparse.Namespace) -> LocalBackend:
     """
     settings = local_settings(args.local_detector, args.local_weights)
     try:
-        return LocalBackend.build(settings, warm_up_px=rung_by_index(args.rung).crop_px)
+        return LocalBackend.build(
+            settings,
+            warm_up_px=rung_by_index(args.rung).crop_px,
+            timeout_s=timeout_s,
+        )
     except Exception as exc:  # noqa: BLE001 - any loader fault, torch included
         logger.error(
             "could not build the local detector %r from %s (%s: %s); refusing to "
@@ -201,7 +208,7 @@ async def run_bridge(
     """Wire everything up and run until the duration elapses or Ctrl-C."""
     grab = GrabThread(open_source(config.source_spec))
     monitor = build_monitor(args)
-    local = build_local_backend(args)
+    local = build_local_backend(args, timeout_s=config.local_timeout_s)
     uplink, probe = build_uplink(config, monitor, local)
     sender = OneInFlightSender(uplink)
     health_hook = PhoneHealthHook(monitor)

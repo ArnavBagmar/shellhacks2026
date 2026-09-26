@@ -177,6 +177,22 @@ def test_an_explicit_fake_detector_is_built_and_named_by_the_banner(
     assert "fallback=fake" in caplog.records[-1].getMessage()
 
 
+def test_the_local_backend_is_built_with_the_configured_local_budget() -> None:
+    """`BridgeConfig.local_timeout_s` is the knob; a default that is only
+    ever the default is not configurable at all.
+    """
+    from cane.bridge.__main__ import build_local_backend
+    from cane.bridge.config import BridgeConfig
+
+    args = parse_args(["--inference-url", INFERENCE_URL, "--local-detector", "fake"])
+    config = BridgeConfig(inference_url=INFERENCE_URL, local_timeout_s=0.5)
+
+    assert build_local_backend(args, timeout_s=config.local_timeout_s).timeout_s == 0.5
+    assert build_local_backend(args).timeout_s == BridgeConfig(
+        inference_url=INFERENCE_URL
+    ).local_timeout_s
+
+
 def test_the_request_timeout_default_is_the_one_second_the_monitor_judges_on() -> None:
     from cane.bridge.backends import DEFAULT_BACKEND_TIMEOUT_S
     from cane.bridge.config import DEFAULT_REQUEST_TIMEOUT_S
