@@ -14,15 +14,19 @@ uv run pytest
 
 ## Running the event link server (`cane-link`)
 
+Canonical command (works from a fresh `git clone` after `uv sync`, nothing
+else required -- see "Environment note" below for why `PYTHONPATH=src` is
+part of it):
+
 ```bash
-uv run python -m cane.transport.server --host 0.0.0.0 --port 8765 \
+PYTHONPATH=src uv run python -m cane.transport.server --host 0.0.0.0 --port 8765 \
     --ping-interval 5 --pipeline-delay-ms 0 --demo-event-every 0
 ```
 
 equivalently, the console script:
 
 ```bash
-uv run cane-link --port 8765
+PYTHONPATH=src uv run cane-link --port 8765
 ```
 
 Flags:
@@ -58,13 +62,27 @@ offset=6.2ms rtt=11ms
 ## Environment note: editable install and `-m`/console-script invocation
 
 `uv sync`'s editable install of this project writes a `.pth` file that can
-end up with the macOS `UF_HIDDEN` flag set (a filesystem quirk of this
-dev machine); when that happens, CPython's `site.py` silently skips it and
-plain `import cane` fails outside pytest (pytest works around this itself
-via `pythonpath = ["src"]` in `pyproject.toml`). If `uv run python -m
-cane.transport.server` or `uv run cane-link` reports `ModuleNotFoundError:
-No module named 'cane'` on this machine, the fix is a `sitecustomize.py`
-dropped into `.venv/lib/python3.12/site-packages/` that unconditionally
-puts `backend/src` on `sys.path`; it is local to this `.venv` (not part of
-the package, not committed) and needs recreating if `.venv` itself is ever
-rebuilt from scratch.
+end up with the macOS `UF_HIDDEN` flag set (a real, reproducible
+`uv`-on-macOS behaviour, not specific to one machine); when that happens,
+CPython's `site.py` silently skips it and plain `import cane` fails for
+`uv run python -m cane.transport.server` / `uv run cane-link`, even though
+`uv sync` reports success and `pytest` is unaffected (pytest works around
+this itself via `pythonpath = ["src"]` in `pyproject.toml`).
+
+`PYTHONPATH=src` (relative to this directory, `backend/`) is the fix, and
+it is the reason that env var is part of the canonical commands above: it
+puts `backend/src` on `sys.path` directly, the same way pytest's own
+`pythonpath` setting does, independent of whether the editable install's
+`.pth` file got skipped. The Swift end-to-end test
+(`EventLinkClientEndToEndTests`) sets this same env var when it spawns the
+server, and separately probes `uv run python -c "import cane"` first,
+`XCTSkip`-ing with the captured error if that fails, rather than spawning
+a server that can never come up.
+
+Troubleshooting-only, not required: if you want `import cane` to work for
+*any* invocation on a given machine without prefixing `PYTHONPATH=src`
+every time, a `sitecustomize.py` dropped into
+`.venv/lib/python3.12/site-packages/` that unconditionally puts
+`backend/src` on `sys.path` works too; it is local to that `.venv` (not
+part of the package, not committed) and needs recreating if `.venv` is
+ever rebuilt from scratch.
