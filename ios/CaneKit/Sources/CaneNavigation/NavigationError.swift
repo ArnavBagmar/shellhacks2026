@@ -33,7 +33,9 @@ public enum NavigationError: Error, Equatable, Sendable, CustomStringConvertible
         case .destinationNotFound(let query):
             return "no place found for \"\(query)\""
         case .routesAPI(let status, let message):
-            return "Routes API HTTP \(status): \(message)"
+            // Shared by Routes, Places (New) and Geocoding HTTP failures, so the
+            // label stays source-neutral.
+            return "Google Maps API HTTP \(status): \(message)"
         case .noRoute:
             return "the Routes API returned no route"
         case .noFix:

@@ -28,8 +28,11 @@ final class NavigationErrorTests: XCTestCase {
         XCTAssertTrue(
             NavigationError.destinationNotFound("the library").description.contains("the library")
         )
-        XCTAssertTrue(
-            NavigationError.routesAPI(status: 403, message: "blocked").description.contains("403")
+        // The case is shared by Routes, Places and Geocoding failures, so the
+        // rendered label must not name one API (review finding, step 12).
+        XCTAssertEqual(
+            NavigationError.routesAPI(status: 403, message: "blocked").description,
+            "Google Maps API HTTP 403: blocked"
         )
         XCTAssertTrue(NavigationError.decoding("bad polyline").description.contains("bad polyline"))
         XCTAssertTrue(NavigationError.transport("offline").description.contains("offline"))
