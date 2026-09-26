@@ -191,6 +191,42 @@ final class TurnCuePolicyTests: XCTestCase {
         XCTAssertEqual(kinds, [.correctHeading, .continueStraight])
     }
 
+    /// Learned on the live FIU route (Graham Center → Green Library): the
+    /// heading swings through a sharp vertex for a tick or two, and "Right
+    /// to rejoin route" one second after "Sharp left now" is a wrong-action
+    /// cue. Corrections wait out a short grace after every `.now`.
+    func testNoHeadingCorrectionInsideTheGraceAfterANow() throws {
+        let (route, samples) = try twoTurnWalk()
+        let follower = RouteFollower(route: route)
+        var followerState = follower.initialState
+        var policyState = TurnCuePolicy.State()
+        var nowAtMs: Int64?
+        var corrections: [Int64] = []
+
+        for sample in samples[55...85] {
+            let skew = nowAtMs == nil ? 0.0 : 60.0
+            let heading = HeadingSample(
+                trueHeadingDeg: sample.heading.trueHeadingDeg + skew,
+                accuracyDeg: 5,
+                timestampMs: sample.fix.timestampMs
+            )
+            followerState = follower.advance(from: followerState, fix: sample.fix, heading: heading)
+            let (next, cue) = TurnCuePolicy.evaluate(
+                state: policyState, follower: followerState, nowMs: sample.fix.timestampMs
+            )
+            policyState = next
+            if cue?.kind == .now, nowAtMs == nil { nowAtMs = sample.fix.timestampMs }
+            if cue?.kind == .correctHeading { corrections.append(sample.fix.timestampMs) }
+        }
+
+        let nowMs = try XCTUnwrap(nowAtMs)
+        let graceMs = Int64(TurnCuePolicy.postManeuverGraceS * 1_000)
+        XCTAssertFalse(corrections.contains { $0 < nowMs + graceMs }, "no correction inside the grace")
+        let first = try XCTUnwrap(corrections.first, "a persistent error is still corrected after the grace")
+        XCTAssertGreaterThanOrEqual(first, nowMs + graceMs)
+        XCTAssertLessThanOrEqual(first, nowMs + graceMs + 3_000)
+    }
+
     func testNoStraightReminderOnACleanWalk() throws {
         let (route, samples) = try twoTurnWalk()
 
@@ -330,6 +366,7 @@ final class TurnCuePolicyTests: XCTestCase {
         XCTAssertEqual(TurnCuePolicy.straightReminderS, 20)
         XCTAssertEqual(TurnCuePolicy.minWalkSpeedMps, 0.5)
         XCTAssertEqual(TurnCuePolicy.gpsLostAfterS, 10)
+        XCTAssertEqual(TurnCuePolicy.postManeuverGraceS, 6)
         XCTAssertEqual(RouteFollower.stepAdvanceRadiusM, 8)
     }
 }

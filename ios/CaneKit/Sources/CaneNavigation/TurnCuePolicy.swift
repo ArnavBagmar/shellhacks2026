@@ -25,6 +25,9 @@ public enum TurnCuePolicy {
     public static let straightReminderS: Double = 20
     public static let minWalkSpeedMps: Double = 0.5
     public static let gpsLostAfterS: Double = 10
+    /// No `.correctHeading` this soon after a `.now`: the heading swings
+    /// through the vertex while the walker turns (seen on the live FIU route).
+    public static let postManeuverGraceS: Double = 6
 
     public static func evaluate(
         state: State, follower: FollowerState, nowMs: Int64
@@ -40,7 +43,9 @@ public enum TurnCuePolicy {
         if let offRoute = offRouteDecision(&next, follower: follower, nowMs: nowMs) {
             return (next, offRoute.cue)
         }
-        if let maneuver = maneuverCue(&next, follower: follower) { return (next, maneuver) }
+        if let maneuver = maneuverCue(&next, follower: follower, nowMs: nowMs) {
+            return (next, maneuver)
+        }
         if let correction = headingCue(&next, follower: follower, nowMs: nowMs) {
             return (next, correction)
         }
@@ -119,12 +124,15 @@ public enum TurnCuePolicy {
 
     /// One `now` and one `prepare` per maneuver, keyed by the step
     /// whose start carries it, so a wobbling fix cannot repeat either.
-    private static func maneuverCue(_ next: inout State, follower: FollowerState) -> TurnCue? {
+    private static func maneuverCue(
+        _ next: inout State, follower: FollowerState, nowMs: Int64
+    ) -> TurnCue? {
         if let reached = follower.reachedManeuver, let boundary = follower.reachedManeuverIndex,
             reached.isTurn, next.announcedBoundary != boundary
         {
             next.announcedBoundary = boundary
             next.preparedBoundary = boundary
+            next.lastNowMs = nowMs
             return TurnCue(kind: .now, direction: reached.turnDirection, distanceM: nil)
         }
 
@@ -135,6 +143,7 @@ public enum TurnCuePolicy {
         if follower.distanceToNextManeuverM <= nowDistanceM, next.announcedBoundary != boundary {
             next.announcedBoundary = boundary
             next.preparedBoundary = boundary
+            next.lastNowMs = nowMs
             return TurnCue(kind: .now, direction: direction, distanceM: nil)
         }
         if follower.distanceToNextManeuverM <= prepareDistanceM, next.preparedBoundary != boundary {
@@ -155,7 +164,8 @@ public enum TurnCuePolicy {
     ) -> TurnCue? {
         guard let error = follower.headingErrorDeg, abs(error) > headingCorrectDeg,
             let speed = follower.speedMps, speed >= minWalkSpeedMps,
-            elapsed(since: next.lastCorrectHeadingMs, to: nowMs, atLeast: correctCooldownS)
+            elapsed(since: next.lastCorrectHeadingMs, to: nowMs, atLeast: correctCooldownS),
+            elapsed(since: next.lastNowMs, to: nowMs, atLeast: postManeuverGraceS)
         else { return nil }
 
         next.lastCorrectHeadingMs = nowMs

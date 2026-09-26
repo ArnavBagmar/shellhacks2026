@@ -9,6 +9,7 @@ extension TurnCuePolicy {
         var preparedBoundary: Int?
         var announcedBoundary: Int?
         var lastCorrectHeadingMs: Int64?
+        var lastNowMs: Int64?
         var lastContinueStraightMs: Int64?
         var straightReminderArmed = false
         var offRouteSinceMs: Int64?
