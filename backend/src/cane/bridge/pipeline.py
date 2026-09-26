@@ -33,6 +33,11 @@ from cane.transport.wall_clock import now_ms
 logger = logging.getLogger(__name__)
 
 FRAME_WAIT_TIMEOUT_S = 0.25
+# The freshness retry below is looking for the *next* grab, which at 30 fps
+# is at most 33 ms away; one grab period plus slack is the whole budget.
+# Reusing FRAME_WAIT_TIMEOUT_S here would stall a tick for 250 ms chasing a
+# frame that is not coming from a stalled camera.
+FRESHNESS_RETRY_TIMEOUT_S = 0.04
 UNSYNCED_LOG_INTERVAL_S = 5.0
 # A 30 fps camera means the frame sitting in the slot is on average half a
 # frame period (17 ms) old, and up to 33 ms old, before we have done any work.
@@ -233,7 +238,7 @@ class BridgePipeline:
             return None
         if now_ms() - frame.t_arrival_laptop_ms <= MAX_FRAME_AGE_AT_PICKUP_MS:
             return frame
-        fresher = self._grab.wait_for_new(frame.seq, FRAME_WAIT_TIMEOUT_S)
+        fresher = self._grab.wait_for_new(frame.seq, FRESHNESS_RETRY_TIMEOUT_S)
         return fresher if fresher is not None else frame
 
     def _count_skip(self, skip: TickSkip) -> None:
