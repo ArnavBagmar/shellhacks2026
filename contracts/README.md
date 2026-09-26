@@ -57,8 +57,8 @@ assert against it in either test suite.
 {
   "schema": 1,
   "source": "phone",
-  "track_id": "",
-  "t_capture_ms": 0,
+  "track_id": "example-001",
+  "t_capture_ms": 1790000000000,
   "ttl_ms": 1,
   "cls": "unknown_obstacle",
   "confidence": 0.0,
@@ -68,6 +68,10 @@ assert against it in either test suite.
   "closing_mps": null
 }
 ```
+
+This template is itself schema-valid (see
+`backend/tests/contracts/test_golden_fixture.py::test_readme_template_is_schema_valid`)
+— copy it verbatim and only change the values, not the shape.
 
 `contracts/` is frozen after Step 2 — changes need controller approval.
 A `schema` version bump is a simultaneous redeploy of cloud, bridge and a
