@@ -21,6 +21,7 @@ from cane.transport.clock_sync import (
 from cane.transport.messages import (
     EventMessage,
     MalformedMessageError,
+    PhoneHealth,
     Ping,
     Pong,
     Unknown,
@@ -39,6 +40,7 @@ __all__ = [
     "NtpSample",
     "OffsetEstimator",
     "PhoneClock",
+    "PhoneHealth",
     "Ping",
     "Pong",
     "Unknown",

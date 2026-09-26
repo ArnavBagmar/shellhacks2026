@@ -23,6 +23,8 @@ public enum AwarenessEventError: Error, Equatable, Sendable {
 /// Numeric bounds -- read from `contracts/awareness_event.schema.json`; see
 /// `EnumDriftTests` for the equality assertions that keep them in sync.
 public enum AwarenessEventBounds {
+    /// The one supported wire version (`schema` is `const: 1`).
+    public static let supportedSchemaVersion = 1
     public static let trackIdMinLength = 1
     public static let trackIdMaxLength = 64
     public static let tCaptureMsMin = 1_600_000_000_000

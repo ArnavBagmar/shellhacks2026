@@ -2,11 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://cane.shellhacks/contracts/transport_envelope.schema.json",
   "title": "TransportEnvelope",
-  "description": "The three WebSocket frame shapes exchanged between the laptop (server) and the phone (client); see docs/camera-sync-design.md Sec 4.2 and contracts/README.md 'Transport envelope'. The reserved types 'health' and 'location' (phone -> laptop, defined in later steps) and any other unrecognised 'type' are valid JSON that a receiver logs and ignores -- they are deliberately out of scope for this schema, which only documents the three shapes the laptop and phone actually exchange today.",
+  "description": "The four WebSocket frame shapes exchanged between the laptop (server) and the phone (client); see docs/camera-sync-design.md Sec 4.2 and Sec 4.4 and contracts/README.md 'Transport envelope'. The reserved type 'location' (phone -> laptop, defined in a later step) and any other unrecognised 'type' are valid JSON that a receiver logs and ignores -- they are deliberately out of scope for this schema, which only documents the shapes the laptop and phone actually exchange today.",
   "oneOf": [
     { "$ref": "#/$defs/ping" },
     { "$ref": "#/$defs/pong" },
-    { "$ref": "#/$defs/event" }
+    { "$ref": "#/$defs/event" },
+    { "$ref": "#/$defs/health" }
   ],
   "$defs": {
     "ping": {
@@ -51,6 +52,66 @@
           "$ref": "awareness_event.schema.json"
         }
       }
+    },
+    "health": {
+      "type": "object",
+      "description": "Phone -> laptop. One report of the feedback manager's stale-drop ring (10 one-second buckets of {received, staleDropped}); a rising rate is the trigger for the docs/camera-sync-design.md Sec 3.4 automatic fallback. Advisory only: the laptop's health monitor still steps rungs and flips to the local detector without it, and a report older than 3 s (after clock conversion) is ignored, so a dead signal can never drive a switch.",
+      "additionalProperties": false,
+      "required": ["type", "t_phone_ms", "window_ms", "received", "stale_dropped", "stale_drop_rate", "complete_buckets"],
+      "properties": {
+        "type": { "const": "health" },
+        "t_phone_ms": {
+          "type": "integer",
+          "description": "When the phone produced this report, integer Unix-epoch milliseconds in the PHONE clock (the laptop converts before judging freshness)."
+        },
+        "window_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Width of the whole ring in milliseconds (10 one-second buckets = 10000)."
+        },
+        "received": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Events the feedback manager received inside the window."
+        },
+        "stale_dropped": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those, the ones dropped for arriving past their TTL (Sec 4.4)."
+        },
+        "stale_drop_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "stale_dropped / received over the complete buckets; 0 when received is 0. At or above 0.2 over at least 2 complete buckets the laptop flips to the local detector."
+        },
+        "complete_buckets": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "How many of the ring's one-second buckets are fully elapsed. Fewer than 2 makes the rate meaningless, and the laptop ignores the report."
+        }
+      },
+      "examples": [
+        {
+          "type": "health",
+          "t_phone_ms": 1790000000000,
+          "window_ms": 10000,
+          "received": 27,
+          "stale_dropped": 7,
+          "stale_drop_rate": 0.26,
+          "complete_buckets": 10
+        },
+        {
+          "type": "health",
+          "t_phone_ms": 1790000001000,
+          "window_ms": 10000,
+          "received": 0,
+          "stale_dropped": 0,
+          "stale_drop_rate": 0.0,
+          "complete_buckets": 1
+        }
+      ]
     }
   }
 }

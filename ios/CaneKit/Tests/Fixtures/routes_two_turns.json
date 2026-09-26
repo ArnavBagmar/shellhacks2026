@@ -1,0 +1,67 @@
+{
+  "_comment": [
+    "Hand-authored Routes API v2 computeRoutes reply for a ~250 m two-turn walk,",
+    "shaped exactly like step-12-brief.md H1 and holding only the fields the",
+    "field mask asks for. Geometry: 100 m north, 80 m west, 70 m north, from",
+    "25.76170,-80.19180. Every encodedPolyline below was produced by",
+    "CaneNavigation's own Polyline.encode. No API key appears in this file."
+  ],
+  "routes": [
+    {
+      "distanceMeters": 250,
+      "duration": "179s",
+      "polyline": { "encodedPolyline": "sqf|CvmmhNsD??~C}B?" },
+      "legs": [
+        {
+          "steps": [
+            {
+              "distanceMeters": 100,
+              "staticDuration": "72s",
+              "polyline": { "encodedPolyline": "sqf|CvmmhNsD?" },
+              "startLocation": { "latLng": { "latitude": 25.7617, "longitude": -80.1918 } },
+              "endLocation": { "latLng": { "latitude": 25.7626, "longitude": -80.1918 } },
+              "navigationInstruction": {
+                "maneuver": "DEPART",
+                "instructions": "Walk north on Bayfront Path"
+              },
+              "travelMode": "WALK"
+            },
+            {
+              "distanceMeters": 80,
+              "staticDuration": "57s",
+              "polyline": { "encodedPolyline": "gwf|CvmmhN?~C" },
+              "startLocation": { "latLng": { "latitude": 25.7626, "longitude": -80.1918 } },
+              "endLocation": { "latLng": { "latitude": 25.7626, "longitude": -80.1926 } },
+              "navigationInstruction": {
+                "maneuver": "TURN_LEFT",
+                "instructions": "Turn left onto Library Walk"
+              },
+              "travelMode": "WALK"
+            },
+            {
+              "distanceMeters": 70,
+              "staticDuration": "50s",
+              "polyline": { "encodedPolyline": "gwf|CvrmhN}B?" },
+              "startLocation": { "latLng": { "latitude": 25.7626, "longitude": -80.1926 } },
+              "endLocation": { "latLng": { "latitude": 25.76323, "longitude": -80.1926 } },
+              "navigationInstruction": {
+                "maneuver": "TURN_RIGHT",
+                "instructions": "Turn right onto Museum Lane"
+              },
+              "travelMode": "WALK"
+            },
+            {
+              "distanceMeters": 0,
+              "staticDuration": "0s",
+              "polyline": { "encodedPolyline": "e{f|CvrmhN??" },
+              "startLocation": { "latLng": { "latitude": 25.76323, "longitude": -80.1926 } },
+              "endLocation": { "latLng": { "latitude": 25.76323, "longitude": -80.1926 } },
+              "navigationInstruction": { "instructions": "Your destination is on the left" },
+              "travelMode": "WALK"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

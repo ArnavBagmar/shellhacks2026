@@ -6,13 +6,26 @@ handshake and event delivery end to end (D6).
 """
 
 import asyncio
+import json
+import logging
 
+import pytest
 import websockets
 
 from cane.transport.messages import EventMessage, Ping, Pong, decode, encode
 from cane.transport.server import EventLinkServer
 
 RECV_TIMEOUT_S = 2.0
+IGNORED_FRAMES = 3
+UNDELIVERED_EVENTS = 3
+
+
+async def _wait_for(predicate, timeout_s: float = RECV_TIMEOUT_S) -> None:
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while asyncio.get_running_loop().time() < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(0.01)
 
 
 async def _recv_decoded(connection):
@@ -128,3 +141,60 @@ async def test_send_event_failure_on_stale_connection_does_not_clobber_replaceme
             msg = await _recv_decoded(phone_b)
             assert isinstance(msg, EventMessage)
             assert msg.event == golden_valid_event
+
+
+# --------------------------------------------------------------------------
+# Frames the laptop does not act on are counted, and said once per window
+# --------------------------------------------------------------------------
+
+
+async def test_unknown_frames_are_counted_and_logged_once_per_window(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A phone sending a frame type this build does not know is a version
+    skew, not a fault -- but at DEBUG it is invisible, and one line per
+    frame at 3 Hz would bury the stats line.
+    """
+    with caplog.at_level(logging.INFO, logger="cane.transport.server"):
+        async with EventLinkServer("127.0.0.1", 0, ping_interval_s=5.0) as srv:
+            async with websockets.connect(f"ws://127.0.0.1:{srv.port}") as phone:
+                for _ in range(IGNORED_FRAMES):
+                    await phone.send(json.dumps({"type": "battery", "percent": 40}))
+                await _wait_for(lambda: srv.frames_ignored == IGNORED_FRAMES)
+
+                assert srv.frames_ignored == IGNORED_FRAMES
+                # The link is untouched by frames it does not understand.
+                assert phone.close_code is None
+
+    lines = [
+        r.getMessage() for r in caplog.records if "ignoring" in r.getMessage().lower()
+    ]
+    assert len(lines) == 1, lines
+    assert "battery" in lines[0]
+
+
+async def test_an_unexpected_frame_type_is_ignored_like_an_unknown_one() -> None:
+    """`ping` flows laptop -> phone only; a phone that sends one is ignored."""
+    async with EventLinkServer("127.0.0.1", 0, ping_interval_s=5.0) as srv:
+        async with websockets.connect(f"ws://127.0.0.1:{srv.port}") as phone:
+            await phone.send(encode(Ping(t1=1_790_000_000_000)))
+            await _wait_for(lambda: srv.frames_ignored == 1)
+
+            assert srv.frames_ignored == 1
+
+
+async def test_the_no_phone_warning_is_throttled_and_counts_what_it_dropped(
+    golden_valid_event, caplog: pytest.LogCaptureFixture
+) -> None:
+    """One warning per window, not one per event: at 3 fps a disconnected
+    phone otherwise writes a line for every detection in the walk.
+    """
+    with caplog.at_level(logging.WARNING, logger="cane.transport.server"):
+        async with EventLinkServer("127.0.0.1", 0, ping_interval_s=5.0) as srv:
+            for _ in range(UNDELIVERED_EVENTS):
+                assert await srv.send_event(golden_valid_event) is False
+
+            assert srv.events_dropped_no_phone == UNDELIVERED_EVENTS
+
+    lines = [r.getMessage() for r in caplog.records if "no phone" in r.getMessage()]
+    assert len(lines) == 1, lines
