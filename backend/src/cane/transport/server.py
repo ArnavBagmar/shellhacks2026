@@ -103,7 +103,13 @@ class EventLinkServer:
             await connection.send(encode(EventMessage(event=event)))
         except websockets.ConnectionClosed:
             logger.warning("send_event: connection closed mid-send")
-            self._connection = None
+            # Only clear if `connection` is still the *current* one: a
+            # second phone may already have replaced it (D4) while this
+            # send was in flight, and clearing unconditionally would drop
+            # that new, healthy connection instead of the dead one this
+            # call actually observed.
+            if self._connection is connection:
+                self._connection = None
             return False
         return True
 
@@ -156,7 +162,11 @@ class EventLinkServer:
                 await connection.send(encode(Ping(t1=now_ms())))
             except websockets.ConnectionClosed:
                 logger.warning("ping: connection closed mid-send")
-                self._connection = None
+                # Same identity guard as send_event: don't clear a
+                # replacement connection that arrived while this ping was
+                # in flight.
+                if self._connection is connection:
+                    self._connection = None
 
 
 if __name__ == "__main__":

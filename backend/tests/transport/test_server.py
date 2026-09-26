@@ -70,3 +70,61 @@ async def test_send_event_with_no_client_returns_false(golden_valid_event):
     async with EventLinkServer("127.0.0.1", 0, ping_interval_s=5.0) as srv:
         delivered = await srv.send_event(golden_valid_event)
         assert delivered is False
+
+
+class _StaleConnection:
+    """A stand-in for a connection object that is about to fail mid-send.
+
+    `send()` blocks until the test says it may proceed, so the test can
+    deterministically arrange for a *replacement* connection to take over
+    ``srv._connection`` while this stale one is still "in flight" inside
+    ``send_event`` -- reproducing the exact race in review finding #5
+    without depending on real-socket timing.
+    """
+
+    def __init__(self) -> None:
+        self.about_to_send = asyncio.Event()
+        self.allowed_to_fail = asyncio.Event()
+
+    async def send(self, _data: str) -> None:
+        self.about_to_send.set()
+        await self.allowed_to_fail.wait()
+        raise websockets.ConnectionClosedOK(None, None)
+
+    async def close(self) -> None:
+        """No-op: `_handle_connection` closes the outgoing connection when
+        a replacement arrives (D4); this stand-in has nothing real to
+        close.
+        """
+
+
+async def test_send_event_failure_on_stale_connection_does_not_clobber_replacement(golden_valid_event):
+    async with EventLinkServer("127.0.0.1", 0, ping_interval_s=0.05) as srv:
+        stale = _StaleConnection()
+        srv._connection = stale  # simulate: phone A is the current connection
+
+        send_to_stale = asyncio.create_task(srv.send_event(golden_valid_event))
+        await asyncio.wait_for(stale.about_to_send.wait(), timeout=RECV_TIMEOUT_S)
+        # send_event is now suspended inside stale.send(), exactly as it
+        # would be mid-network-write to a phone that is about to drop.
+
+        async with websockets.connect(f"ws://127.0.0.1:{srv.port}") as phone_b:
+            # Phone B connecting replaces the stale connection -- the
+            # same "second connection replaces the first" path D4
+            # describes -- while send_event's call above is still
+            # suspended on the old one.
+            await _recv_decoded(phone_b)  # first ping: B is now srv._connection
+
+            stale.allowed_to_fail.set()  # let the stale send fail now
+            delivered_to_stale = await asyncio.wait_for(send_to_stale, timeout=RECV_TIMEOUT_S)
+            assert delivered_to_stale is False
+
+            # The bug: without an identity guard, handling that failure
+            # would have cleared `srv._connection` unconditionally,
+            # clobbering B even though B is healthy and current.
+            delivered_to_b = await srv.send_event(golden_valid_event)
+            assert delivered_to_b is True
+
+            msg = await _recv_decoded(phone_b)
+            assert isinstance(msg, EventMessage)
+            assert msg.event == golden_valid_event
