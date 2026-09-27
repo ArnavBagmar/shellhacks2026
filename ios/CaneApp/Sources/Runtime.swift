@@ -398,6 +398,8 @@ final class Runtime {
                 callbacks.onNote("camera: front, mirroring off, no TrueDepth on this phone")
             }
             diagnostics.record("depth_available", ["has_depth": .text(camera.hasDepth ? "yes" : "no")])
+            callbacks.onNote("camera view: \(camera.formatSummary)")
+            diagnostics.record("camera_format", ["summary": .text(camera.formatSummary)])
         } catch {
             callbacks.onNote("camera: \(error)")
         }

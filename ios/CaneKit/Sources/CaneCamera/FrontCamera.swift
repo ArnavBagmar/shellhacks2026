@@ -72,6 +72,10 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
     /// until something asks for it.
     public var wantsDepth = false
 
+    /// What `start()` chose, for the setup notes: size, horizontal field of
+    /// view, and whether a wider view exists without depth.
+    public private(set) var formatSummary = ""
+
     public override init() {
         super.init()
     }
@@ -151,6 +155,9 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
         let input = try AVCaptureDeviceInput(device: device)
         guard session.canAddInput(input) else { throw CameraError.cannotAddInput }
         session.addInput(input)
+        // The widest view the front camera has (the iPhone 17's selfie camera
+        // is much wider than older ones), picked before depth is paired.
+        let widest = chooseWidest(device, needDepth: wantsDepth)
 
         output.alwaysDiscardsLateVideoFrames = true
         output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
@@ -158,7 +165,7 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
         guard session.canAddOutput(output) else { throw CameraError.cannotAddOutput }
         session.addOutput(output)
 
-        if wantsDepth { configureDepth(device) }
+        if wantsDepth { configureDepth(device, format: widest.format) }
 
         if let connection = output.connection(with: .video) {
             connection.automaticallyAdjustsVideoMirroring = false
@@ -170,12 +177,18 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
         }
 
         let dims = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
-        let zoom = max(Double(device.videoZoomFactor), 1)
+        let zoom = Double(device.videoZoomFactor)
         let formatFOV = Double(device.activeFormat.videoFieldOfView)
+        let fov = 2 * atan(tan(formatFOV * .pi / 360) / max(zoom, 0.1)) * 180 / .pi
         lock.withLock {
-            sensorFOVDeg = 2 * atan(tan(formatFOV * .pi / 360) / zoom) * 180 / .pi
+            sensorFOVDeg = fov
             sensorAspect = Double(max(dims.width, dims.height)) / Double(max(1, min(dims.width, dims.height)))
         }
+        var summary = String(format: "%dx%d, %.0f° across the long side, zoom %.2f", dims.width, dims.height, fov, zoom)
+        if let wider = widest.widerWithoutDepthDeg, wider > fov + 2 {
+            summary += String(format: " (%.0f° possible without TrueDepth)", wider)
+        }
+        formatSummary = summary
 
         let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
         self.coordinator = coordinator
@@ -189,16 +202,60 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
     /// Depth is strictly additive: every failure here leaves the video path
     /// exactly as it was, because video already feeds the scene questions and
     /// must not regress for a sensor that may not exist.
-    private func configureDepth(_ device: AVCaptureDevice) {
+    /// Frames per second the tracker needs, and the frame sizes worth
+    /// processing live (Vision on a 12 MP frame at 30 fps would not keep up).
+    static let minFPS = 30.0
+    static let maxLongSide: Int32 = 1_920
+
+    /// The widest-view front format that runs at 30 fps at a live-processable
+    /// size -- with a paired depth format when `needDepth` and one exists --
+    /// made active, zoomed all the way out.
+    private func chooseWidest(_ device: AVCaptureDevice, needDepth: Bool) -> (format: AVCaptureDevice.Format?, widerWithoutDepthDeg: Double?) {
+        func longSide(_ f: AVCaptureDevice.Format) -> Int32 {
+            let d = CMVideoFormatDescriptionGetDimensions(f.formatDescription)
+            return max(d.width, d.height)
+        }
+        let live = device.formats.filter { f in
+            f.videoSupportedFrameRateRanges.contains { $0.maxFrameRate >= Self.minFPS } && longSide(f) <= Self.maxLongSide
+        }
+        let usable = live.isEmpty ? device.formats : live
+        // Widest first; then the most depth; then the larger frame.
+        func better(_ a: AVCaptureDevice.Format, _ b: AVCaptureDevice.Format) -> Bool {
+            let fa = (a.videoFieldOfView * 2).rounded(), fb = (b.videoFieldOfView * 2).rounded()
+            if fa != fb { return fa < fb }
+            if depthPixels(a) != depthPixels(b) { return depthPixels(a) < depthPixels(b) }
+            return longSide(a) < longSide(b)
+        }
+        let withDepth = usable.filter { !$0.supportedDepthDataFormats.isEmpty }
+        let widestAny = usable.max(by: better)
+        let pick = needDepth && !withDepth.isEmpty ? withDepth.max(by: better) : widestAny
+        guard let pick else { return (nil, nil) }
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            device.activeFormat = pick
+            device.videoZoomFactor = device.minAvailableVideoZoomFactor
+        } catch {
+            logger.error("front camera: cannot choose the widest format (\(error.localizedDescription)); using the default")
+            return (nil, nil)
+        }
+        let widerWithoutDepth = widestAny.map { Double($0.videoFieldOfView) }
+        logger.info("front camera: widest usable format \(Double(pick.videoFieldOfView), format: .fixed(precision: 1)) deg, depth \(!pick.supportedDepthDataFormats.isEmpty)")
+        return (pick, needDepth ? widerWithoutDepth : nil)
+    }
+
+    private func configureDepth(_ device: AVCaptureDevice, format chosen: AVCaptureDevice.Format?) {
         guard session.canAddOutput(depthOutput) else {
             logger.info("truedepth: session will not take a depth output; continuing without distances")
             return
         }
         // A format only yields depth if it declares a paired depth format, and
-        // the default active format often does not. Pick the pairing with the
-        // largest depth map among the video formats we can live with.
+        // the default active format often does not. Keep the widest-view
+        // format `chooseWidest` picked when it pairs with depth; else the
+        // pairing with the largest depth map.
         let candidates = device.formats.filter { !$0.supportedDepthDataFormats.isEmpty }
-        guard let format = candidates.max(by: { left, right in
+        let paired = chosen.flatMap { $0.supportedDepthDataFormats.isEmpty ? nil : $0 }
+        guard let format = paired ?? candidates.max(by: { left, right in
             depthPixels(left) < depthPixels(right)
         }), let depthFormat = format.supportedDepthDataFormats.max(by: { left, right in
             CMVideoFormatDescriptionGetDimensions(left.formatDescription).width
@@ -210,8 +267,9 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
         do {
             try device.lockForConfiguration()
             defer { device.unlockForConfiguration() }
-            device.activeFormat = format
+            if device.activeFormat != format { device.activeFormat = format }
             device.activeDepthDataFormat = depthFormat
+            device.videoZoomFactor = device.minAvailableVideoZoomFactor
         } catch {
             logger.error("truedepth: cannot lock the device for depth (\(error.localizedDescription)); continuing without distances")
             return
