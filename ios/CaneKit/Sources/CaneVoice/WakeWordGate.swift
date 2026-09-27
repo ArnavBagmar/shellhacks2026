@@ -43,6 +43,12 @@ public struct WakeWordGate: Sendable {
     /// finalizes the wake word as its own segment while the command is
     /// still being said, and answering at once would mute the mic over it.
     public static let wakePromptDelayMs: Int64 = 1_200
+    /// A finished sentence that is not a clear command ("Hey Cane, I'm
+    /// bored.") waits this long for more: the recognizer ends a sentence at
+    /// a short pause, and acting at once spoke over -- and so muted the mic
+    /// for -- "is there a Rubik's cube on the table?" (2026-09-27).
+    /// Anything said in this window joins the same question, no wake word.
+    public static let followOnMs: Int64 = 1_500
 
     static let greetings: Set<String> = ["hey", "hi", "okay", "ok", "hay", "yo"]
     /// What the recognizer writes for "Cane". "king" and "keen" were heard
@@ -65,6 +71,9 @@ public struct WakeWordGate: Sendable {
     /// What that early emit said ("" for a bare wake word), so the final can
     /// correct it.
     private var emittedEarly: String?
+    /// A finished free question waiting `followOnMs` for more words.
+    private var held: String?
+    private var heldDueMs: Int64?
 
     /// Whether a command is already complete (defaults to "it parses").
     private let isComplete: @Sendable (String) -> Bool
@@ -98,6 +107,30 @@ public struct WakeWordGate: Sendable {
             armedUntilMs = nil
             return .command(final)
         }
+        if held != nil {
+            if Self.commandStart(words) != nil {
+                // A new "Hey Cane": the newest question wins.
+                held = nil
+                heldDueMs = nil
+            } else if !words.isEmpty {
+                let combined = ([held!] + words).joined(separator: " ")
+                if isFinal {
+                    held = nil
+                    heldDueMs = nil
+                    pending = nil
+                    return .command(combined)
+                }
+                // Still talking: the stability rules take over from here.
+                heldDueMs = nil
+                if combined != pending {
+                    pending = combined
+                    lastChangeMs = nowMs
+                }
+                return .none
+            } else {
+                return .none
+            }
+        }
         let command: [String]
         if let start = Self.commandStart(words) {
             command = Array(words[start...])
@@ -117,6 +150,11 @@ public struct WakeWordGate: Sendable {
                 return .none
             }
             armedUntilMs = nil
+            if !isComplete(joined) {
+                held = joined
+                heldDueMs = nowMs + Self.followOnMs
+                return .none
+            }
             return .command(joined)
         }
         if joined != pending {
@@ -127,6 +165,11 @@ public struct WakeWordGate: Sendable {
     }
 
     public mutating func tick(nowMs: Int64) -> Output {
+        if let due = heldDueMs, let text = held, pending == nil, nowMs >= due {
+            held = nil
+            heldDueMs = nil
+            return .command(text)
+        }
         if let due = wakePromptDueMs, pending == nil, nowMs >= due {
             wakePromptDueMs = nil
             return .wakeOnly
@@ -144,6 +187,8 @@ public struct WakeWordGate: Sendable {
         let fragment = !complete && Self.unfinished(text)
         if !text.isEmpty, !fragment, waited >= (complete ? Self.completeStableMs : Self.stableMs) {
             pending = nil
+            held = nil
+            heldDueMs = nil
             consumedSegment = true
             emittedEarly = text
             armedUntilMs = nil
@@ -161,6 +206,8 @@ public struct WakeWordGate: Sendable {
     /// Forget everything in flight -- e.g. the phone just started speaking.
     public mutating func reset() {
         pending = nil
+        held = nil
+        heldDueMs = nil
         consumedSegment = false
         emittedEarly = nil
     }

@@ -269,6 +269,42 @@ final class WakeWordGateTests: XCTestCase {
         XCTAssertEqual(gate.tick(nowMs: 5_000), .none)
     }
 
+    /// Live, 2026-09-27: "Hey Cane, I'm bored" finalized at the pause and was
+    /// answered at once; "is there a Rubik's cube on the table" was lost.
+    func testAFreeQuestionWaitsForTheRestOfTheSentence() {
+        var gate = WakeWordGate()
+        XCTAssertEqual(gate.feed(text: "Hey, Kane, I'm bored.", isFinal: true, nowMs: 0), .none)
+        XCTAssertEqual(gate.tick(nowMs: 800), .none)
+        XCTAssertEqual(gate.feed(text: "is there any", isFinal: false, nowMs: 1_000), .none)
+        XCTAssertEqual(gate.tick(nowMs: 1_600), .none, "still talking: no answer over it")
+        XCTAssertEqual(
+            gate.feed(text: "Is there any Rubik's cube on the table I can play with?", isFinal: true, nowMs: 3_000),
+            .command("i am bored is there any rubik's cube on the table i can play with"))
+        XCTAssertEqual(gate.tick(nowMs: 9_000), .none)
+    }
+
+    func testAFreeQuestionAloneIsAskedAfterTheShortWait() {
+        var gate = WakeWordGate()
+        XCTAssertEqual(gate.feed(text: "Hey Cane, how's the weather?", isFinal: true, nowMs: 0), .none)
+        XCTAssertEqual(gate.tick(nowMs: 1_400), .none)
+        XCTAssertEqual(gate.tick(nowMs: 1_500), .command("how is the weather"))
+        XCTAssertEqual(gate.tick(nowMs: 5_000), .none)
+    }
+
+    func testAClearCommandStillGoesAtOnce() {
+        var gate = WakeWordGate()
+        XCTAssertEqual(gate.feed(text: "Hey Cane, navigate me to the Green Library.", isFinal: true, nowMs: 0),
+                       .command("navigate me to the green library"))
+    }
+
+    func testANewWakeWordReplacesAHeldQuestion() {
+        var gate = WakeWordGate()
+        _ = gate.feed(text: "Hey Cane, I'm bored.", isFinal: true, nowMs: 0)
+        XCTAssertEqual(gate.feed(text: "Hey Cane, what time is it?", isFinal: true, nowMs: 800),
+                       .command("what time is it"))
+        XCTAssertEqual(gate.tick(nowMs: 3_000), .none, "the held question is dropped")
+    }
+
     func testTheArmExpires() {
         var gate = WakeWordGate()
         _ = gate.feed(text: "hey cane", isFinal: true, nowMs: 0)
