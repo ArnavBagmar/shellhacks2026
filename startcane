@@ -14,6 +14,12 @@
 #   ./startcane test       run both test suites
 #   ./startcane logs       follow today's laptop log and phone log
 #
+# Step 28 (the trust baseline) is a bare bridge run, not a startcane mode -- it wants no
+# phone, no cloud and no scene. Pass --record-events PATH to python -m cane.bridge to append
+# every event sent to the phone to a JSONL file, then replay it with:
+#   cd ios/CaneKit && swift run replay-cli <that file>
+# The full walk protocol is docs/steps/step-28-brief.md.
+#
 # Every mode saves what Gemini saw per question under backend/logs/views/.
 # Extra arguments after `front`/`still`/`x4` go straight to `python -m cane.scene`.
 # A second phone needs its own port: CANE_PORT=8766 ./startcane
@@ -99,6 +105,26 @@ serve() {
   PYTHONPATH=src exec caffeinate -i uv run --env-file .env python -m cane.scene --serve --ws-port "$PORT" "$@"
 }
 
+# The depth model is NOT in git (backend/third_party/ and backend/checkpoints/
+# are ignored, and so is *.pt), so a fresh clone has no depth head -- and with
+# no depth there are no steer frames at all. Fail here, with the commands, rather
+# than after a two-minute dep sync.
+check_depth_assets() {
+  local repo="$BACKEND/third_party/Depth-Anything-V2/depth_anything_v2/dpt.py"
+  local weights="$BACKEND/checkpoints/depth_anything_v2_vits.pth"
+  [[ -f "$repo" && -f "$weights" ]] && return 0
+  printf '\033[31mstartcane: the depth model is missing, so there would be no steering.\033[0m\n' >&2
+  printf 'It is deliberately not in git (~95 MiB + a pinned checkout). Run once, from the repo root:\n\n' >&2
+  printf '  cd backend\n' >&2
+  printf '  mkdir -p third_party checkpoints\n' >&2
+  printf '  git clone https://github.com/DepthAnything/Depth-Anything-V2.git third_party/Depth-Anything-V2\n' >&2
+  printf '  git -C third_party/Depth-Anything-V2 checkout a561b849ebae10a6f5ef49e26c83cbbcd36c71bf\n' >&2
+  printf '  curl -L --fail --retry 2 https://huggingface.co/depth-anything/Depth-Anything-V2-Small/resolve/main/depth_anything_v2_vits.pth -o checkpoints/depth_anything_v2_vits.pth\n\n' >&2
+  printf 'The revision is pinned and checked at load time. See docs/depth-benchmark.md.\n' >&2
+  printf 'To run the voice half only, with no steering: ./startcane x4\n' >&2
+  exit 1
+}
+
 # Kills the inference service and its uv wrapper; full()'s trap calls it.
 # Never `exec` the bridge after setting that trap: exec replaces this shell,
 # the trap is lost and the service is orphaned (learned the hard way).
@@ -130,6 +156,7 @@ full() {
   local delta="${CANE_DELTA_DEG:-0}"
   local venv=".venv-vision"
   local source="${CANE_SOURCE:-x4}"   # synthetic | file:PATH | x4 -- rehearse at a desk with synthetic
+  check_depth_assets
 
   say "syncing Python deps (torch + ultralytics + depth: the first run is slow)"
   UV_PROJECT_ENVIRONMENT="$venv" uv sync --quiet \
