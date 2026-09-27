@@ -253,6 +253,34 @@ final class TurnCuePolicyTests: XCTestCase {
         XCTAssertEqual(offRoute.first?.cue.phrase, "Off route, rerouting")
     }
 
+    func testThirtyMetresOffWithAFortyFiveMetreErrorCircleIsNotOffRoute() throws {
+        // Near buildings the phone's fix is often 30-60 m out: that alone
+        // said "Off route, rerouting" again and again (FIU, 2026-09-27).
+        let (route, samples) = try twoTurnWalk()
+        let follower = RouteFollower(route: route)
+        var followerState = follower.initialState
+        var policyState = TurnCuePolicy.State()
+        var cues: [TurnCue] = []
+        for sample in samples[0...20] {
+            let fix = LocationFix(
+                latLng: Geo.destinationPoint(from: sample.fix.latLng, bearingDeg: 90, distanceMeters: 30),
+                horizontalAccuracyM: 45, speedMps: 1.4, timestampMs: sample.fix.timestampMs
+            )
+            followerState = follower.advance(from: followerState, fix: fix, heading: sample.heading)
+            let (next, cue) = TurnCuePolicy.evaluate(state: policyState, follower: followerState, nowMs: fix.timestampMs)
+            policyState = next
+            if let cue { cues.append(cue) }
+        }
+        XCTAssertEqual(followerState.accuracyM, 45)
+        XCTAssertFalse(cues.contains { $0.kind == .offRoute })
+    }
+
+    func testOnlyThePartOfTheErrorCirclePastTenMetresIsForgiven() {
+        XCTAssertEqual(TurnCuePolicy.offRouteUncertaintyM(5), 0)
+        XCTAssertEqual(TurnCuePolicy.offRouteUncertaintyM(30), 20)
+        XCTAssertEqual(TurnCuePolicy.offRouteUncertaintyM(200), 40)
+    }
+
     func testABriefWobbleOffRouteSaysNothing() throws {
         let (route, samples) = try twoTurnWalk()
         let follower = RouteFollower(route: route)

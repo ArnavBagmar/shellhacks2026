@@ -101,7 +101,10 @@ public enum TurnCuePolicy {
     private static func offRouteDecision(
         _ next: inout State, follower: FollowerState, nowMs: Int64
     ) -> Decision? {
-        guard follower.offRouteM > offRouteThresholdM else {
+        // Only the distance the GPS is *sure* of counts: a 45 m error circle
+        // near buildings must not read as walking off the route
+        // (2026-09-27: "Off route, rerouting" over and over at FIU).
+        guard follower.offRouteM - offRouteUncertaintyM(follower.accuracyM) > offRouteThresholdM else {
             next.offRouteSinceMs = nil
             next.offRouteAnnounced = false
             return nil
@@ -118,6 +121,12 @@ public enum TurnCuePolicy {
         }
         next.offRouteAnnounced = true
         return .speak(TurnCue(kind: .offRoute, direction: .straight, distanceM: nil))
+    }
+
+    /// How much of a fix's error radius is forgiven: nothing for a good
+    /// fix (<= 10 m), at most 40 m for a poor one.
+    static func offRouteUncertaintyM(_ accuracyM: Double) -> Double {
+        min(max(accuracyM - 10, 0), 40)
     }
 
     // MARK: - Maneuvers

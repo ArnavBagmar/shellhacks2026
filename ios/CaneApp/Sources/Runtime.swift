@@ -181,7 +181,8 @@ final class Runtime {
             // win. The spoken cue's arbitration is unchanged.
             steerBias: { lateral in
                 Task { await feedback.setNavigationBias(lateral: lateral, now: Self.now()) }
-            }
+            },
+            record: { kind, fields in diagnostics.record(kind, fields) }
         )
         self.navigation = navigation
         voice = VoiceRouter(

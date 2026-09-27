@@ -20,6 +20,11 @@
     /// navigating; without it the streams stay empty and the engine
     /// reports `NavigationError.noFix`.
     ///
+    /// **One per route.** `stop()` finishes both streams for good, so a
+    /// reused instance hands the next route a dead stream: no fix ever
+    /// arrives and the route fails as `.noFix` (the app did exactly that
+    /// until 2026-09-27).
+    ///
     /// `@unchecked Sendable`: the only non-`Sendable` stored property is
     /// `CLLocationManager`, which is created on the main actor (see
     /// `init`) and touched nowhere else -- `start`/`stop` hop to

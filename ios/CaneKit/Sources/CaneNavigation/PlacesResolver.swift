@@ -11,6 +11,12 @@ public struct PlacesTextSearchResolver: DestinationResolver {
     public static let endpointURLString = "https://places.googleapis.com/v1/places:searchText"
     public static let fieldMask = "places.location,places.displayName,places.formattedAddress"
     public static let locationBiasRadiusM: Double = 2000
+    /// A walking destination farther than this is a mishearing, not a
+    /// place: the bias only *prefers* nearby results, and "trition" came
+    /// back as an office in the Netherlands (2026-09-27).
+    public static let maxWalkDistanceM: Double = 5_000
+    /// Candidates asked for, so a far first hit can give way to a near one.
+    public static let pageSize = 5
 
     /// A compile-time constant URL; see `RoutesClient.endpoint`.
     private static let endpoint = URL(string: endpointURLString)!
@@ -39,7 +45,11 @@ public struct PlacesTextSearchResolver: DestinationResolver {
         } catch {
             throw NavigationError.decoding("places:searchText body: \(error)")
         }
-        guard let first = decoded.places?.first, let location = first.location else {
+        let located = (decoded.places ?? []).compactMap { place in place.location.map { (place, $0) } }
+        let walkable = near.map { here in
+            located.filter { Geo.haversineMeters(here, $0.1) <= PlacesTextSearchResolver.maxWalkDistanceM }
+        } ?? located
+        guard let (first, location) = walkable.first else {
             throw NavigationError.destinationNotFound(freeText)
         }
         return ResolvedPlace(
@@ -52,6 +62,7 @@ public struct PlacesTextSearchResolver: DestinationResolver {
     private func makeRequest(freeText: String, near: LatLng?, key: String) throws -> HTTPRequest {
         let body = SearchTextRequest(
             textQuery: freeText,
+            pageSize: PlacesTextSearchResolver.pageSize,
             locationBias: near.map {
                 LocationBiasDTO(
                     circle: CircleDTO(center: $0, radius: PlacesTextSearchResolver.locationBiasRadiusM)
@@ -75,6 +86,7 @@ public struct PlacesTextSearchResolver: DestinationResolver {
 
 private struct SearchTextRequest: Encodable {
     let textQuery: String
+    let pageSize: Int
     let locationBias: LocationBiasDTO?
 }
 

@@ -1,5 +1,7 @@
+import CaneAssist
 import CaneNavigation
 import CaneOutput
+import CaneTransport
 import Foundation
 import os
 
@@ -13,7 +15,12 @@ final class NavigationController {
     private let arbiter: OutputArbiter
     private let userGain: @Sendable () -> Float
     private let steerBias: @Sendable (Double) -> Void
-    private lazy var sources = CoreLocationSources()
+    /// A new one per route: stopping a route finishes its streams for good,
+    /// so a reused one gave every later route no GPS at all -- "I couldn't
+    /// find a walking route" to places Google Maps walks to fine
+    /// (2026-09-27).
+    private var sources: CoreLocationSources?
+    private let record: @Sendable (String, [String: DiagnosticEvent.Value]) -> Void
     private var engine: NavigationEngine?
     private var cueTask: Task<Void, Never>?
     /// Where the current route goes, and its last spoken cue ("repeat that").
@@ -34,8 +41,10 @@ final class NavigationController {
     init(
         arbiter: OutputArbiter,
         userGain: @escaping @Sendable () -> Float,
-        steerBias: @escaping @Sendable (Double) -> Void = { _ in }
+        steerBias: @escaping @Sendable (Double) -> Void = { _ in },
+        record: @escaping @Sendable (String, [String: DiagnosticEvent.Value]) -> Void = { _, _ in }
     ) {
+        self.record = record
         self.arbiter = arbiter
         self.userGain = userGain
         self.steerBias = steerBias
@@ -47,6 +56,8 @@ final class NavigationController {
             return
         }
         stop()
+        let sources = CoreLocationSources()
+        self.sources = sources
         sources.requestAuthorization()
         let transport = URLSessionTransport()
         let engine = NavigationEngine(
@@ -67,15 +78,49 @@ final class NavigationController {
                 await Self.present(cue, arbiter: arbiter, gain: gain())
             }
         }
+        record("nav_start", ["query": .text(place)])
         await say("Finding a route to \(place).")
-        await engine.start(to: place)
+        let record = self.record
+        await engine.start(to: place) { [weak self] found, route in
+            record("nav_route", [
+                "query": .text(place), "place": .text(found.name), "address": .text(found.formattedAddress),
+                "lat": .number(found.latLng.latitude), "lng": .number(found.latLng.longitude),
+                "route_m": .number(Double(route.distanceMeters)), "steps": .number(Double(route.steps.count)),
+            ])
+            // Before any cue: the walker hears which place was chosen, so a
+            // mishearing ("graham hall" -> Graham Center) is caught at once.
+            await self?.say(Self.headingPhrase(found.name, metres: Double(route.distanceMeters)))
+        }
         if case .failed(let error) = await engine.status {
             logger.warning("navigation failed: \(String(describing: error), privacy: .public)")
-            await say("I couldn't find a walking route to \(place).")
+            record("nav_failed", ["query": .text(place), "error": .text(String(describing: error))])
+            await say(Self.failurePhrase(error, place: place))
+            if self.engine === engine { stop() }
+        }
+    }
+
+    static func headingPhrase(_ name: String, metres: Double) -> String {
+        metres < 15 ? "\(name) is right here." : "Heading to \(name), \(DistanceWords.away(metres))."
+    }
+
+    /// Why, in words the walker can act on -- not one message for every failure.
+    static func failurePhrase(_ error: NavigationError, place: String) -> String {
+        switch error {
+        case .noFix:
+            "I can't get a GPS fix here. Try outside or near a window, then ask again."
+        case .destinationNotFound:
+            "I couldn't find \(place) within walking distance."
+        case .noRoute:
+            "Google Maps has no walking route to \(place)."
+        case .missingAPIKey:
+            "Navigation isn't set up on this phone."
+        case .routesAPI, .transport, .decoding:
+            "I can't reach Google Maps right now. Check the internet connection."
         }
     }
 
     func stop() {
+        sources = nil
         cueTask?.cancel()
         cueTask = nil
         if let engine {

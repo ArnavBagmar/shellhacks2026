@@ -71,6 +71,36 @@ final class DestinationResolverTests: XCTestCase {
         XCTAssertEqual(place.formattedAddress, "101 W Flagler St, Miami, FL 33130, USA")
     }
 
+    func testAFarAwayFirstResultGivesWayToANearOne() async throws {
+        // "trition" came back as an office in the Netherlands (2026-09-27).
+        let json = """
+            {"places":[
+              {"location":{"latitude":51.70,"longitude":5.34},"displayName":{"text":"Trition HQ"},
+               "formattedAddress":"Rosmalen, Netherlands"},
+              {"location":{"latitude":25.7640,"longitude":-80.1920},"displayName":{"text":"Nearby Hall"},
+               "formattedAddress":"Miami"}
+            ]}
+            """
+        let transport = FakeHTTPTransport.alwaysOK(json: json)
+        let resolver = PlacesTextSearchResolver(transport: transport, apiKey: { self.testKey })
+
+        let place = try await resolver.resolve(freeText: "trition", near: here)
+
+        XCTAssertEqual(place.name, "Nearby Hall")
+        let body = try await transport.requestBody(at: 0)
+        XCTAssertEqual(body["pageSize"] as? Int, PlacesTextSearchResolver.pageSize)
+    }
+
+    func testOnlyFarAwayResultsAreNotADestination() async {
+        let json = #"{"places":[{"location":{"latitude":51.70,"longitude":5.34},"displayName":{"text":"Trition HQ"}}]}"#
+        let resolver = PlacesTextSearchResolver(
+            transport: FakeHTTPTransport.alwaysOK(json: json), apiKey: { self.testKey }
+        )
+        await assertThrows(NavigationError.destinationNotFound("trition")) {
+            _ = try await resolver.resolve(freeText: "trition", near: self.here)
+        }
+    }
+
     func testPlacesEmptyResultIsDestinationNotFound() async {
         let resolver = PlacesTextSearchResolver(
             transport: FakeHTTPTransport.alwaysOK(json: #"{"places":[]}"#), apiKey: { self.testKey }

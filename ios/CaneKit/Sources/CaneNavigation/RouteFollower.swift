@@ -32,6 +32,9 @@ public struct FollowerState: Sendable, Equatable {
     /// "when did we last hear from GPS".
     public let timestampMs: Int64
     public let isArrived: Bool
+    /// The fix's own error radius, metres (0 when unknown). Near buildings
+    /// it is often 30-60 m, which alone looks like being off the route.
+    public let accuracyM: Double
 
     public init(
         currentStepIndex: Int,
@@ -44,7 +47,8 @@ public struct FollowerState: Sendable, Equatable {
         distanceToDestinationM: Double,
         speedMps: Double?,
         timestampMs: Int64,
-        isArrived: Bool
+        isArrived: Bool,
+        accuracyM: Double = 0
     ) {
         self.currentStepIndex = currentStepIndex
         self.distanceToNextManeuverM = distanceToNextManeuverM
@@ -57,6 +61,7 @@ public struct FollowerState: Sendable, Equatable {
         self.speedMps = speedMps
         self.timestampMs = timestampMs
         self.isArrived = isArrived
+        self.accuracyM = accuracyM
     }
 
     /// The step index whose start carries `pendingManeuver`. Used as the
@@ -139,7 +144,8 @@ public struct RouteFollower: Sendable {
             timestampMs: fix.timestampMs,
             isArrived: newIndex == steps.count - 1
                 && (here.travelledM >= routeLengthM
-                    || toDestination <= RouteFollower.stepAdvanceRadiusM)
+                    || toDestination <= RouteFollower.stepAdvanceRadiusM),
+            accuracyM: max(0, fix.horizontalAccuracyM)
         )
     }
 

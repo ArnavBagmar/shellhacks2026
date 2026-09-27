@@ -19,6 +19,10 @@ public actor NavigationEngine {
     /// The watchdog cadence -- the rate at which "have the fixes
     /// stopped?" is asked. Cue evaluation itself happens per fix.
     public static let tickIntervalMs: Int64 = 1_000
+    /// How long to wait for the first GPS fix. Longer than the mid-walk
+    /// "GPS lost" silence: a cold start between buildings takes longer
+    /// than 10 s, and giving up then said "no route" (2026-09-27).
+    public static let firstFixTimeoutS: Double = 20
     /// Brief F5: at most one reroute fetch per 15 s.
     public static let rerouteMinIntervalS: Double = 15
 
@@ -36,6 +40,8 @@ public actor NavigationEngine {
     let clock: any NavigationClock
 
     public internal(set) var status: NavigationStatus = .idle
+    /// Where "the library" turned out to be, once resolved.
+    public internal(set) var resolved: ResolvedPlace?
 
     var follower: RouteFollower?
     var followerState: FollowerState?
@@ -69,12 +75,18 @@ public actor NavigationEngine {
     // MARK: - Starting
 
     /// Resolves spoken text ("the library"), then routes to it.
-    public func start(to freeText: String) async {
+    /// `announce` runs once the route is known and before any cue: the
+    /// walker hears where they are going first ("Heading to Graham
+    /// Center..."). Fixes that arrive meanwhile are queued, not lost.
+    public func start(
+        to freeText: String, announce: (@Sendable (ResolvedPlace, Route) async -> Void)? = nil
+    ) async {
         status = .resolving
         guard let origin = await firstFix() else { return fail(.noFix) }
         do {
             let place = try await resolver.resolve(freeText: freeText, near: origin.latLng)
-            await route(from: origin, to: place.latLng)
+            resolved = place
+            await route(from: origin, to: place.latLng, announce: announce.map { hook in { await hook(place, $0) } })
         } catch let error as NavigationError {
             fail(error)
         } catch {
@@ -96,16 +108,22 @@ public actor NavigationEngine {
         if status != .arrived { status = .idle }
     }
 
-    private func route(from origin: LocationFix, to point: LatLng) async {
+    private func route(
+        from origin: LocationFix, to point: LatLng, announce: (@Sendable (Route) async -> Void)? = nil
+    ) async {
         status = .routing
         destination = point
+        let route: Route
         do {
-            adopt(try await routes.computeWalkingRoute(origin: origin.latLng, destination: .latLng(point)))
+            route = try await routes.computeWalkingRoute(origin: origin.latLng, destination: .latLng(point))
         } catch let error as NavigationError {
             return fail(error)
         } catch {
             return fail(.transport(String(describing: error)))
         }
+        if let announce { await announce(route) }
+        guard status == .routing else { return }  // stopped while announcing
+        adopt(route)
         startWatchdog()
         await drainPendingFixes()
     }
@@ -147,7 +165,7 @@ public actor NavigationEngine {
         let clock = self.clock
         let timeout = Task { [weak self] in
             try? await clock.sleep(
-                forMilliseconds: Int64(TurnCuePolicy.gpsLostAfterS * 1_000)
+                forMilliseconds: Int64(NavigationEngine.firstFixTimeoutS * 1_000)
             )
             guard !Task.isCancelled else { return }
             await self?.abandonFirstFixWait()

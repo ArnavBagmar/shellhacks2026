@@ -72,6 +72,29 @@ final class NavigationEngineTests: XCTestCase {
         await harness.clock.releaseAll()
     }
 
+    func testThePlaceIsAnnouncedBeforeAnyCueAndNoCueIsLost() async throws {
+        let harness = makeHarness(transport: try fixtureTransport())
+        let route = try NavigationFixtures.twoTurnsRoute()
+        let samples = RouteWalkSimulator(route: route).samples()
+        let collected = collect(harness.engine)
+        final class Box: @unchecked Sendable { var announced: (String, Int)? }
+        let box = Box()
+
+        harness.locations.emit(samples)
+        await harness.engine.start(to: "library") { place, route in
+            box.announced = (place.name, route.distanceMeters)
+        }
+        harness.locations.finish()
+
+        let cues = try await withTestTimeout { await collected.value }
+        XCTAssertEqual(box.announced?.0, library.name)
+        XCTAssertEqual(box.announced?.1, route.distanceMeters)
+        XCTAssertEqual(cues.map(\.phrase).first, "Left in 30 metres", "fixes during the announcement are kept")
+        let resolved = await harness.engine.resolved
+        XCTAssertEqual(resolved, library)
+        await harness.clock.releaseAll()
+    }
+
     func testTheRouteRequestUsesTheResolvedPlaceAndTheFirstFix() async throws {
         let transport = try fixtureTransport()
         let harness = makeHarness(transport: transport)
@@ -172,7 +195,7 @@ final class NavigationEngineTests: XCTestCase {
         await harness.clock.releaseAll()
     }
 
-    func testNoFixWithinTenSecondsFailsWithNoFix() async throws {
+    func testNoFixWithinTwentySecondsFailsWithNoFix() async throws {
         let transport = try fixtureTransport()
         let harness = makeHarness(transport: transport)
 
