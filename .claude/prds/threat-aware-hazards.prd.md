@@ -159,12 +159,14 @@ rig, inside the hackathon window:
 
 ## Open Questions
 
-- [ ] **Does the phone stream torso yaw rate to the feedback manager today, at a
-      usable rate?** Bearings are torso-relative by design, so when the user
-      turns, *every* bearing sweeps and an uncompensated path-conflict gate
-      would suppress real threats during a turn. If yaw is unavailable the gate
-      must disable itself while turning — confirm the data exists before
-      committing to milestone 2.
+- [x] **Does the phone stream torso yaw rate to the feedback manager today?**
+      **Answered 2026-09-26: no, and there is no yaw source at all** — no
+      CoreMotion anywhere in the tree, and every heading lives in
+      `CaneNavigation`, walled off from the awareness path on purpose. Milestone
+      2 therefore works without one: separation by magnitude (a car sweeps
+      ~110 °/s where it first reads `near`, walking sways ~10 °/s), common-mode
+      rejection across tracks in place of a gyro, and a cap of one rung rather
+      than silence.
 - [ ] **What is the miss-distance threshold?** A sidewalk-to-near-lane offset
       of ~3.5 m should be suppressed and a head-on approach must not be. The
       boundary between them is unknown and has to come off the measured walk.
@@ -184,10 +186,10 @@ rig, inside the hackathon window:
       detector and `MIN_ANNOUNCE_CONFIDENCE` 0.35 on the laptop, together roughly
       "the floor reads twice as far away as it should". Both are named constants
       that milestone 1's recordings can re-tune offline.
-- [ ] **Is the path-conflict decision the consumer's to make?** §4.6 is explicit
-      that producers emit facts and the consumer computes urgency, which argues
-      the gate lives with the consumer — and the yaw data is only there anyway.
-      Confirm this reading before planning.
+- [x] **Is the path-conflict decision the consumer's to make?**
+      **Answered: yes.** The gate ships in `CaneFeedback` as gate 5b, between
+      `UrgencyPolicy.decide` and the hysteresis stage, so §4.6 holds unchanged —
+      producers still emit facts and the phone still computes urgency.
 
 ## Risks
 
