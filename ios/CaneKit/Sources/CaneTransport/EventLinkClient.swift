@@ -98,6 +98,12 @@ public actor EventLinkClient {
         try await task.send(.data(request.encoded()))
     }
 
+    /// Best effort: the hand guide's live state for the laptop page.
+    public func send(_ update: GuideUpdate) async throws {
+        guard let task else { throw TransportError.notConnected }
+        try await task.send(.data(update.encoded()))
+    }
+
     /// Best effort: one black-box line to the laptop. Throws
     /// `notConnected` with no link; callers keep their own copy anyway.
     public func send(_ event: DiagnosticEvent) async throws {

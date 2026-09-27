@@ -322,6 +322,7 @@ async def run_bridge(
         on_health=health_hook,
         on_query=scene_hook,
         on_speak=scene_voice.clip if scene_voice is not None else None,
+        on_guide=debug.on_phone_guide if debug is not None else None,
     ) as server:
         health_hook.server = server
         warm: asyncio.Task[None] | None = None

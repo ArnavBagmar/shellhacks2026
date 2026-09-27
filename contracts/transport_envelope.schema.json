@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://cane.shellhacks/contracts/transport_envelope.schema.json",
   "title": "TransportEnvelope",
-  "description": "The eleven WebSocket frame shapes exchanged between the laptop (server) and the phone (client); see docs/camera-sync-design.md Sec 4.2 and Sec 4.4, docs/steps/step-20-brief.md (query/answer), docs/shepherd-steering-plan.md step 21 (steer), .claude/prds/threat-aware-hazards.prd.md milestone 3 (ground) and contracts/README.md 'Transport envelope'. The reserved type 'location' (phone -> laptop, defined in a later step) and any other unrecognised 'type' are valid JSON that a receiver logs and ignores -- they are deliberately out of scope for this schema, which only documents the shapes the laptop and phone actually exchange today.",
+  "description": "The twelve WebSocket frame shapes exchanged between the laptop (server) and the phone (client); see docs/camera-sync-design.md Sec 4.2 and Sec 4.4, docs/steps/step-20-brief.md (query/answer), docs/shepherd-steering-plan.md step 21 (steer), .claude/prds/threat-aware-hazards.prd.md milestone 3 (ground), docs/hand-guide.md (guide) and contracts/README.md 'Transport envelope'. The reserved type 'location' (phone -> laptop, defined in a later step) and any other unrecognised 'type' are valid JSON that a receiver logs and ignores -- they are deliberately out of scope for this schema, which only documents the shapes the laptop and phone actually exchange today.",
   "oneOf": [
     {
       "$ref": "#/$defs/ping"
@@ -36,6 +36,9 @@
     },
     {
       "$ref": "#/$defs/ground"
+    },
+    {
+      "$ref": "#/$defs/guide"
     }
   ],
   "$defs": {
@@ -785,6 +788,177 @@
           "drop_ratio": 2.4,
           "confidence": 0.64,
           "source": "x4_cloud"
+        }
+      ]
+    },
+    "guide": {
+      "type": "object",
+      "description": "Phone -> laptop, ~8 Hz while 'guide my hand' runs: where the phone's own tracker (Apple Vision, seeded with Gemini's phone_box) has the object and the fingertip nearest it, the gap between them, and a small front-camera frame a few times a second. Display-only: the laptop page draws it; nothing on the laptop acts on it, and a laptop without a page counts it as ignored.",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "t_phone_ms",
+        "state",
+        "target",
+        "box",
+        "hand",
+        "gap_m",
+        "metric",
+        "hint",
+        "frame"
+      ],
+      "properties": {
+        "type": {
+          "const": "guide"
+        },
+        "t_phone_ms": {
+          "type": "integer",
+          "description": "PHONE-clock Unix-epoch ms."
+        },
+        "state": {
+          "enum": [
+            "looking",
+            "find_hand",
+            "guiding",
+            "reached",
+            "lost",
+            "stopped"
+          ]
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "box": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "x_min",
+                "y_min",
+                "x_max",
+                "y_max"
+              ],
+              "description": "The tracked object in the frame, fractions from the top-left (x_min < x_max, y_min < y_max).",
+              "properties": {
+                "x_min": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "y_min": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "x_max": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "y_max": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              }
+            }
+          ]
+        },
+        "hand": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "x",
+                "y"
+              ],
+              "description": "The fingertip nearest the object, fractions from the top-left.",
+              "properties": {
+                "x": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "y": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              }
+            }
+          ]
+        },
+        "gap_m": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            }
+          ],
+          "description": "Fingertip to the object's surface, metres; null with no hand in view."
+        },
+        "metric": {
+          "type": "boolean",
+          "description": "True when both ends were measured by TrueDepth; false when the gap is estimated from the photo."
+        },
+        "hint": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            }
+          ],
+          "description": "The direction word last spoken, e.g. 'Left.'."
+        },
+        "frame": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/phone_frame"
+            }
+          ]
+        }
+      },
+      "examples": [
+        {
+          "type": "guide",
+          "t_phone_ms": 1790000000000,
+          "state": "guiding",
+          "target": "rubik's cube",
+          "box": {
+            "x_min": 0.58,
+            "y_min": 0.52,
+            "x_max": 0.7,
+            "y_max": 0.66
+          },
+          "hand": {
+            "x": 0.31,
+            "y": 0.6
+          },
+          "gap_m": 0.14,
+          "metric": true,
+          "hint": "Right.",
+          "frame": null
         }
       ]
     }

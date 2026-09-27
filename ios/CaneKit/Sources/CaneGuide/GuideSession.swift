@@ -39,9 +39,10 @@ public enum GuideOutput: Sendable, Equatable {
 /// The hand guide's rules, free of Vision and the watch so they run in
 /// `swift test`: one camera frame in, what to tap / say / stop out.
 ///
-/// - the watch gets the gap ~10 times a second and taps faster as it shrinks;
-/// - the voice adds the *direction* ("Left.") every few seconds, because
-///   taps alone say "warmer" but never "which way";
+/// - the watch (and the phone's own ticks and beeps) get the gap ~10 times a
+///   second and speed up as it shrinks;
+/// - the voice adds the *direction* ("Left.") every 1.2 s, because taps
+///   alone say "warmer" but never "which way";
 /// - a fingertip within `reachM` of the thing's surface for `reachHoldMs`
 ///   ends it with "You've got it.";
 /// - the thing out of sight for `lostAfterMs`, or `timeoutMs` overall, ends it.
@@ -51,12 +52,10 @@ public struct GuideSession: Sendable {
     public static let lostAfterMs: Int64 = 2_500
     public static let timeoutMs: Int64 = 60_000
     public static let watchEveryMs: Int64 = 100
-    /// Between direction words with the watch doing the closeness...
-    public static let hintEveryMs: Int64 = 2_500
-    /// ...and faster when the voice is all there is.
-    public static let voiceOnlyHintEveryMs: Int64 = 1_600
-    /// The same word again only after this long.
-    public static let repeatHintMs: Int64 = 5_000
+    /// Between direction words, the same word included: the hand is still
+    /// moving and needs to hear it is still the right way (2026-09-27: five
+    /// seconds of silence felt like no feedback at all).
+    public static let hintEveryMs: Int64 = 1_200
     public static let noHandPromptEveryMs: Int64 = 6_000
     /// No hints this close: the taps are enough and words would lag.
     public static let quietWithinM = 0.08
@@ -69,8 +68,8 @@ public struct GuideSession: Sendable {
     public static let timedOutPhrase = "Let's stop there. Ask me again when you're ready."
 
     public static func startPhrase(watch: Bool) -> String {
-        watch ? "Reach out slowly. Your watch taps faster as you get closer."
-            : "Your watch isn't open, so I'll guide you by voice. Reach out slowly."
+        watch ? "Reach out slowly. The beeps and your watch speed up as you get closer."
+            : "Reach out slowly. The beeps speed up as you get closer."
     }
 
     public static func lostPhrase(_ target: String) -> String {
@@ -81,6 +80,14 @@ public struct GuideSession: Sendable {
     public let voiceOnly: Bool
     public private(set) var state: GuideState = .findHand
     public private(set) var finished = false
+    /// The newest gap (fingertip to surface, m); nil with no hand in view.
+    public private(set) var gapM: Double?
+    /// Whether `gapM` is measured (TrueDepth) or estimated from the photo.
+    public private(set) var metric = false
+    /// Hand to thing, camera metres: its sign says which ear to beep in.
+    public private(set) var towards: Point3?
+    /// The last direction word said.
+    public private(set) var hintText: String?
 
     private let startMs: Int64
     private var lastObjectMs: Int64
@@ -89,9 +96,7 @@ public struct GuideSession: Sendable {
     private var lastWatchMs: Int64?
     private var lastSentState: GuideState?
     private var lastHintMs: Int64
-    private var lastHint: GuideDirection?
     private var lastNoHandPromptMs: Int64
-    private var hintText: String?
 
     /// `startMs` is when the start phrase was said: the first "reach out"
     /// reminder waits a full interval after it.
@@ -121,6 +126,8 @@ public struct GuideSession: Sendable {
 
         guard let hand = frame.hand else {
             nearSinceMs = nil
+            gapM = nil
+            towards = nil
             state = .findHand
             var out = watch(now: now, gap: nil, metric: false)
             if now - lastNoHandPromptMs >= Self.noHandPromptEveryMs {
@@ -142,6 +149,9 @@ public struct GuideSession: Sendable {
             hand: hand, handDepthM: handDepth ?? objectDepth, object: object, objectDepthM: objectDepth,
             hfovDeg: frame.hfovDeg, aspect: frame.aspect
         )
+        self.gapM = gap
+        self.metric = metric
+        self.towards = towards
 
         if gap <= Self.reachM {
             if let since = nearSinceMs {
@@ -171,18 +181,14 @@ public struct GuideSession: Sendable {
 
     // MARK: - Internals
 
+    /// One word, never a sentence: the ticks and beeps carry closeness, and
+    /// every extra syllable is latency.
     private mutating func hint(towards: Point3, gap: Double, now: Int64) -> String? {
-        guard gap > Self.quietWithinM || voiceOnly, let direction = GuideGeometry.direction(towards) else { return nil }
-        let every = voiceOnly ? Self.voiceOnlyHintEveryMs : Self.hintEveryMs
-        guard now - lastHintMs >= every else { return nil }
-        guard direction != lastHint || now - lastHintMs >= Self.repeatHintMs else { return nil }
+        guard gap > Self.quietWithinM, let direction = GuideGeometry.direction(towards) else { return nil }
+        guard now - lastHintMs >= Self.hintEveryMs else { return nil }
         lastHintMs = now
-        lastHint = direction
         hintText = direction.spoken
-        guard voiceOnly else { return direction.spoken }
-        // No watch: the voice carries closeness too.
-        if gap <= Self.quietWithinM { return direction.spoken + " Almost there." }
-        return gap <= 0.25 ? direction.spoken + " Close." : direction.spoken
+        return direction.spoken
     }
 
     private mutating func watch(now: Int64, gap: Double?, metric: Bool) -> [GuideOutput] {

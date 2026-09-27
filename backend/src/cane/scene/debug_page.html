@@ -67,7 +67,7 @@
   #live-stop em { margin-left: auto; font-style: normal; font-weight: 700; font-size: 14px; border: 2px solid var(--white);
                   border-radius: 4px; padding: 2px 8px; }
 
-  main { max-width: 1680px; margin: 0 auto; padding: 22px 24px 64px; display: grid; gap: 40px; }
+  main { max-width: 1680px; margin: 0 auto; padding: 22px 24px 64px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 40px; }
 
   /* ---- plates (section signs) ----------------------------------------- */
   .plate-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; }
@@ -177,6 +177,38 @@
           line-height: 1; padding: 5px 8px 4px; border-radius: 3px; white-space: nowrap; }
   .chip.big { font-size: 18px; padding: 7px 11px 6px; margin: 12px; }
 
+  /* ---- hand guide ------------------------------------------------------ */
+  .guide { display: grid; grid-template-columns: minmax(0, 58fr) minmax(0, 42fr); gap: 22px; align-items: start; }
+  .guide .feed { aspect-ratio: 4 / 3; }
+  .guide .feed img { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; object-fit: fill; }
+  .guide .feed img:not([src]) { visibility: hidden; }
+  .guide .feed svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .guide .feed .wait { position: absolute; inset: 0; display: grid; place-items: center; color: var(--board-dim); font-size: 16px; }
+  /* The answer sign's grammar again: yellow while guiding, charcoal otherwise. */
+  .gsign { border-radius: var(--r); background: var(--yellow); color: var(--ink); overflow: hidden; display: grid;
+           grid-template-columns: auto minmax(0, 1fr); }
+  .gsign.info { background: var(--charcoal); color: var(--white); }
+  .gsign .arrow { width: 132px; display: grid; place-items: center; border-right: 4px solid var(--ink); min-height: 150px; }
+  .gsign.info .arrow { border-color: #4a4b4e; }
+  .gsign .arrow svg { width: 88px; height: 88px; transition: transform .2s ease-out; }
+  .gsign .words { padding: 18px 22px; display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; }
+  .gsign .words small { font-size: 15px; font-weight: 700; letter-spacing: .04em; }
+  .gsign .words b { font-size: 40px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.05; overflow-wrap: anywhere; }
+  .gsign .words span { font-size: 17px; font-weight: 600; }
+  .gsign.info .words span { color: #d5d3cd; }
+  .gsign .gap { grid-column: 1 / -1; background: var(--ink); color: var(--yellow); margin: 0 16px 16px; border-radius: 4px;
+                padding: 14px 18px 16px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 22px; align-items: center; }
+  .gsign .gap b { font-size: 62px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .gsign .gap b small { font-size: 28px; margin-left: 4px; }
+  .gsign .gap b.none { font-size: 30px; color: var(--board-dim); }
+  .gsign .gap .why { color: var(--white); font-size: 14px; font-weight: 600; }
+  .meter { grid-column: 1 / -1; position: relative; height: 12px; background: #3a3a3a; border-radius: 6px; margin-top: 6px; }
+  .meter i { position: absolute; inset: 0 auto 0 0; background: var(--yellow); border-radius: 6px; transition: width .12s linear; }
+  .meter-scale { grid-column: 1 / -1; display: flex; justify-content: space-between; color: var(--board-dim); font-size: 12.5px; font-weight: 600; }
+  .beat { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; color: var(--white); font-size: 14px; font-weight: 600; }
+  .beat i { width: 14px; height: 14px; border-radius: 50%; background: var(--yellow); animation: beat 1s infinite; }
+  @keyframes beat { 0% { transform: scale(1.25); opacity: 1; } 35% { transform: scale(.7); opacity: .35; } 100% { transform: scale(.7); opacity: .35; } }
+
   /* ---- recorded car alarm --------------------------------------------- */
   .recorded { display: inline-flex; gap: 10px; align-items: center; background: var(--blue); color: var(--white);
               font-weight: 700; font-size: 15px; padding: 7px 12px; border-radius: 4px; }
@@ -232,6 +264,7 @@
 
   /* ---- recent questions (departures board) ---------------------------- */
   table { width: 100%; border-collapse: collapse; }
+  .fids-wrap { overflow-x: auto; }
   .fids th { text-align: left; color: var(--board-dim); font-size: 12.5px; font-weight: 700; letter-spacing: .04em; padding: 10px 14px;
              border-bottom: 1px solid var(--board-line); white-space: nowrap; }
   .fids td { overflow-wrap: anywhere; padding: 11px 14px; border-bottom: 1px solid var(--board-line); font-size: 16px; font-weight: 600; vertical-align: top; }
@@ -289,7 +322,7 @@
   dialog::backdrop { background: #000d; }
 
   @media (max-width: 1180px) {
-    .now, .replay { grid-template-columns: minmax(0, 1fr); }
+    .now, .replay, .guide { grid-template-columns: minmax(0, 1fr); }
     #convo { min-height: 0; } .convo { max-height: 380px; }
     .two, .hz-grid { grid-template-columns: minmax(0, 1fr); }
   }
@@ -300,6 +333,8 @@
     .st { padding: 6px 10px; } .st span { font-size: 14px; white-space: normal; }
     .rsign { grid-template-columns: minmax(0, 1fr); } .rsign .arrow { width: auto; height: 100px; border-right: 0; border-bottom: 4px solid #4a4b4e; }
     .rsign .arrow svg { width: 70px; height: 70px; } .rsign .words b { font-size: 26px; }
+    .gsign { grid-template-columns: minmax(0, 1fr); } .gsign .arrow { width: auto; min-height: 0; height: 96px; border-right: 0; border-bottom: 4px solid var(--ink); }
+    .gsign .arrow svg { width: 64px; height: 64px; } .gsign .words b { font-size: 30px; } .gsign .gap b { font-size: 44px; }
     .chip { font-size: 10px; padding: 3px 4px 2px; margin: 3px; max-width: calc(100% - 6px); overflow: hidden; text-overflow: clip; }
     .chip.big { font-size: 14px; padding: 5px 8px 4px; margin: 8px; }
     .sign { grid-template-columns: minmax(0, 1fr); } .sign .arrow { width: auto; height: 120px; border-right: 0; border-bottom: 4px solid var(--ink); }
@@ -308,6 +343,7 @@
     .evidence { grid-template-columns: minmax(0, 1fr); } .pick { height: 260px; }
     .readouts { grid-template-columns: repeat(2, 1fr); }
     .fids th:nth-child(n+5), .fids td:nth-child(n+5) { display: none; }
+    .fids th, .fids td { padding-left: 8px; padding-right: 8px; }
   }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -346,6 +382,19 @@
     </aside>
   </section>
 
+  <section id="guide-sec" aria-label="Hand guide" hidden>
+    <div class="plate-row"><h2 class="plate">Hand guide &middot; live</h2><span class="note">tracked on the phone at camera speed: Apple Vision follows the object and the fingertips, TrueDepth measures the gap. Gemini only found the object.</span></div>
+    <div class="guide">
+      <div class="feed" id="guide-feed">
+        <img id="guide-img" alt="The phone's chest camera during the hand guide, with the object and fingertip marked">
+        <svg id="guide-svg" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <div class="wait" id="guide-wait">Waiting for the phone's camera&hellip;</div>
+        <span class="flag">STALLED</span>
+      </div>
+      <div class="gsign" id="guide-sign" aria-live="polite"></div>
+    </div>
+  </section>
+
   <section id="live-sec" aria-label="Live cameras">
     <div class="plate-row"><h2 class="plate">360 camera &middot; live</h2><span class="note" id="live-note">the six views Gemini is sent, tilted down to see tables and the floor; each is labelled with where it points</span></div>
     <div class="feed" id="live-feed"><img id="live" alt="The 360 camera as six views, from 120 degrees left through ahead to behind"><div class="chips" id="live-chips"></div><span class="flag" id="live-flag">STALLED</span></div>
@@ -373,8 +422,8 @@
   <section aria-label="Recent questions">
     <div class="board">
       <div class="board-head"><h2>Recent questions</h2><span class="note">select one to show it above</span></div>
-      <table class="fids"><thead><tr><th>Time</th><th>Question</th><th>Result</th><th>Direction</th><th>Distance</th><th>Gemini</th></tr></thead>
-        <tbody id="history"></tbody></table>
+      <div class="fids-wrap"><table class="fids"><thead><tr><th>Time</th><th>Question</th><th>Result</th><th>Direction</th><th>Distance</th><th>Gemini</th></tr></thead>
+        <tbody id="history"></tbody></table></div>
     </div>
   </section>
 
@@ -953,6 +1002,140 @@ function renderChart(tracks, now, threshold) {
   $("hz-chart-legend").innerHTML = legend.join("");
 }
 
+// ---------------------------------------------------------------- hand guide
+// = GuidePulse (ios/CaneKit/Sources/CaneGuide/GuidePulse.swift)
+const PULSE = { farM: 0.6, touchM: 0.03, slowestS: 1.0, fastestS: 0.15 };
+function pulseInterval(gap) {
+  const c = Math.min(Math.max(gap, PULSE.touchM), PULSE.farM);
+  return PULSE.fastestS + (c - PULSE.touchM) / (PULSE.farM - PULSE.touchM) * (PULSE.slowestS - PULSE.fastestS);
+}
+// = GuideDirection.spoken -> which way the sign's arrow points.
+const HINT_ARROW = { "Left.": [-90, "Move left"], "Right.": [90, "Move right"], "Up.": [0, "Move up"],
+  "Down.": [180, "Move down"], "Forward.": [0, "Reach further forward"], "Back toward you.": [180, "Back toward you"] };
+const GUIDE_STALE_MS = 1500;
+const cm = (m) => Math.round(m * 100);
+
+function guideSign(g, stale) {
+  const target = esc(g.target);
+  if (g.state === "reached") {
+    return `<div class="arrow"><svg viewBox="0 0 100 100" aria-hidden="true"><path d="M18 52 L41 75 L84 27" stroke="currentColor" stroke-width="15" fill="none"/></svg></div>
+      <div class="words"><small>REACHED</small><b>Got it</b><span>"You've got it." &middot; ${target}</span></div>
+      <div class="gap"><b>0<small>cm</small></b><span class="why">fingertip on the object</span></div>`;
+  }
+  const info = g.state !== "guiding";
+  const [rot, words] = HINT_ARROW[g.hint] || [null, null];
+  const head = {
+    looking: ["FINDING", "Looking", "Gemini is finding it"],
+    find_hand: ["GUIDING TO", target, "Reach out: no hand in view yet"],
+    guiding: ["GUIDING TO", target, words || "On target: keep going"],
+    lost: ["LOST", "Lost sight of it", `The ${target} left the camera's view`],
+    stopped: ["STOPPED", "Guide ended", target],
+  }[g.state] || ["", target, ""];
+  const arrow = info || rot == null
+    ? `<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="18" fill="currentColor"/></svg>`
+    : arrowSvg(rot);
+  let gap;
+  if (g.gap_m == null) {
+    gap = `<b class="none">&mdash;</b><span class="why">${g.state === "guiding" || g.state === "find_hand" ? "no fingertip in view" : "not guiding"}</span>`;
+  } else {
+    const n = cm(g.gap_m);
+    gap = `<b>${g.metric ? "" : "&asymp;"}${n < 100 ? n : (g.gap_m).toFixed(1)}<small>${n < 100 ? "cm" : "m"}</small></b>
+      <span class="why">fingertip to object${g.metric ? ", TrueDepth" : ", estimated from the photo"}</span>
+      <span class="meter"><i style="width:${Math.round(100 * (1 - Math.min(g.gap_m / PULSE.farM, 1)))}%"></i></span>
+      <span class="meter-scale"><span>60 cm</span><span>touching</span></span>`;
+    if (!stale && g.state === "guiding") {
+      const every = pulseInterval(g.gap_m);
+      gap += `<span class="beat"><i style="animation-duration:${every.toFixed(2)}s${REDUCED ? ";animation:none" : ""}"></i>beep and buzz every ${every.toFixed(2)} s</span>`;
+    }
+  }
+  return `<div class="arrow">${arrow}</div>
+    <div class="words"><small>${head[0]}</small><b>${head[1]}</b><span>${esc(head[2])}</span></div>
+    <div class="gap">${gap}</div>`;
+}
+
+function guideOverlay(g, w, h) {
+  const u = w / 480;                       // stroke and text scale
+  const parts = [];
+  if (g.trail && g.trail.length > 1) {
+    const pts = g.trail.map(([x, y]) => `${(x * w).toFixed(1)},${(y * h).toFixed(1)}`).join(" ");
+    parts.push(`<polyline points="${pts}" fill="none" stroke="#ffffff" stroke-opacity=".55" stroke-width="${3 * u}" stroke-linecap="round" stroke-linejoin="round"/>`);
+  }
+  const b = g.box;
+  if (b) {
+    const x = b.x_min * w, y = b.y_min * h, bw = (b.x_max - b.x_min) * w, bh = (b.y_max - b.y_min) * h;
+    const fs = 15 * u, name = String(g.target), tw = name.length * fs * 0.6 + 12 * u;
+    const ty = y - fs * 1.5 >= 0 ? y - fs * 1.5 : y + bh + 2 * u;
+    parts.push(`<rect x="${x}" y="${y}" width="${bw}" height="${bh}" fill="none" stroke="#1a1a1a" stroke-width="${7 * u}"/>
+      <rect x="${x}" y="${y}" width="${bw}" height="${bh}" fill="none" stroke="#ffd200" stroke-width="${4 * u}"/>
+      <rect x="${x}" y="${ty}" width="${tw}" height="${fs * 1.4}" rx="${3 * u}" fill="#ffd200"/>
+      <text x="${x + 6 * u}" y="${ty + fs * 1.02}" font-size="${fs}" font-weight="700" fill="#1a1a1a" font-family="Avenir Next, Helvetica, sans-serif">${esc(name)}</text>`);
+  }
+  if (b && g.hand) {
+    const hx = g.hand.x * w, hy = g.hand.y * h;
+    const nx = Math.min(Math.max(hx, b.x_min * w), b.x_max * w), ny = Math.min(Math.max(hy, b.y_min * h), b.y_max * h);
+    parts.push(`<line x1="${hx}" y1="${hy}" x2="${nx}" y2="${ny}" stroke="#1a1a1a" stroke-width="${6 * u}"/>
+      <line x1="${hx}" y1="${hy}" x2="${nx}" y2="${ny}" stroke="#ffd200" stroke-width="${3 * u}" stroke-dasharray="${8 * u} ${6 * u}"/>`);
+    if (g.gap_m != null && g.state === "guiding") {
+      const label = `${g.metric ? "" : "\u2248"}${cm(g.gap_m)} cm`, fs = 17 * u;
+      const mx = (hx + nx) / 2, my = (hy + ny) / 2 - fs * 1.3, tw = label.length * fs * 0.62 + 12 * u;
+      parts.push(`<rect x="${mx - tw / 2}" y="${my - fs * 0.85}" width="${tw}" height="${fs * 1.4}" rx="${3 * u}" fill="#1a1a1a"/>
+        <text x="${mx}" y="${my + fs * 0.3}" text-anchor="middle" font-size="${fs}" font-weight="700" fill="#ffd200" font-family="Avenir Next, Helvetica, sans-serif">${label}</text>`);
+    }
+  }
+  if (g.hand) {
+    const hx = g.hand.x * w, hy = g.hand.y * h;
+    parts.push(`<circle cx="${hx}" cy="${hy}" r="${11 * u}" fill="#ffffff" stroke="#1a1a1a" stroke-width="${4 * u}"/>
+      <circle cx="${hx}" cy="${hy}" r="${3.5 * u}" fill="#1a1a1a"/>`);
+  }
+  return parts.join("");
+}
+
+let guideRunning = false;
+function renderGuide(g) {
+  const sec = $("guide-sec");
+  if (!g) { sec.hidden = true; return; }
+  sec.hidden = false;
+  const [w, h] = g.frame_size || [480, 360];
+  const feed = $("guide-feed");
+  feed.style.aspectRatio = `${w} / ${h}`;
+  const final = ["reached", "lost", "stopped"].includes(g.state);
+  const stale = !final && g.age_ms > GUIDE_STALE_MS;
+  feed.classList.toggle("stale", stale);
+  $("guide-wait").hidden = g.frame_seq > 0;
+  if (g.frame_seq && g.frame_seq !== renderGuide.seq && !renderGuide.loading) {
+    renderGuide.loading = true;
+    const im = new Image();
+    im.onload = () => { $("guide-img").src = im.src; renderGuide.loading = false; };
+    im.onerror = () => { renderGuide.loading = false; };
+    im.src = `/guide.jpg?${g.frame_seq}`;
+    renderGuide.seq = g.frame_seq;
+  }
+  const svg = $("guide-svg");
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.innerHTML = final && g.state !== "reached" ? "" : guideOverlay(g, w, h);
+  const sign = $("guide-sign");
+  sign.className = "gsign" + (g.state === "guiding" || g.state === "reached" ? "" : " info");
+  sign.innerHTML = guideSign(g, stale);
+}
+
+// Its own fast loop, only while a guide is on the page: the main poll is
+// once a second, and a reaching hand needs ~8 frames a second.
+async function guideLoop() {
+  if (guideRunning) return;
+  guideRunning = true;
+  try {
+    while (true) {
+      let g = null;
+      try { g = await (await fetch("/guide.json")).json(); } catch (e) { g = null; }
+      try { renderGuide(g); } catch (e) { console.error(e); }
+      if (!g || document.hidden) break;
+      await new Promise((r) => setTimeout(r, 125));
+    }
+  } finally {
+    guideRunning = false;
+  }
+}
+
 // ---------------------------------------------------------------- loop
 async function poll() {
   if (location.protocol === "file:") {
@@ -971,6 +1154,7 @@ async function poll() {
     renderBand(s);
     renderConvo(s);
     renderLive(s);
+    if (s.guide) guideLoop(); else renderGuide(null);
     const newest = s.queries[s.queries.length - 1];
     if (follow && newest) selected = newest.query_id;
     const q = s.queries.find((x) => x.query_id === selected) || (follow ? newest : null);

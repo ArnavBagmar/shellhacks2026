@@ -24,6 +24,7 @@ from cane.transport.log_throttle import LogThrottle
 from cane.transport.messages import (
     Ground,
     EventMessage,
+    GuideUpdate,
     MalformedMessageError,
     PhoneDiagnostic,
     PhoneHealth,
@@ -82,6 +83,7 @@ class EventLinkServer:
         on_health: Callable[[PhoneHealth], None] | None = None,
         on_query: QueryHandler | None = None,
         on_speak: SpeakHandler | None = None,
+        on_guide: Callable[[GuideUpdate], None] | None = None,
     ) -> None:
         self._host = host
         self._port = port
@@ -99,6 +101,9 @@ class EventLinkServer:
         # ``voice`` back -- ``unavailable`` without a hook -- so the phone
         # never waits out a timeout before using its own voice.
         self._on_speak = on_speak
+        # "Guide my hand": the phone's live tracking, for the laptop page.
+        # Synchronous and display-only (it stores the newest update).
+        self._on_guide = on_guide
         self._query_tasks: set[asyncio.Task[None]] = set()
         self._estimator = OffsetEstimator()
         self._frames_ignored = 0
@@ -274,6 +279,8 @@ class EventLinkServer:
             self._apply_query(msg)
         elif isinstance(msg, SpeakRequest):
             self._spawn(self._run_speak(msg))
+        elif isinstance(msg, GuideUpdate):
+            self._apply_guide(msg)
         elif isinstance(msg, Unknown):
             self._count_ignored(msg.type)
         else:
@@ -312,6 +319,18 @@ class EventLinkServer:
             self._on_health(health)
         except Exception:  # noqa: BLE001 - the connection outlives the hook
             logger.exception("the on_health hook raised; ignoring this report")
+
+    def _apply_guide(self, update: GuideUpdate) -> None:
+        """The hand guide's live state. Only a page draws it; with no page it
+        is counted as ignored, and a hook that raises never drops the phone.
+        """
+        if self._on_guide is None:
+            self._count_ignored("guide")
+            return
+        try:
+            self._on_guide(update)
+        except Exception:  # noqa: BLE001 - the connection outlives the hook
+            logger.exception("the on_guide hook raised; ignoring this update")
 
     def _apply_query(self, query: SceneQuery) -> None:
         """Hand a spoken question to the scene service on its own task. With

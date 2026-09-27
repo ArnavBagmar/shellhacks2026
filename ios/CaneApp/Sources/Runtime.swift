@@ -15,7 +15,8 @@ import os
 ///     laptop --steer---> FeedbackManager --> SteerCueOutput -^ (step 24)
 ///     laptop <--query--- QueryCoordinator <-- VoiceRouter <-- SpeechListener (open mic)
 ///     laptop --answer--> QueryCoordinator --> OutputArbiter
-///                             `--> HandGuide (front camera + TrueDepth) --> watch taps
+///                             `--> HandGuide (front camera + TrueDepth) --> ticks, beeps, watch taps
+///     laptop <--guide--- HandGuide (live boxes + small frames for the page)
 ///     laptop <--speak--- NaturalSpeechRenderer (answers, prompts) --voice--> clip player
 ///
 /// The phone is the master clock: every `now` here is phone wall-clock ms.
@@ -130,7 +131,10 @@ final class Runtime {
         let camera = FrontCamera()
         self.camera = camera
         let guide = HandGuide(
-            camera: camera, speaker: arbiter, watch: WatchLink.shared, clock: Self.now,
+            camera: camera, speaker: arbiter, watch: WatchLink.shared, laptop: client,
+            ticker: GuideTicker(hazardActive: { arbiter.isPresentingHazard }, speaking: { arbiter.isSpeaking },
+                                clock: Self.now),
+            clock: Self.now,
             onEnd: { target, end in
                 diagnostics.record("guide_end", ["target": .text(target), "end": .text(end.rawValue)])
             }

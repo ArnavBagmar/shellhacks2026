@@ -13,13 +13,23 @@ import AVFoundation
 import CaneCamera
 import CaneOutput
 import CaneTransport
+import CoreImage
 import Vision
 import os
 
+/// Where the live tracking goes for the laptop page. `EventLinkClient` is
+/// the real one.
+public protocol GuideLink: Sendable {
+    func send(_ update: GuideUpdate) async throws
+}
+
+extension EventLinkClient: GuideLink {}
+
 /// "Guide my hand to the Rubik's cube", after Gemini found it in the phone
 /// photo: follows the thing and the wearer's fingertips live in the front
-/// camera, measures both with TrueDepth, and turns the gap into watch taps
-/// and direction words (`GuideSession` holds the rules).
+/// camera, measures both with TrueDepth, and turns the gap into ticks and
+/// beeps (`GuideTicker`), watch taps and direction words (`GuideSession`
+/// holds the rules). The laptop page gets the same picture live.
 ///
 /// No detection model: Apple Vision's object tracker (seeded with Gemini's
 /// box) and hand-pose request, both built into iOS.
@@ -42,10 +52,16 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
     static let minDepthCoverage = 0.2
     /// A whole-map copy is ~1 MB; a reaching hand does not need it at 15 Hz.
     static let depthEveryMs: Int64 = 150
+    /// The laptop page: positions this often, a camera frame half as often.
+    static let laptopEveryMs: Int64 = 125
+    static let laptopFrameEveryMs: Int64 = 250
+    static let laptopFramePx = 480.0
 
     private let camera: FrontCamera
     private let speaker: AssistSpeaker
     private let watch: GuideWatch
+    private let laptop: GuideLink?
+    private let ticker: GuideTicker?
     private let clock: @Sendable () -> Int64
     private let onEnd: @Sendable (String, GuideEnd) -> Void
     private let work = DispatchQueue(label: "cane.guide", qos: .userInitiated)
@@ -63,17 +79,24 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
     private var held = false
     private var objectDepthM: Double?
     private var depth: (map: DepthMap, atMs: Int64)?
+    private var lastLaptopMs: Int64?
+    private var lastLaptopFrameMs: Int64?
+    private let ciContext = CIContext()
 
     public init(
         camera: FrontCamera,
         speaker: AssistSpeaker,
         watch: GuideWatch,
+        laptop: GuideLink? = nil,
+        ticker: GuideTicker? = nil,
         clock: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
         onEnd: @escaping @Sendable (String, GuideEnd) -> Void = { _, _ in }
     ) {
         self.camera = camera
         self.speaker = speaker
         self.watch = watch
+        self.laptop = laptop
+        self.ticker = ticker
         self.clock = clock
         self.onEnd = onEnd
         camera.addConsumer(self)
@@ -92,9 +115,13 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
             session = GuideSession(target: request.target, startMs: now, voiceOnly: voiceOnly)
             objectDepthM = nil
             depth = nil
+            lastLaptopMs = nil
+            lastLaptopFrameMs = nil
             seed(box)
+            sendLaptop(state: .findHand, target: request.target, now: now, force: true)
         }
         lock.withLock { active = true }
+        ticker?.start()
         watch.send(GuideMessage(state: .findHand, target: request.target, sentMs: now))
         logger.info("guide started: \(request.target, privacy: .public), watch \(voiceOnly ? "not reachable" : "reachable")")
         return GuideSession.startPhrase(watch: !voiceOnly)
@@ -184,7 +211,53 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
             hfovDeg: hfovDeg, aspect: aspect
         ))
         session = current.finished ? nil : current
+        if !current.finished {
+            ticker?.update(gapM: current.gapM, pan: current.towards.map { $0.x / 0.15 } ?? 0)
+            sendLaptop(state: current.state, target: current.target, now: now, object: seen, hand: hand,
+                       gapM: current.gapM, metric: current.metric, hint: current.hintText,
+                       buffer: buffer, hfovDeg: hfovDeg)
+        }
         deliver(outputs, target: current.target)
+    }
+
+    /// Best effort, never blocking the tracker: the page is for watching,
+    /// nothing on the laptop acts on it.
+    private func sendLaptop(
+        state: GuideState, target: String, now: Int64, force: Bool = false, object: NormBox? = nil,
+        hand: NormPoint? = nil, gapM: Double? = nil, metric: Bool = false, hint: String? = nil,
+        buffer: CVPixelBuffer? = nil, hfovDeg: Double = 0
+    ) {
+        guard let laptop else { return }
+        guard force || lastLaptopMs.map({ now - $0 >= Self.laptopEveryMs }) ?? true else { return }
+        lastLaptopMs = now
+        var frame: PhoneFrame?
+        if let buffer, lastLaptopFrameMs.map({ now - $0 >= Self.laptopFrameEveryMs }) ?? true {
+            frame = jpeg(buffer, hfovDeg: hfovDeg)
+            if frame != nil { lastLaptopFrameMs = now }
+        }
+        let wireState = switch state {
+        case .findHand: "find_hand"
+        default: state.rawValue
+        }
+        guard let update = try? GuideUpdate(
+            tPhoneMs: now, state: wireState, target: String(target.prefix(60)),
+            box: object.map { .init(xMin: max(0, $0.xMin), yMin: max(0, $0.yMin), xMax: min(1, $0.xMax), yMax: min(1, $0.yMax)) },
+            hand: hand.map { (min(max($0.x, 0), 1), min(max($0.y, 0), 1)) },
+            gapM: gapM, metric: metric, hint: hint, frame: frame
+        ) else { return }
+        Task { try? await laptop.send(update) }
+    }
+
+    private func jpeg(_ buffer: CVPixelBuffer, hfovDeg: Double) -> PhoneFrame? {
+        var image = CIImage(cvPixelBuffer: buffer)
+        let scale = min(1, Self.laptopFramePx / Double(max(image.extent.width, image.extent.height)))
+        if scale < 1 { image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale)) }
+        let options = [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.5]
+        guard hfovDeg > 0, let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let data = ciContext.jpegRepresentation(of: image, colorSpace: space, options: options)
+        else { return nil }
+        return try? PhoneFrame(jpeg: data, hfovDeg: hfovDeg, width: Int(image.extent.width.rounded()),
+                               height: Int(image.extent.height.rounded()))
     }
 
     /// The tracker's box for this frame, or nil when it is not confident.
@@ -233,18 +306,26 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
             case .say(let text):
                 let speaker = speaker
                 let final = outputs.contains { if case .end = $0 { true } else { false } }
+                // The phone's own voice (the navigation channel), never the
+                // laptop's: a hint that waits a second for a network voice
+                // points where the hand was, not where it is.
                 Task {
                     if final {
-                        // "You've got it." must be heard: it waits and cuts a hint.
-                        speaker.cancel(upTo: .prompt)
-                        _ = await speaker.say(SpokenPhrase(text: text), on: .answer, haptic: nil, pan: 0, maxWaitMs: 3_000)
-                    } else {
-                        // A late hint is a wrong hint: dropped if anything is talking.
-                        _ = await speaker.say(SpokenPhrase(text: text), on: .prompt, haptic: nil, pan: 0, maxWaitMs: 0)
+                        // "You've got it." must be heard at once: cut whatever talks.
+                        speaker.cancel(upTo: .answer)
                     }
+                    // Dropped, never queued, if anything else is talking.
+                    _ = await speaker.say(SpokenPhrase(text: text), on: .navigation, haptic: nil, pan: 0, maxWaitMs: 0)
                 }
             case .end(let end):
                 lock.withLock { active = false }
+                ticker?.stop(reached: end == .reached)
+                let finalState: GuideState = switch end {
+                case .reached: .reached
+                case .lost: .lost
+                case .timedOut, .stopped: .stopped
+                }
+                sendLaptop(state: finalState, target: target, now: clock(), force: true, object: box)
                 logger.info("guide ended: \(end.rawValue, privacy: .public)")
                 onEnd(target, end)
             }

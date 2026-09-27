@@ -224,6 +224,11 @@ class SceneQueryService:
         self._monotonic = monotonic
         self._current: asyncio.Task[object] | None = None
 
+    @property
+    def debug(self) -> DebugHub | None:
+        """The laptop page, if this run has one (the hand guide draws there)."""
+        return self._debug
+
     async def handle(self, query: SceneQuery) -> SceneAnswer | None:
         """Answer ``query``, or return ``None`` if a newer query superseded
         it while it was being worked on.

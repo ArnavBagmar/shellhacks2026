@@ -113,6 +113,12 @@ object with a `type` string:
   died cannot drive a switch. The frame is advisory: the health monitor
   also steps rungs and flips on its own RTT and timeout evidence, and a
   phone that never sends `health` changes nothing.
+- `guide` (phone → laptop, ~8 Hz) is "guide my hand" live: the tracked
+  object's `box` and the nearest fingertip (`hand`) as frame fractions, the
+  fingertip-to-surface `gap_m`, whether TrueDepth measured it (`metric`), the
+  last direction word (`hint`), and a small `frame` (the `phone_frame` shape)
+  a few times a second. Display-only: the laptop page draws it and nothing
+  acts on it; see `docs/hand-guide.md`.
 - The type `location` is **reserved** (phone → laptop, defined in a later
   step). A receiver that sees an unrecognised `type` logs at debug level
   and ignores the frame — never errors, never disconnects. Malformed JSON,

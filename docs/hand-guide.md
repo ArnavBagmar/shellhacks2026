@@ -1,8 +1,10 @@
-# Guide my hand (phone + Apple Watch)
+# Guide my hand (phone, laptop page, Apple Watch)
 
 "Hey Cane, guide my hand to the Rubik's cube." Cane finds the thing, then
-follows it and the wearer's fingertips live in the chest camera. The watch
-taps faster as the hand gets closer, and "You've got it." ends the guide.
+follows it and the wearer's fingertips live in the chest camera. The phone
+buzzes and beeps faster as the hand gets closer (the watch too, when it is
+installed), Cane says which way to move, and "You've got it." ends the
+guide. The laptop page shows it all live.
 
 ## What happens
 
@@ -26,22 +28,42 @@ taps faster as the hand gets closer, and "You've got it." ends the guide.
      tracker would follow the hand.
 3. **Decide** (`CaneGuide/GuideSession.swift`, pure and tested on macOS):
    - The gap is measured from the fingertip to the thing's surface, in metres.
-   - The gap goes to the watch about 10 times a second.
-   - Cane says a direction word ("Left.", "Down.", "Forward.") every few
-     seconds, but not within 8 cm of the thing.
+   - The gap goes to the ticker (and the watch) about 10 times a second.
+   - Cane says a direction word ("Left.", "Down.", "Forward.") every 1.2 s,
+     the same word again if the hand still needs to go that way, but not
+     within 8 cm of the thing. Words use the phone's own voice (the
+     navigation channel), never the laptop's: a hint that waits a second
+     for a network voice points where the hand was.
    - A fingertip within 4 cm of the thing for 0.3 s means it was reached.
    - The guide ends if the thing is out of sight for 2.5 s, after 60 s, or
      when the wearer says anything.
-4. **Tap** (`ios/CaneWatch`). The watch has no intensity control, so closeness
-   is carried by the tap rate, like a parking sensor:
+4. **Tick and beep on the phone** (`CaneAssist/GuideTicker.swift`), like a
+   parking sensor:
+   - A buzz on the chest and a short beep, once a second at 60 cm or more,
+     getting faster down to every 0.15 s near touching (`GuidePulse`).
+   - Buzzes get stronger and beeps higher as the hand closes in. The beep
+     is panned toward the way the hand should move, which you can hear in
+     earbuds.
+   - Silent during a hazard. No beep while a word is being spoken, so the
+     beep never masks "Left.".
+   - A quick triple buzz at the end.
+5. **Tap on the watch** (`ios/CaneWatch`), when it is installed. The watch has
+   no intensity control, so closeness is carried by the tap rate:
    - One light tap a second at 60 cm or more, getting faster down to one tap
      every 0.15 s near touching (`GuidePulse`).
    - Firm taps within 10 cm, and a success tap at the end.
    - An extended runtime session (physical therapy) keeps the taps going with
      the wrist lowered.
 
-If the watch app isn't open, Cane says so and guides by voice instead, with
-more frequent words plus "Close." and "Almost there."
+6. **Show it on the laptop** (`guide` frame, about 8 times a second, with a
+   480 px camera frame about 4 times a second). The live view at
+   localhost:8780 shows a **Hand guide · live** panel while a guide runs:
+   - the chest camera, with the object's box, the fingertip, its trail and
+     the gap;
+   - a sign with the direction, the gap in centimetres, a closeness bar and
+     the beep rhythm.
+   It polls `/guide.json` 8 times a second only while a guide is on, and
+   disappears 45 s after the last update.
 
 ## Running it
 
@@ -50,7 +72,7 @@ more frequent words plus "Close." and "Almost there."
    - iOS installs it on the paired watch if "Automatic App Install" is on.
    - If not, open the iPhone's Watch app, go to Available Apps, and tap
      Install next to Cane.
-2. Open **Cane** on the watch. It shows "Phone connected" once the phone app
+2. Optional: open **Cane** on the watch. It shows "Phone connected" once the phone app
    is running. The phone's setup notes show `watch: connected`.
 3. Put the thing on a table in front of you, 30 cm to 1 m from your chest.
    Your hand must stay in view of the chest camera.

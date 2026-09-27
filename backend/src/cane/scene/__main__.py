@@ -149,7 +149,8 @@ async def serve(service: SceneQueryService, vlm: VisionLanguageModel, host: str,
             await box[0].send_answer(answer)
 
     on_speak = voice.clip if voice is not None else None
-    async with EventLinkServer(host, port, on_query=on_query, on_speak=on_speak) as server:
+    on_guide = service.debug.on_phone_guide if service.debug is not None else None
+    async with EventLinkServer(host, port, on_query=on_query, on_speak=on_speak, on_guide=on_guide) as server:
         box.append(server)
         logger.info("scene link on ws://%s:%d -- point the phone app here", host, server.port)
         if voice is None:

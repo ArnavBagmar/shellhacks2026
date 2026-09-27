@@ -385,6 +385,56 @@ class VoiceClip(BaseModel):
         return cls(speak_id=speak_id, status="unavailable", format=None, audio_b64=None, latency_ms=latency_ms)
 
 
+GuideState = Literal["looking", "find_hand", "guiding", "reached", "lost", "stopped"]
+
+
+class GuideBox(BaseModel):
+    """A box in the guide's camera frame, fractions from the top-left."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    x_min: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+    y_min: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+    x_max: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+    y_max: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+
+    @model_validator(mode="after")
+    def _ordered(self) -> GuideBox:
+        if not (self.x_min < self.x_max and self.y_min < self.y_max):
+            raise ValueError("a guide box needs x_min < x_max and y_min < y_max")
+        return self
+
+
+class GuidePoint(BaseModel):
+    """The fingertip, fractions from the top-left of the guide's frame."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    x: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+    y: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+
+
+class GuideUpdate(BaseModel):
+    """``guide`` frame, phone -> laptop, ~8 Hz while "guide my hand" runs:
+    where the phone's tracker has the thing and the fingertip, the gap
+    between them, and a small front-camera frame a few times a second.
+    Display-only: the laptop page draws it and nothing acts on it. Numbers
+    are not strict (JSON cannot tell 0 from 0.0).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    t_phone_ms: Annotated[int, Field(strict=True)]
+    state: GuideState
+    target: Annotated[str, Field(min_length=1, max_length=60)]
+    box: GuideBox | None
+    hand: GuidePoint | None
+    gap_m: Annotated[float | None, Field(ge=0, le=10, allow_inf_nan=False)]
+    metric: Annotated[bool, Field(strict=True)]
+    hint: Annotated[str | None, Field(min_length=1, max_length=40)]
+    frame: PhoneFrame | None
+
+
 @dataclass(frozen=True)
 class Unknown:
     """A frame whose ``type`` is not one of ``ping``/``pong``/``event``/
@@ -404,6 +454,7 @@ ANSWER_TYPE = "answer"
 STEER_TYPE = "steer"
 SPEAK_TYPE = "speak"
 VOICE_TYPE = "voice"
+GUIDE_TYPE = "guide"
 
 OutboundMessage = Ping | Pong | EventMessage | SceneAnswer | Steer | VoiceClip
 InboundMessage = (
@@ -418,6 +469,7 @@ InboundMessage = (
     | Ground
     | SpeakRequest
     | VoiceClip
+    | GuideUpdate
     | Unknown
 )
 
@@ -543,6 +595,8 @@ def decode(text: str) -> InboundMessage:
         return _decode_model(data, SpeakRequest, SPEAK_TYPE)
     if msg_type == VOICE_TYPE:
         return _decode_model(data, VoiceClip, VOICE_TYPE)
+    if msg_type == GUIDE_TYPE:
+        return _decode_model(data, GuideUpdate, GUIDE_TYPE)
     if isinstance(msg_type, str):
         return Unknown(type=msg_type)
     raise MalformedMessageError(f"'type' must be a string, got {msg_type!r}")

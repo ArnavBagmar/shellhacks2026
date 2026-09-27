@@ -79,6 +79,12 @@ public final class OutputArbiter: @unchecked Sendable {
         lock.withLock { speakingCount > 0 }
     }
 
+    /// True while a hazard is being presented: nothing else may make a
+    /// sound or a buzz then, the hand guide's ticks included.
+    public var isPresentingHazard: Bool {
+        lock.withLock { active?.channel == .hazard }
+    }
+
     /// Called on every change of `isSpeaking`, on an arbitrary thread.
     public func observeSpeaking(_ observer: @escaping @Sendable (Bool) -> Void) {
         lock.withLock { speakingObserver = observer }

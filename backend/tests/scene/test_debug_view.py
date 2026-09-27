@@ -16,7 +16,7 @@ from cane.scene.debug_view import DebugHub, PhoneDiagHandler, serve_debug
 from cane.scene.frames import StillProvider
 from cane.scene.service import SceneQueryService
 from cane.scene.vlm import FakeVLM, VlmReply
-from cane.transport.messages import PhoneFrame, SceneQuery
+from cane.transport.messages import GuideUpdate, PhoneFrame, SceneQuery
 
 EQUIRECT = np.full((180, 360, 3), 90, dtype=np.uint8)
 PHOTO = cv2.imencode(".jpg", np.full((120, 160, 3), 200, dtype=np.uint8))[1].tobytes()
@@ -162,5 +162,58 @@ def test_a_still_picture_keeps_streaming_so_the_browser_shows_it() -> None:
         buffered = b""
         while buffered.count(b"--canelive") < 2:  # the second part is what makes Chrome draw the first
             buffered += stream.read1(65536)
+    finally:
+        server.shutdown()
+
+
+# ------------------------------------------------------------- hand guide
+
+
+def _guide(**overrides: object) -> GuideUpdate:
+    fields: dict[str, object] = {
+        "t_phone_ms": 1, "state": "guiding", "target": "rubik's cube",
+        "box": {"x_min": 0.58, "y_min": 0.52, "x_max": 0.7, "y_max": 0.66}, "hand": {"x": 0.31, "y": 0.6},
+        "gap_m": 0.14, "metric": True, "hint": "Right.", "frame": None,
+    }
+    fields.update(overrides)
+    return GuideUpdate.model_validate(fields)
+
+
+def test_no_guide_means_no_guide_on_the_page() -> None:
+    assert DebugHub().state()["guide"] is None
+
+
+def test_the_guide_is_drawn_from_the_phones_updates_with_a_fingertip_trail() -> None:
+    hub = DebugHub()
+    frame = PhoneFrame(jpeg_b64=base64.b64encode(PHOTO).decode(), hfov_deg=70, width=160, height=120)
+    hub.on_phone_guide(_guide(state="find_hand", hand=None, gap_m=None, hint=None, frame=frame))
+    hub.on_phone_guide(_guide(hand={"x": 0.4, "y": 0.6}))
+    hub.on_phone_guide(_guide(hand={"x": 0.5, "y": 0.6}, gap_m=0.06))
+    g = hub.state()["guide"]
+    assert g["state"] == "guiding" and g["gap_m"] == 0.06
+    assert g["frame_seq"] == 1 and g["frame_size"] == [160, 120], "the last frame is kept between frames"
+    assert [p[0] for p in g["trail"]] == [0.4, 0.5]
+    assert hub.guide_jpeg() == PHOTO
+
+
+def test_a_new_guide_starts_a_fresh_trail() -> None:
+    hub = DebugHub()
+    hub.on_phone_guide(_guide(hand={"x": 0.4, "y": 0.6}))
+    hub.on_phone_guide(_guide(state="reached"))
+    hub.on_phone_guide(_guide(state="find_hand", hand=None, gap_m=None))
+    assert hub.state()["guide"]["trail"] == []
+
+
+def test_the_page_serves_the_guide_fast_path() -> None:
+    hub = DebugHub()
+    frame = PhoneFrame(jpeg_b64=base64.b64encode(PHOTO).decode(), hfov_deg=70, width=160, height=120)
+    hub.on_phone_guide(_guide(frame=frame))
+    server = serve_debug(hub, port=0)
+    try:
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        assert b"Hand guide" in urllib.request.urlopen(f"{base}/").read()
+        g = json.loads(urllib.request.urlopen(f"{base}/guide.json").read())
+        assert g["target"] == "rubik's cube" and g["hand"] == {"x": 0.31, "y": 0.6}
+        assert urllib.request.urlopen(f"{base}/guide.jpg").read() == PHOTO
     finally:
         server.shutdown()

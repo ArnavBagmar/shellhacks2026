@@ -16,6 +16,7 @@ answer path: a failure in it is logged and ignored.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import socketserver
@@ -55,6 +56,11 @@ FEED_KINDS = {
 #: No phone diagnostic for this long -> shown as disconnected (it sends mic
 #: levels every 2 s and depth every 1 s while walking).
 PHONE_QUIET_MS = 4_000
+#: "Guide my hand" stays on the page this long after its last update.
+GUIDE_SHOW_MS = 45_000
+#: The fingertip's recent path, drawn as a fading trail.
+GUIDE_TRAIL = 40
+GUIDE_TRAIL_MS = 1_500
 
 #: The page's signal yellow (#ffd200) and sign black, in BGR.
 SIGN_YELLOW = (0, 210, 255)
@@ -142,6 +148,11 @@ class DebugHub:
         self._live_source: np.ndarray | None = None
         self._fps_mark: tuple[float, int] | None = None
         self._fps = 0.0
+        #: "Guide my hand": the phone's newest tracking update and frame.
+        self._guide: dict[str, Any] | None = None
+        self._guide_jpeg: bytes | None = None
+        self._guide_frame_seq = 0
+        self._guide_trail: deque[tuple[int, float, float]] = deque(maxlen=GUIDE_TRAIL)
 
     # ------------------------------------------------------------- writers
 
@@ -216,6 +227,57 @@ class DebugHub:
             if kind in FEED_KINDS and not (kind == "transcript" and not data.get("final")):
                 self._feed.append({"t_ms": received, "kind": kind, "data": data})
 
+    def on_phone_guide(self, update: Any) -> None:
+        """One ``guide`` frame (a ``GuideUpdate``): the page draws the thing's
+        box, the fingertip and the gap over the phone's own frame.
+        """
+        received = now_ms()
+        jpeg: bytes | None = None
+        if update.frame is not None:
+            try:
+                jpeg = base64.b64decode(update.frame.jpeg_b64, validate=True)
+            except (ValueError, TypeError):
+                jpeg = None
+        data = update.model_dump(exclude={"frame"})
+        with self._lock:
+            if self._guide is None or self._guide.get("target") != data["target"] or data["state"] == "find_hand" \
+                    and self._guide.get("state") in ("reached", "lost", "stopped"):
+                self._guide_trail.clear()
+            if update.hand is not None:
+                self._guide_trail.append((received, update.hand.x, update.hand.y))
+            if jpeg:
+                self._guide_jpeg = jpeg
+                self._guide_frame_seq += 1
+                data["frame_size"] = [update.frame.width, update.frame.height]
+            elif self._guide is not None:
+                data["frame_size"] = self._guide.get("frame_size")
+            if self._guide is None or self._guide.get("state") != data["state"]:
+                data["state_since_ms"] = received
+            else:
+                data["state_since_ms"] = self._guide.get("state_since_ms", received)
+            data["received_ms"] = received
+            self._guide = data
+
+    def guide_jpeg(self) -> bytes | None:
+        with self._lock:
+            return self._guide_jpeg
+
+    def guide_state(self) -> dict[str, Any] | None:
+        """``/guide.json``: polled ~8 times a second while a guide runs."""
+        with self._lock:
+            return self._guide_state()
+
+    def _guide_state(self) -> dict[str, Any] | None:
+        """The page's view of the guide; None once it is long over."""
+        if self._guide is None:
+            return None
+        now = now_ms()
+        age = now - self._guide["received_ms"]
+        if age > GUIDE_SHOW_MS:
+            return None
+        trail = [[round(x, 4), round(y, 4)] for t, x, y in self._guide_trail if now - t <= GUIDE_TRAIL_MS]
+        return dict(self._guide, age_ms=age, frame_seq=self._guide_frame_seq, trail=trail)
+
     def _attach_to_query(self, kind: str, data: dict[str, Any]) -> None:
         """The phone's side of the latest question: what it said and measured."""
         latest = self._queries[-1]
@@ -265,6 +327,7 @@ class DebugHub:
                 "queries": queries,
                 "feed": list(self._feed),
                 "hazards": self.hazards.state(),
+                "guide": self._guide_state(),
             }
 
     def query_image(self, query_id: str, index: int) -> bytes | None:
@@ -453,6 +516,11 @@ def serve_debug(hub: DebugHub, port: int = DEFAULT_PORT, host: str = "127.0.0.1"
                     self._stream(hub.hazard_jpeg)
                 elif path == "/hazards.jpg":
                     jpeg = hub.hazard_jpeg()
+                    self._send(200 if jpeg else 404, "image/jpeg", jpeg or b"")
+                elif path == "/guide.json":
+                    self._send(200, "application/json", json.dumps(hub.guide_state()).encode())
+                elif path == "/guide.jpg":
+                    jpeg = hub.guide_jpeg()
                     self._send(200 if jpeg else 404, "image/jpeg", jpeg or b"")
                 elif path == "/live.jpg":
                     jpeg = hub.live_jpeg()

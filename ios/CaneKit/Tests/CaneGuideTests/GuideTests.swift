@@ -127,13 +127,23 @@ final class GuideSessionTests: XCTestCase {
         XCTAssertEqual(c.count, 1)
     }
 
-    func testTheVoiceSaysWhichWayEveryFewSeconds() {
+    func testTheVoiceSaysWhichWayEverySecondOrSo() {
         var s = GuideSession(target: "cube", startMs: 0)
         let hand = NormPoint(x: 0.2, y: 0.65) // the cube is to the right
-        XCTAssertEqual(says(s.update(frame(2_600, object: cube, hand: hand))), ["Right."])
-        XCTAssertEqual(says(s.update(frame(3_000, object: cube, hand: hand))), [])
-        XCTAssertEqual(says(s.update(frame(5_200, object: cube, hand: hand))), [], "same word: waits the longer repeat")
-        XCTAssertEqual(says(s.update(frame(7_700, object: cube, hand: hand))), ["Right."])
+        XCTAssertEqual(says(s.update(frame(1_200, object: cube, hand: hand))), ["Right."])
+        XCTAssertEqual(says(s.update(frame(2_000, object: cube, hand: hand))), [])
+        XCTAssertEqual(says(s.update(frame(2_400, object: cube, hand: hand))), ["Right."], "still moving right: said again")
+        XCTAssertEqual(s.hintText, "Right.")
+    }
+
+    func testTheLiveGapIsExposedForTheTicksAndThePage() {
+        var s = GuideSession(target: "cube", startMs: 0)
+        _ = s.update(frame(100, object: cube, hand: NormPoint(x: 0.2, y: 0.65)))
+        XCTAssertGreaterThan(s.gapM ?? 0, 0.1)
+        XCTAssertTrue(s.metric)
+        XCTAssertGreaterThan(s.towards?.x ?? 0, 0, "the cube is to the right of the hand")
+        _ = s.update(frame(200, object: cube))
+        XCTAssertNil(s.gapM, "no hand, no gap")
     }
 
     func testTouchingForAMomentEndsWithYouveGotIt() {
@@ -178,9 +188,10 @@ final class GuideSessionTests: XCTestCase {
         XCTAssertNotNil(out.first?.gapM, "the taps still use the estimate")
     }
 
-    func testVoiceOnlyAddsHowClose() {
-        var s = GuideSession(target: "cube", startMs: 0, voiceOnly: true)
-        XCTAssertEqual(says(s.update(frame(1_700, object: cube, hand: NormPoint(x: 0.4, y: 0.65)))), ["Right. Close."])
+    func testNoWordsInTheLastFewCentimetres() {
+        var s = GuideSession(target: "cube", startMs: 0)
+        // 7.9 cm from the cube's surface: the beeps carry it from here.
+        XCTAssertEqual(says(s.update(frame(1_300, object: cube, hand: NormPoint(x: 0.5, y: 0.65)))), [])
     }
 
     func testStopEndsQuietly() {
