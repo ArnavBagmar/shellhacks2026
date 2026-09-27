@@ -414,6 +414,9 @@ class BridgePipeline:
         events = events_from_response(
             response, CROPSET_YAWS_DEG, self._config.delta_deg, source
         )
+        allowed = self._config.hazard_classes
+        if allowed is not None:
+            events = tuple(e for e in events if e.cls.value in allowed)
         if self._event_sink is None:
             self._events_undelivered += len(events)
         else:
@@ -424,8 +427,10 @@ class BridgePipeline:
                     self._events_undelivered += 1
         # After the events, always: a hazard warning is the older promise and
         # steering is the advisory layer on top of it.
-        await self._send_steer(response, source)
-        await self._send_ground(response, source)
+        if self._config.send_steer:
+            await self._send_steer(response, source)
+        if self._config.send_ground:
+            await self._send_ground(response, source)
 
     async def _send_ground(self, response: InferenceResponse, source: Source) -> None:
         """One ``ground`` frame per answered tick that has a hole in it.
@@ -436,7 +441,7 @@ class BridgePipeline:
         method never has to decide what a missing measurement looks like.
         """
         ground = ground_from_response(
-            response, CROP_YAWS_DEG, self._config.delta_deg, source
+            response, CROPSET_YAWS_DEG, self._config.delta_deg, source
         )
         if ground is None:
             return

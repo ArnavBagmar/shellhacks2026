@@ -204,6 +204,8 @@ full() {
 
   say "phone app settings -> Address: $(laptop_ip)   Port: $PORT"
   say "source $source, rung $rung, delta_deg $delta   (CANE_SOURCE / CANE_RUNG / CANE_DELTA_DEG)"
+  say "alerts: cars and buses coming at you only (CANE_HAZARDS=all for every class);"
+  say "        steering ${CANE_STEER:-off}, floor drops ${CANE_GROUND:-off} (CANE_STEER=on / CANE_GROUND=on)"
   say "logs -> backend/logs/{laptop,inference}-$(date +%Y%m%d).log"
   say "debug view -> http://localhost:${CANE_DEBUG_PORT:-8780}  (cameras, what Gemini picked, stats)"
   local status=0
@@ -213,6 +215,9 @@ full() {
       --source "$source" --rung "$rung" --delta-deg "$delta" \
       --inference-url "http://127.0.0.1:$infer_port/infer" \
       --ws-port "$PORT" --scene \
+      --hazards "${CANE_HAZARDS:-vehicles}" \
+      $([[ "${CANE_STEER:-off}" == on ]] || echo --no-steer) \
+      $([[ "${CANE_GROUND:-off}" == on ]] || echo --no-ground) \
       --local-detector ultralytics "$@" || status=$?
   reap_inference
   return "$status"

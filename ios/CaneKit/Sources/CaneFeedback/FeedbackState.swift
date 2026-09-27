@@ -30,8 +30,12 @@ public struct FeedbackState: Equatable, Sendable {
     /// Step 24 (Shepherd's stages 6, 8, 9). Shares the actor and the 100 ms
     /// tick with the announcement gauntlet and touches none of its state.
     public var steering = SteeringState()
+    /// What may be announced at all (the app: approaching vehicles only).
+    public var hazardScope: HazardScope = .everything
 
-    public init() {}
+    public init(hazardScope: HazardScope = .everything) {
+        self.hazardScope = hazardScope
+    }
 
     /// §3.4's trigger: stale drops over events received in the trailing
     /// 10 s. 0 when nothing was received.

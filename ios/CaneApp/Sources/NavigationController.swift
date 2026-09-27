@@ -16,6 +16,11 @@ final class NavigationController {
     private lazy var sources = CoreLocationSources()
     private var engine: NavigationEngine?
     private var cueTask: Task<Void, Never>?
+    /// Where the current route goes, and its last spoken cue ("repeat that").
+    private(set) var destination: String?
+    private var lastCue: String?
+
+    var isActive: Bool { engine != nil }
     private let logger = Logger(subsystem: "cane", category: "navigation")
 
     static let retriedKinds: Set<CueKind> = [.arrived, .offRoute, .gpsLost, .gpsRestored]
@@ -51,10 +56,13 @@ final class NavigationController {
             headings: sources
         )
         self.engine = engine
+        destination = place
+        lastCue = nil
         let arbiter = arbiter, gain = userGain
         let steerBias = self.steerBias
-        cueTask = Task {
+        cueTask = Task { [weak self] in
             for await cue in engine.cues {
+                self?.lastCue = cue.phrase
                 steerBias(Self.lateralBias(for: cue))
                 await Self.present(cue, arbiter: arbiter, gain: gain())
             }
@@ -74,6 +82,36 @@ final class NavigationController {
             Task { await engine.stop() }
         }
         engine = nil
+        destination = nil
+        lastCue = nil
+    }
+
+    /// "Stop navigation" / "cancel": ends the route, cuts any cue being
+    /// spoken ("Rerouting..."), releases the steering lean. Returns whether
+    /// there was a route to stop.
+    @discardableResult
+    func cancelByVoice(announce: Bool = true) async -> Bool {
+        guard isActive else { return false }
+        stop()
+        arbiter.cancel(upTo: .navigation)
+        steerBias(0)
+        if announce { await say("Navigation stopped.") }
+        return true
+    }
+
+    /// "Repeat that": the last direction, or why there is none.
+    func repeatLast() async {
+        guard isActive, let destination else { return await say("You're not navigating right now.") }
+        await say(lastCue.map { "\($0)." } ?? "Heading to \(destination). No new direction yet.")
+    }
+
+    /// "Where am I going?"
+    func status() async {
+        guard isActive, let destination else {
+            return await say("You're not navigating right now. Say: take me to, and a place.")
+        }
+        let last = lastCue.map { " Last direction: \($0)." } ?? ""
+        await say("Heading to \(destination).\(last) Say stop navigation to end it.")
     }
 
     /// -1 left, +1 right, 0 for anything that is not a turn happening now.

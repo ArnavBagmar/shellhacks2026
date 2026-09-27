@@ -12,7 +12,7 @@ actor VoiceRouter {
     private var phrases = PromptPicker()
     private let arbiter: OutputArbiter
     private let coordinator: QueryCoordinator
-    private let navigate: @Sendable (String) async -> Void
+    private let navigation: NavigationController
     private let onHeard: @Sendable (String) -> Void
     private let diagnostics: Diagnostics
     private let logger = Logger(subsystem: "cane", category: "voice-router")
@@ -20,14 +20,14 @@ actor VoiceRouter {
     init(
         arbiter: OutputArbiter,
         coordinator: QueryCoordinator,
-        navigate: @escaping @Sendable (String) async -> Void,
+        navigation: NavigationController,
         onHeard: @escaping @Sendable (String) -> Void,
         diagnostics: Diagnostics
     ) {
         self.diagnostics = diagnostics
         self.arbiter = arbiter
         self.coordinator = coordinator
-        self.navigate = navigate
+        self.navigation = navigation
         self.onHeard = onHeard
     }
 
@@ -62,9 +62,9 @@ actor VoiceRouter {
                 "command": .text(text),
                 "intent": .text(intent.map { String(describing: $0) } ?? "none"),
             ])
-            let arbiter = arbiter, coordinator = coordinator, navigate = navigate, onHeard = onHeard
+            let arbiter = arbiter, coordinator = coordinator, navigation = navigation, onHeard = onHeard
             Task {
-                let understood = await Self.route(text, arbiter: arbiter, coordinator: coordinator, navigate: navigate)
+                let understood = await Self.route(text, arbiter: arbiter, coordinator: coordinator, navigation: navigation)
                 if !understood {
                     // Show exactly what was heard (the screen is the only
                     // way to debug this), and let the wearer just repeat it.
@@ -82,17 +82,38 @@ actor VoiceRouter {
     /// Returns false when the words matched no intent.
     private static func route(
         _ text: String, arbiter: OutputArbiter, coordinator: QueryCoordinator,
-        navigate: @Sendable (String) async -> Void
+        navigation: NavigationController
     ) async -> Bool {
         guard let intent = IntentParser.route(text) else {
             logger.info("not understood: \(text, privacy: .public)")
             await arbiter.say(SpokenPhrase(text: AnswerPhrasing.notUnderstood(heard: text)), on: .prompt, maxWaitMs: 3_000)
             return false
         }
+        switch intent {
+        case .cancel:
+            // "Stop" means everything: the question in flight *and* a route
+            // (2026-09-26: stuck rerouting with no way out).
+            let stoppedRoute = await navigation.cancelByVoice()
+            await coordinator.cancel(acknowledge: !stoppedRoute)
+            return true
+        case .stopNavigation:
+            if !(await navigation.cancelByVoice()) {
+                await arbiter.say(SpokenPhrase(text: "You're not navigating right now."), on: .prompt, maxWaitMs: 3_000)
+            }
+            return true
+        case .repeatDirection:
+            await navigation.repeatLast()
+            return true
+        case .navigationStatus:
+            await navigation.status()
+            return true
+        default:
+            break
+        }
         if await coordinator.handle(intent, utterance: text) { return true }
         switch intent {
         case .navigate(let place):
-            await navigate(place)
+            await navigation.start(to: place)
         case .time:
             await arbiter.say(SpokenPhrase(text: AnswerPhrasing.time()), on: .prompt, maxWaitMs: 3_000)
         case .help:

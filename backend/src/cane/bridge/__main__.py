@@ -49,6 +49,7 @@ from cane.bridge.config import (
     DEFAULT_REQUEST_TIMEOUT_S,
     DEFAULT_WS_HOST,
     DEFAULT_WS_PORT,
+    VEHICLE_CLASSES,
     BridgeConfig,
 )
 from cane.bridge.health import HealthMonitor, Mode
@@ -147,6 +148,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="append every event sent to the phone to this JSONL file, for the "
              "step-28 trust baseline; refuses to overwrite an existing recording",
     )
+    parser.add_argument(
+        "--hazards", choices=("all", "vehicles"), default="all",
+        help="which detections become hazard events for the phone: all classes, or "
+             "only cars and buses (people, poles, chairs... are still detected for "
+             "steering, just never announced)",
+    )
+    parser.add_argument("--no-steer", action="store_true", help="send no steering pulses to the phone")
+    parser.add_argument("--no-ground", action="store_true", help="send no floor-drop warnings to the phone")
     parser.add_argument("--duration-s", type=float, default=None, help="stop after N seconds")
     parser.add_argument("--log-level", default="INFO")
     parser.add_argument(
@@ -170,6 +179,9 @@ def build_config(args: argparse.Namespace) -> BridgeConfig:
         ws_port=args.ws_port,
         allow_unsynced=args.allow_unsynced,
         record_events=args.record_events,
+        hazard_classes=VEHICLE_CLASSES if args.hazards == "vehicles" else None,
+        send_steer=not args.no_steer,
+        send_ground=not args.no_ground,
         **overrides,
     )
 

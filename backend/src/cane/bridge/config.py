@@ -62,6 +62,10 @@ def _new_session_id() -> str:
     return f"bridge-{uuid.uuid4().hex[:12]}"
 
 
+#: ``--hazards vehicles``: the classes that can drive at the wearer.
+VEHICLE_CLASSES: frozenset[str] = frozenset({"car", "bus"})
+
+
 @dataclass(frozen=True)
 class BridgeConfig:
     """One run of ``python -m cane.bridge``.
@@ -87,6 +91,16 @@ class BridgeConfig:
     # Step 28: where to append the walk recording, or None for no recording.
     # Off by default, so the measured run and the unmeasured run are one run.
     record_events: Path | None = None
+    # Which detection classes become events for the phone (None = all). The
+    # wearer asked for vehicle hazards only (2026-09-26): "person" every two
+    # seconds was noise. Detection itself is unchanged -- every box still
+    # anchors the depth scale for steering; only what is *sent* is filtered.
+    hazard_classes: frozenset[str] | None = None
+    # Steering pulses (steps 21-27) and floor-drop warnings (step 29). On by
+    # default; `./startcane full` turns both off while the cane is a car
+    # alarm only ("we only want cars moving towards us", 2026-09-26).
+    send_steer: bool = True
+    send_ground: bool = True
 
     def __post_init__(self) -> None:
         if not self.inference_url.startswith(ALLOWED_URL_SCHEMES):

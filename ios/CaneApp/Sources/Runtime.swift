@@ -116,6 +116,9 @@ final class Runtime {
                 userGain: { settings.current.hapticGain },
                 panRoute: { AudioSessionConfig.panRoute() }
             ),
+            // Hazards are vehicles coming at the wearer, nothing else
+            // (2026-09-26); steering still guides around every obstacle.
+            state: FeedbackState(hazardScope: .approachingVehicles),
             clock: Self.now
         )
         self.feedback = feedback
@@ -157,7 +160,7 @@ final class Runtime {
         voice = VoiceRouter(
             arbiter: arbiter,
             coordinator: coordinator,
-            navigate: { place in await navigation.start(to: place) },
+            navigation: navigation,
             onHeard: callbacks.onHeard,
             diagnostics: diagnostics
         )
