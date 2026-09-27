@@ -155,7 +155,8 @@ public enum Gauntlet {
     ) -> (FeedbackState, Outcome) {
         var working = state
         let key = FeedbackKey(event)
-        let raw = UrgencyPolicy.decide(event)
+        let raw = working.hazardScope.decide(event)
+        if !working.hazardScope.admits(event) { working.counters.outOfScope += 1 }
         // Gate 5b, before hysteresis so the smoothing sees the final level:
         // `recentAccepted` already holds this event (stage 3 appended it), so
         // the sweep is measured against the track's previous sighting.

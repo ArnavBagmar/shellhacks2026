@@ -30,6 +30,8 @@ public struct FeedbackCounters: Equatable, Sendable {
     /// Neither `range_m` nor `range_band`: scored as `far`.
     public var bandUnknown = 0
     public var ambientLogged = 0
+    /// Kept quiet by `HazardScope` (e.g. a person, or a car not coming at you).
+    public var outOfScope = 0
     public var announced = 0
     public var preempted = 0
     public var queueOverflow = 0

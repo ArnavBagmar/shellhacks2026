@@ -151,15 +151,22 @@ public actor QueryCoordinator {
         case .describeFront:
             await ask(.describeFront, target: nil, utterance: utterance ?? "what is in front of me")
         case .cancel:
-            finish()
-            speaker.cancel(upTo: .answer)
-            _ = await speaker.say(SpokenPhrase(text: AnswerPhrasing.cancelled), on: .prompt, haptic: nil, pan: 0, maxWaitMs: 0)
+            await cancel(acknowledge: true)
         case .ask(let question):
             await ask(.ask, target: nil, utterance: question)
-        case .readSign, .navigate, .time, .help:
+        case .readSign, .navigate, .time, .help, .stopNavigation, .repeatDirection, .navigationStatus:
             return false
         }
         return true
+    }
+
+    /// Drops the question in flight and cuts its speech; "Okay." unless the
+    /// caller says something itself (e.g. "Navigation stopped.").
+    public func cancel(acknowledge: Bool) async {
+        finish()
+        speaker.cancel(upTo: .answer)
+        guard acknowledge else { return }
+        _ = await speaker.say(SpokenPhrase(text: AnswerPhrasing.cancelled), on: .prompt, haptic: nil, pan: 0, maxWaitMs: 0)
     }
 
     public func receive(_ answer: SceneAnswer) async {

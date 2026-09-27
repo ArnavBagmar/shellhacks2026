@@ -49,6 +49,7 @@ from cane.bridge.config import (
     DEFAULT_REQUEST_TIMEOUT_S,
     DEFAULT_WS_HOST,
     DEFAULT_WS_PORT,
+    VEHICLE_CLASSES,
     BridgeConfig,
 )
 from cane.bridge.health import HealthMonitor, Mode
@@ -154,6 +155,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="append every event sent to the phone to this JSONL file, for the "
              "step-28 trust baseline; refuses to overwrite an existing recording",
     )
+    parser.add_argument(
+        "--hazards", choices=("all", "vehicles"), default="all",
+        help="which detections become hazard events for the phone: all classes, or "
+             "only cars and buses (people, poles, chairs... are still detected for "
+             "steering, just never announced)",
+    )
+    parser.add_argument("--no-steer", action="store_true", help="send no steering pulses to the phone")
+    parser.add_argument("--no-ground", action="store_true", help="send no floor-drop warnings to the phone")
     parser.add_argument("--duration-s", type=float, default=None, help="stop after N seconds")
     parser.add_argument("--log-level", default="INFO")
     parser.add_argument(
@@ -177,6 +186,9 @@ def build_config(args: argparse.Namespace) -> BridgeConfig:
         ws_port=args.ws_port,
         allow_unsynced=args.allow_unsynced,
         record_events=args.record_events,
+        hazard_classes=VEHICLE_CLASSES if args.hazards == "vehicles" else None,
+        send_steer=not args.no_steer,
+        send_ground=not args.no_ground,
         **overrides,
     )
 
@@ -294,9 +306,14 @@ async def run_bridge(
     # and dies with this process -- one bridge run is one session, which is
     # exactly the memory lifetime the PRD asks for.
     places: PlaceMemory | None = None
+    # Local page at http://localhost:8780 (CANE_DEBUG_PORT=0: off): cameras,
+    # Gemini's picks and the hazard view. Rides with --scene (`startcane full`).
+    debug = None
     if scene_vlm is not None:
         from cane.scene.debug_view import start_debug_view
 
+        debug = start_debug_view(grab=grab, delta_deg=config.delta_deg)
+    if scene_vlm is not None:
         clear_ways = LatestClearWay()
         places = PlaceMemory()
         scene_service = SceneQueryService(
@@ -305,8 +322,7 @@ async def run_bridge(
             clear_ways=clear_ways,
             delta_deg=config.delta_deg,
             weather=weather_from_env(),
-            # Local page at http://localhost:8780 (CANE_DEBUG_PORT=0: off).
-            debug=start_debug_view(grab=grab),
+            debug=debug,
             # Gemini's views only; the detector keeps its level crops.
             layout=HEAD_WORN_LAYOUT,
             places=places,
@@ -341,6 +357,7 @@ async def run_bridge(
             monitor=monitor, source_provider=lambda: uplink.last_source,
             local_detector=local.detector_name,
             frames_ignored=lambda: server.frames_ignored,
+            hazard_observer=debug.record_hazards if debug is not None else None,
         )
         grab.start()
         _log_banner(config, args, local)

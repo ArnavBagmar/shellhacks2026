@@ -59,7 +59,7 @@ async def test_the_picked_image_has_the_box_drawn_on_it() -> None:
     drawn = cv2.imdecode(np.frombuffer(hub.query_image("q-dbg1", 6) or b"", np.uint8), cv2.IMREAD_COLOR)
     plain = cv2.imdecode(np.frombuffer(PHOTO, np.uint8), cv2.IMREAD_COLOR)
     assert drawn.shape == plain.shape
-    assert np.abs(drawn.astype(int) - plain.astype(int)).max() > 60  # a green box, not JPEG noise
+    assert np.abs(drawn.astype(int) - plain.astype(int)).max() > 60  # a yellow box, not JPEG noise
     assert hub.query_image("q-dbg1", 0) is not None
     assert hub.query_image("q-nope", 0) is None
 
@@ -128,7 +128,7 @@ async def test_it_serves_the_page_the_state_and_the_images() -> None:
     try:
         base = f"http://127.0.0.1:{server.server_address[1]}"
         page = urllib.request.urlopen(f"{base}/").read()
-        assert b"Cane debug view" in page
+        assert b"Cane Live View" in page
         state = json.loads(urllib.request.urlopen(f"{base}/state.json").read())
         assert state["queries"][0]["query_id"] == "q-dbg1"
         assert urllib.request.urlopen(f"{base}/query/q-dbg1/6.jpg").read()[:2] == b"\xff\xd8"
@@ -150,5 +150,17 @@ def test_the_live_view_is_a_motion_jpeg_stream() -> None:
             buffered += stream.read1(65536)
             parts = buffered.count(b"Content-Type: image/jpeg")
         stream.close()
+    finally:
+        server.shutdown()
+
+
+def test_a_still_picture_keeps_streaming_so_the_browser_shows_it() -> None:
+    hub = DebugHub(live_frame=lambda: EQUIRECT, source_name="still test photo")
+    server = serve_debug(hub, port=0)
+    try:
+        stream = urllib.request.urlopen(f"http://127.0.0.1:{server.server_address[1]}/live.mjpg", timeout=5)
+        buffered = b""
+        while buffered.count(b"--canelive") < 2:  # the second part is what makes Chrome draw the first
+            buffered += stream.read1(65536)
     finally:
         server.shutdown()

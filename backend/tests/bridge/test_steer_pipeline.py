@@ -294,3 +294,44 @@ async def test_the_live_unanchored_path_reaches_the_phone() -> None:
     assert all(not frame.proximity_anchored for frame in harness.sink.steers)
     assert all(frame.proximity == 0.5 for frame in harness.sink.steers)
     assert all(frame.steer > 0.0 for frame in harness.sink.steers), "still steers right"
+
+
+async def test_an_answered_tick_raises_nothing_in_the_response_handler(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # The sender logs and swallows a handler exception, so a NameError in
+    # the ground path (CROP_YAWS_DEG after the nadir crop's rename, live
+    # 2026-09-26) failed every tick while every other test stayed green.
+    harness = Harness()
+    with caplog.at_level("ERROR", logger="cane.bridge.sender"):
+        await harness.run()
+    assert harness.sink.steers
+    assert "handler raised" not in caplog.text
+
+
+async def test_vehicles_only_sends_no_person_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The scripted backend detects a person every tick; with --hazards
+    # vehicles none of them reach the phone, and steering is untouched.
+    from dataclasses import replace
+
+    from cane.bridge.config import VEHICLE_CLASSES
+
+    harness = Harness()
+    harness.pipeline._config = replace(harness.pipeline._config, hazard_classes=VEHICLE_CLASSES)  # noqa: SLF001
+    await harness.run()
+    assert harness.sink.steers, "steering must still run"
+    assert harness.sink.events == []
+
+
+async def test_steering_and_floor_drops_can_be_switched_off() -> None:
+    # `./startcane full` runs the cane as a car alarm only: no steer frames.
+    from dataclasses import replace
+
+    harness = Harness()
+    harness.pipeline._config = replace(  # noqa: SLF001
+        harness.pipeline._config, send_steer=False, send_ground=False  # noqa: SLF001
+    )
+    await harness.run()
+    assert harness.sink.events, "hazard events still flow"
+    assert harness.sink.steers == []
+    assert harness.pipeline.steer_sent == 0

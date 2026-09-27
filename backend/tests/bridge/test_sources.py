@@ -98,4 +98,5 @@ def test_the_insta360_virtual_camera_is_skipped_for_the_real_x4() -> None:
 
     names = ["Insta360 Virtual Camera", "Insta360 X4"]
     assert pick_real_camera(names, str) == "Insta360 X4"
-    assert pick_real_camera(["Insta360 Virtual Camera"], str) == "Insta360 Virtual Camera"
+    # Only the virtual one attached means the X4 is unplugged: never use it.
+    assert pick_real_camera(["Insta360 Virtual Camera"], str) is None

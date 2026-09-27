@@ -287,3 +287,36 @@ final class HowFarIntentTests: XCTestCase {
         XCTAssertEqual(IntentParser.parse("is there a door nearby"), .find("door"))
     }
 }
+
+final class NavigationCommandTests: XCTestCase {
+    func testStopNavigationPhrasings() {
+        for text in [
+            "stop navigation", "please stop navigating", "cancel the route", "end directions", "stop routing",
+            "can you cancel navigation", "stop taking me to the library", "exit navigation", "turn off navigation",
+        ] {
+            XCTAssertEqual(IntentParser.parse(text), .stopNavigation, text)
+        }
+    }
+
+    func testPlainStopIsStillCancel() {
+        for text in ["stop", "cancel", "never mind", "stop talking"] {
+            XCTAssertEqual(IntentParser.parse(text), .cancel, text)
+        }
+    }
+
+    func testRepeatAndStatus() {
+        XCTAssertEqual(IntentParser.parse("repeat that"), .repeatDirection)
+        XCTAssertEqual(IntentParser.parse("say that again"), .repeatDirection)
+        XCTAssertEqual(IntentParser.parse("can you repeat that please"), .repeatDirection)
+        XCTAssertEqual(IntentParser.parse("what was that"), .repeatDirection)
+        XCTAssertEqual(IntentParser.parse("where am I going"), .navigationStatus)
+        XCTAssertEqual(IntentParser.parse("are we there yet"), .navigationStatus)
+        XCTAssertEqual(IntentParser.parse("what's my destination"), .navigationStatus)
+    }
+
+    func testStartingARouteStillWorks() {
+        XCTAssertEqual(IntentParser.parse("take me to the library"), .navigate("library"))
+        // A question that merely starts like a repeat goes to Gemini.
+        XCTAssertNil(IntentParser.parse("what was that sign about"))
+    }
+}

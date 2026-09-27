@@ -130,10 +130,31 @@ public enum SpeechPhrase {
         return head
     }
 
+    /// A car or bus coming at the wearer, at any urgency: the whole
+    /// warning, not a clipped "Stop!" -- the wearer asked for exactly this
+    /// at a crosswalk (2026-09-26). Still locative, never a steering command:
+    /// it says where the car comes *from*, not where to go.
+    public static func vehicleComingWords(sector: Sector, cls: ObjectClass) -> String {
+        let vehicle = classWord(cls).capitalized
+        switch sector {
+        case .ahead, .aheadQuarter:
+            return "Stop! \(vehicle) coming ahead."
+        case .lateral(.left):
+            return "Stop! \(vehicle) coming from your left."
+        case .lateral:
+            return "Stop! \(vehicle) coming from your right."
+        case .behindQuarter, .behind:
+            return "\(vehicle) coming behind you!"
+        }
+    }
+
     /// The single entry point the renderer calls.
     public static func words(for announcement: Announcement) -> String? {
         guard let verbosity = announcement.speech else { return nil }
         let sector = BearingSector.sector(announcement.bearingDeg)
+        if HazardScope.isVehicleComing(cls: announcement.cls, closingMps: announcement.closingMps) {
+            return vehicleComingWords(sector: sector, cls: announcement.cls)
+        }
         switch verbosity {
         case .oneWord:
             // "<= 2 words, <= 450 ms", not literally one word.

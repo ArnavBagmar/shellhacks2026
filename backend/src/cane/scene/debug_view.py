@@ -43,19 +43,22 @@ LIVE_REFRESH_S = 0.8
 STREAM_FPS_ENV = "CANE_DEBUG_FPS"
 DEFAULT_STREAM_FPS = 15.0
 BOUNDARY = "canelive"
+#: An unchanged frame is re-sent this often so the browser shows it.
+STREAM_RESEND_S = 1.0
 LIVE_CROP_PX = 240
 PAGE = Path(__file__).with_name("debug_page.html")
 #: Phone diagnostics shown in the feed (the rest only feed the stats).
 FEED_KINDS = {
     "transcript", "gate", "intent", "say", "answer", "distance", "link", "link_alert", "note",
-    "typed", "assist", "start",
+    "typed", "assist", "start", "hazard",
 }
 #: No phone diagnostic for this long -> shown as disconnected (it sends mic
 #: levels every 2 s and depth every 1 s while walking).
 PHONE_QUIET_MS = 4_000
 
-GREEN = (80, 220, 80)
-YELLOW = (0, 220, 255)
+#: The page's signal yellow (#ffd200) and sign black, in BGR.
+SIGN_YELLOW = (0, 210, 255)
+SIGN_BLACK = (26, 26, 26)
 GREY = (160, 160, 160)
 
 
@@ -108,7 +111,16 @@ class DebugHub:
         frame_counter: Callable[[], int] | None = None,
         frame_arrival_ms: Callable[[], int | None] | None = None,
         source_name: str = "none",
+        delta_deg: float = 0.0,
+        clips_dir: Path | None = None,
     ) -> None:
+        from cane.scene.hazard_clips import HazardRecorder
+        from cane.scene.hazard_view import HazardBoard
+
+        #: The hazard section: filled by the bridge (``startcane full``).
+        self.hazards = HazardBoard(delta_deg=delta_deg)
+        #: Every car alarm, saved for replay (the alarm can't be staged live).
+        self.clips = HazardRecorder(live_frame, clips_dir)
         self._lock = threading.Lock()
         self._live_frame = live_frame
         self._frame_counter = frame_counter
@@ -167,10 +179,22 @@ class DebugHub:
         except Exception:  # noqa: BLE001 - debug view must never break answers
             logger.exception("debug view: could not record query")
 
+    def record_hazards(self, response: Any, built: tuple[Any, ...], sent: tuple[Any, ...]) -> None:
+        """The bridge's ``hazard_observer``: one inference response."""
+        rows = self.hazards.record(response, built, sent)
+        self.clips.offer(now_ms(), rows)
+
+    def hazard_jpeg(self, max_age_s: float = LIVE_REFRESH_S) -> bytes | None:
+        return self.hazards.view_jpeg(self._live_frame, max_age_s)
+
     def on_phone_diag(self, record: dict[str, Any]) -> None:
         kind = record.get("kind")
         data = record.get("data") or {}
         received = now_ms()
+        if kind in ("hazard", "say"):
+            said = self.hazards.on_phone(str(kind), data)
+            if said:
+                self.clips.note_said(received, said)
         with self._lock:
             self._phone_last_ms = received
             if kind == "mic":
@@ -188,7 +212,7 @@ class DebugHub:
                 if waited is not None:
                     self._voice_waits.append(waited)
             if kind in ("answer", "distance", "say") and self._queries:
-                self._attach_to_query(str(kind), data)
+                self._attach_to_query(str(kind), dict(data, at_ms=received))
             if kind in FEED_KINDS and not (kind == "transcript" and not data.get("final")):
                 self._feed.append({"t_ms": received, "kind": kind, "data": data})
 
@@ -223,7 +247,7 @@ class DebugHub:
                     "mic_peak": self._mic,
                     "depth": self._depth,
                 },
-                "x4": live,
+                "x4": dict(live, tiles=live_order()),
                 "gemini": {
                     "questions": len(answers),
                     "by_status": dict(Counter(a["status"] for a in answers)),
@@ -240,6 +264,7 @@ class DebugHub:
                 },
                 "queries": queries,
                 "feed": list(self._feed),
+                "hazards": self.hazards.state(),
             }
 
     def query_image(self, query_id: str, index: int) -> bytes | None:
@@ -311,22 +336,15 @@ def _num(value: Any) -> float | None:
 
 
 def _strip(equirect: np.ndarray) -> bytes:
-    """The six views Gemini is sent (tall, tilted down), side by side, each
-    labelled with where it points.
+    """The six views Gemini is sent (tall, tilted down), side by side, ordered
+    left to right by yaw. The page labels them (``LIVE_ORDER``).
     """
     from cane.scene.tall_views import HEAD_PITCH_DEG, HEAD_VFOV_DEG, YAWS_DEG, tall_views
 
     images = tall_views(equirect, LIVE_CROP_PX, vfov_deg=HEAD_VFOV_DEG, pitch_deg=HEAD_PITCH_DEG)
-    tiles = []
-    for image, yaw in zip(images, YAWS_DEG):
-        tile = image.copy()
-        label = "ahead" if yaw == 0 else ("behind" if abs(yaw) == 180 else f"{abs(yaw):g} {'R' if yaw > 0 else 'L'}")
-        cv2.rectangle(tile, (0, 0), (LIVE_CROP_PX, 28), (0, 0, 0), -1)
-        cv2.putText(tile, label, (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
-        tiles.append(tile)
     # Left of the wearer on the left: order the strip by yaw.
-    order = sorted(range(len(tiles)), key=lambda i: _signed(YAWS_DEG[i]))
-    ok, buf = cv2.imencode(".jpg", np.hstack([tiles[i] for i in order]), [cv2.IMWRITE_JPEG_QUALITY, 70])
+    order = sorted(range(len(images)), key=lambda i: _signed(YAWS_DEG[i]))
+    ok, buf = cv2.imencode(".jpg", np.hstack([images[i] for i in order]), [cv2.IMWRITE_JPEG_QUALITY, 70])
     return buf.tobytes() if ok else b""
 
 
@@ -334,8 +352,21 @@ def _signed(yaw: float) -> float:
     return 180.0 if abs(yaw) == 180 else yaw
 
 
+def yaw_name(yaw: float) -> str:
+    """"Ahead", "60 L", "Behind": a view's short name on the page."""
+    return "Ahead" if yaw == 0 else ("Behind" if abs(yaw) == 180 else f"{abs(yaw):g} {'R' if yaw > 0 else 'L'}")
+
+
+def live_order() -> list[str]:
+    """The live strip's tiles, left to right."""
+    from cane.scene.tall_views import YAWS_DEG
+
+    return [yaw_name(y) for y in sorted(YAWS_DEG, key=_signed)]
+
+
 def _annotate(jpeg: bytes, reply: dict[str, Any] | None, subject: str | None) -> bytes:
-    """Draw Gemini's box (green) and x position (yellow) on the image it picked."""
+    """Draw Gemini's box (signal yellow, black edge, subject on a black tag)
+    and its x position (thin white line) on the image it picked."""
     if reply is None:
         return jpeg
     image = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
@@ -348,15 +379,21 @@ def _annotate(jpeg: bytes, reply: dict[str, Any] | None, subject: str | None) ->
         y0, x0, y1, x1 = (float(v) / 1000 for v in box)
         p0 = (int(min(x0, x1) * w), int(min(y0, y1) * h))
         p1 = (int(max(x0, x1) * w), int(max(y0, y1) * h))
-        cv2.rectangle(image, p0, p1, GREEN, thick)
+        cv2.rectangle(image, p0, p1, SIGN_BLACK, thick + 2)
+        cv2.rectangle(image, p0, p1, SIGN_YELLOW, thick)
         if subject:
-            cv2.putText(image, subject, (p0[0], max(18, p0[1] - 8)), cv2.FONT_HERSHEY_SIMPLEX,
-                        max(0.5, w / 900), GREEN, max(1, thick // 2), cv2.LINE_AA)
+            scale = max(0.5, w / 900)
+            weight = max(1, thick // 2)
+            (tw, th), base = cv2.getTextSize(subject, cv2.FONT_HERSHEY_SIMPLEX, scale, weight)
+            top = p0[1] - th - base - 8 if p0[1] - th - base - 8 >= 0 else p1[1]
+            cv2.rectangle(image, (p0[0], top), (p0[0] + tw + 10, top + th + base + 8), SIGN_BLACK, -1)
+            cv2.putText(image, subject, (p0[0] + 5, top + th + 4), cv2.FONT_HERSHEY_SIMPLEX,
+                        scale, SIGN_YELLOW, weight, cv2.LINE_AA)
     x = reply.get("x_center")
     if isinstance(x, (int, float)):
         fx = x / 1000 if 1 < x <= 1000 else x
         px = int(min(max(fx, 0.0), 1.0) * (w - 1))
-        cv2.line(image, (px, 0), (px, h), YELLOW, max(1, thick // 2))
+        cv2.line(image, (px, 0), (px, h), (255, 255, 255), 1)
     ok, buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
     return buf.tobytes() if ok else jpeg
 
@@ -411,10 +448,26 @@ def serve_debug(hub: DebugHub, port: int = DEFAULT_PORT, host: str = "127.0.0.1"
                 elif path == "/state.json":
                     self._send(200, "application/json", json.dumps(hub.state()).encode())
                 elif path == "/live.mjpg":
-                    self._stream()
+                    self._stream(hub.live_jpeg)
+                elif path == "/hazards.mjpg":
+                    self._stream(hub.hazard_jpeg)
+                elif path == "/hazards.jpg":
+                    jpeg = hub.hazard_jpeg()
+                    self._send(200 if jpeg else 404, "image/jpeg", jpeg or b"")
                 elif path == "/live.jpg":
                     jpeg = hub.live_jpeg()
                     self._send(200 if jpeg else 404, "image/jpeg", jpeg or b"")
+                elif path == "/clips.json":
+                    from cane.scene.hazard_clips import list_clips
+
+                    self._send(200, "application/json", json.dumps(list_clips(hub.clips.directory)).encode())
+                elif path.startswith("/clips/"):
+                    from cane.scene.hazard_clips import clip_file
+
+                    _, _, name, file = path.split("/", 3)
+                    body = clip_file(name, file, hub.clips.directory)
+                    kind = "application/json" if file.endswith(".json") else "image/jpeg"
+                    self._send(200 if body else 404, kind if body else "text/plain", body or b"not found")
                 elif path.startswith("/query/"):
                     _, _, query_id, name = path.split("/", 3)
                     jpeg = hub.query_image(query_id, int(name.removesuffix(".jpg")))
@@ -424,7 +477,7 @@ def serve_debug(hub: DebugHub, port: int = DEFAULT_PORT, host: str = "127.0.0.1"
             except (ValueError, BrokenPipeError, ConnectionResetError):
                 pass
 
-        def _stream(self) -> None:
+        def _stream(self, frames: Callable[..., bytes | None]) -> None:
             """Motion JPEG: the browser shows each part as it arrives."""
             if not hub.has_live:
                 self._send(404, "text/plain", b"no live camera")
@@ -435,17 +488,20 @@ def serve_debug(hub: DebugHub, port: int = DEFAULT_PORT, host: str = "127.0.0.1"
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             last: bytes | None = None
+            sent_at = 0.0
             while True:
                 started = time.monotonic()
-                jpeg = hub.live_jpeg(max_age_s=period * 0.9)
-                if jpeg and jpeg is not last:
+                jpeg = frames(max_age_s=period * 0.9)
+                # Chrome shows a part only when the next one starts, so an
+                # unchanged picture (a still photo) is re-sent every second.
+                if jpeg and (jpeg is not last or started - sent_at >= STREAM_RESEND_S):
                     self.wfile.write(
                         f"--{BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: {len(jpeg)}\r\n\r\n".encode()
                     )
                     self.wfile.write(jpeg)
                     self.wfile.write(b"\r\n")
                     self.wfile.flush()
-                    last = jpeg
+                    last, sent_at = jpeg, started
                 time.sleep(max(0.0, period - (time.monotonic() - started)))
 
         def _send(self, status: int, content_type: str, body: bytes) -> None:
@@ -470,7 +526,8 @@ PORT_ENV = "CANE_DEBUG_PORT"
 
 
 def start_debug_view(
-    *, grab: Any | None = None, still: np.ndarray | None = None, port: int | None = None
+    *, grab: Any | None = None, still: np.ndarray | None = None, port: int | None = None,
+    delta_deg: float = 0.0,
 ) -> DebugHub | None:
     """The page for one run: live frames from ``grab`` (a ``GrabThread``) or
     one ``still`` image, the phone's diagnostics from the ``cane.phone``
@@ -494,6 +551,7 @@ def start_debug_view(
             frame_counter=lambda: grab.frames_grabbed,
             frame_arrival_ms=lambda: (f.t_arrival_laptop_ms if (f := newest()) is not None else None),
             source_name=str(grab.source_name),
+            delta_deg=delta_deg,
         )
     elif still is not None:
         hub = DebugHub(live_frame=lambda: still, source_name="still test photo")

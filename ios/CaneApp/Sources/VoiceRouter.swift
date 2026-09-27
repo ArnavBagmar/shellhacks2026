@@ -13,7 +13,7 @@ actor VoiceRouter {
     private var phrases = PromptPicker()
     private let arbiter: OutputArbiter
     private let coordinator: QueryCoordinator
-    private let navigate: @Sendable (String) async -> Void
+    private let navigation: NavigationController
     /// Indoors or outdoors right now, or nil before GPS has said. Decides who
     /// owns a destination: the laptop's sign memory, or the Routes engine.
     private let setting: @Sendable () -> WalkSetting?
@@ -24,7 +24,7 @@ actor VoiceRouter {
     init(
         arbiter: OutputArbiter,
         coordinator: QueryCoordinator,
-        navigate: @escaping @Sendable (String) async -> Void,
+        navigation: NavigationController,
         setting: @escaping @Sendable () -> WalkSetting? = { nil },
         onHeard: @escaping @Sendable (String) -> Void,
         diagnostics: Diagnostics
@@ -32,7 +32,7 @@ actor VoiceRouter {
         self.diagnostics = diagnostics
         self.arbiter = arbiter
         self.coordinator = coordinator
-        self.navigate = navigate
+        self.navigation = navigation
         self.setting = setting
         self.onHeard = onHeard
     }
@@ -68,11 +68,11 @@ actor VoiceRouter {
                 "command": .text(text),
                 "intent": .text(intent.map { String(describing: $0) } ?? "none"),
             ])
-            let arbiter = arbiter, coordinator = coordinator, navigate = navigate, onHeard = onHeard
+            let arbiter = arbiter, coordinator = coordinator, navigation = navigation, onHeard = onHeard
             let setting = setting
             Task {
                 let understood = await Self.route(
-                    text, arbiter: arbiter, coordinator: coordinator, navigate: navigate, setting: setting
+                    text, arbiter: arbiter, coordinator: coordinator, navigation: navigation, setting: setting
                 )
                 if !understood {
                     // Show exactly what was heard (the screen is the only
@@ -91,13 +91,34 @@ actor VoiceRouter {
     /// Returns false when the words matched no intent.
     private static func route(
         _ text: String, arbiter: OutputArbiter, coordinator: QueryCoordinator,
-        navigate: @Sendable (String) async -> Void,
+        navigation: NavigationController,
         setting: @Sendable () -> WalkSetting? = { nil }
     ) async -> Bool {
         guard let intent = IntentParser.route(text) else {
             logger.info("not understood: \(text, privacy: .public)")
             await arbiter.say(SpokenPhrase(text: AnswerPhrasing.notUnderstood(heard: text)), on: .prompt, maxWaitMs: 3_000)
             return false
+        }
+        switch intent {
+        case .cancel:
+            // "Stop" means everything: the question in flight *and* a route
+            // (2026-09-26: stuck rerouting with no way out).
+            let stoppedRoute = await navigation.cancelByVoice()
+            await coordinator.cancel(acknowledge: !stoppedRoute)
+            return true
+        case .stopNavigation:
+            if !(await navigation.cancelByVoice()) {
+                await arbiter.say(SpokenPhrase(text: "You're not navigating right now."), on: .prompt, maxWaitMs: 3_000)
+            }
+            return true
+        case .repeatDirection:
+            await navigation.repeatLast()
+            return true
+        case .navigationStatus:
+            await navigation.status()
+            return true
+        default:
+            break
         }
         if await coordinator.handle(intent, utterance: text) { return true }
         switch intent {
@@ -111,7 +132,7 @@ actor VoiceRouter {
                 logger.info("indoors: \(place, privacy: .public) goes to the sign engine, not Maps")
                 await coordinator.handle(.find(place), utterance: "where is \(place)")
             } else {
-                await navigate(place)
+                await navigation.start(to: place)
             }
         case .time:
             await arbiter.say(SpokenPhrase(text: AnswerPhrasing.time()), on: .prompt, maxWaitMs: 3_000)

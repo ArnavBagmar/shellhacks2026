@@ -15,8 +15,15 @@ public enum VoiceIntent: Equatable, Sendable {
     case readSign
     /// "Take me to the library."
     case navigate(String)
-    /// "Never mind" / "stop" / "cancel".
+    /// "Never mind" / "stop" / "cancel": stops whatever is going on,
+    /// navigation included.
     case cancel
+    /// "Stop navigation" / "cancel the route" / "end directions".
+    case stopNavigation
+    /// "Repeat that" / "say that again": the last direction.
+    case repeatDirection
+    /// "Where am I going?" / "are we there yet?".
+    case navigationStatus
     /// "What time is it?" -- answered on the phone.
     case time
     /// "What can you do?" -- the command list, spoken.
@@ -47,6 +54,13 @@ public enum IntentParser {
         guard !text.isEmpty else { return nil }
 
         if cancelPhrases.contains(text) { return .cancel }
+        // Before "take me to" and the finds: "stop taking me to the library"
+        // must stop, not start, a route (2026-09-26: stuck rerouting, and
+        // nothing the wearer said could end it).
+        if stopNavigationPhrases.contains(where: text.contains) { return .stopNavigation }
+        let bare = text.hasSuffix(" please") ? String(text.dropLast(" please".count)) : text
+        if repeatPhrases.contains(bare) { return .repeatDirection }
+        if navigationStatusPhrases.contains(where: text.contains) { return .navigationStatus }
         if timePhrases.contains(where: text.contains) { return .time }
         if text == "help" || helpPhrases.contains(where: text.contains) { return .help }
         if let place = after(navigatePrefixes, in: text).flatMap(clean) { return .navigate(place) }
@@ -123,6 +137,25 @@ public enum IntentParser {
         "how far away are the ", "how far are the ", "how far are ",
         // "can you tell me how far the bench is" (filler already stripped).
         "how far away the ", "how far the ",
+    ]
+
+    static let stopNavigationPhrases = [
+        "stop navigation", "stop navigating", "stop the navigation", "stop routing", "stop the route",
+        "stop route", "stop directions", "stop the directions", "stop giving directions", "stop guiding",
+        "stop guidance", "stop taking me", "cancel navigation", "cancel the navigation", "cancel route",
+        "cancel the route", "cancel routing", "cancel directions", "cancel the directions", "end navigation",
+        "end the navigation", "end route", "end the route", "end directions", "exit navigation",
+        "quit navigation", "turn off navigation", "i don't want to go there", "i do not want to go there",
+    ]
+    /// Whole-sentence (or sentence-start) matches only: "what was that
+    /// sign" is a question for Gemini, not a repeat.
+    static let repeatPhrases: Set<String> = [
+        "repeat", "repeat that", "repeat it", "say that again", "say it again", "repeat the direction",
+        "repeat the directions", "repeat directions", "repeat the last direction", "what was that", "come again",
+    ]
+    static let navigationStatusPhrases = [
+        "where am i going", "where are we going", "where are you taking me", "what is my destination",
+        "what's my destination", "are we there yet", "how much further", "how much farther", "navigation status",
     ]
 
     static let navigatePrefixes = [

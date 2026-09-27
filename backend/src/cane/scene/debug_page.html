@@ -3,277 +3,1027 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cane Debug View</title>
+<title>Cane Live View</title>
 <style>
   :root {
-    --bg: #0d0f12; --panel: #161a1f; --line: #262c34; --text: #e6e9ee; --dim: #8b95a3;
-    --ok: #3ecf6e; --warn: #f2b33d; --bad: #f25555; --accent: #5aa9ff; --pick: #3ecf6e;
+    --ground: #e2e4e3;       /* concourse terrazzo */
+    --ground-2: #d3d6d5;
+    --ink: #1a1a1a;          /* sign black */
+    --ink-2: #4a4945;
+    --yellow: #ffd200;       /* direction signs */
+    --yellow-2: #e6bd00;
+    --charcoal: #2c2d2f;     /* information bands */
+    --board: #141414;        /* flight-board panels */
+    --board-2: #1f1f1f;
+    --board-line: #2e2e2e;
+    --board-dim: #a3a29d;
+    --white: #ffffff;
+    --red: #d52b1e;          /* STOP only */
+    --red-2: #a81f15;
+    --blue: #0b5ea8;         /* RECORDED only */
+    --amber: #ffbe00;
+    --r: 6px;
+    --font: "Avenir Next", Avenir, "Helvetica Neue", Helvetica, Arial, sans-serif;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-         font: 14px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; }
-  header { display: flex; align-items: baseline; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
-  header h1 { font-size: 17px; margin: 0; }
-  header .dim { color: var(--dim); font-size: 12px; }
-  main { padding: 16px 20px 40px; display: grid; gap: 16px; max-width: 1700px; margin: 0 auto; }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
-  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
-  .tile h3 { margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
-  .tile .big { font-size: 20px; font-weight: 650; }
-  .tile .small { color: var(--dim); font-size: 12px; margin-top: 2px; }
-  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
-  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; }
-  section > h2 { font-size: 13px; margin: 0 0 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; }
-  .live img { width: 100%; border-radius: 8px; display: block; background: #000; }
-  .order { display: flex; justify-content: space-between; color: var(--dim); font-size: 11px; margin-top: 4px; }
-  .cols { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(320px, 1fr); gap: 16px; }
-  @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
-  .q-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; margin-bottom: 10px; }
-  .q-head .utt { font-size: 18px; font-weight: 650; }
-  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #222831; }
-  .pill.found { background: #173b25; color: var(--ok); } .pill.not_found { background: #3b3417; color: var(--warn); }
-  .pill.unavailable { background: #3b1717; color: var(--bad); } .pill.described { background: #172b3b; color: var(--accent); }
-  .facts { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; font-size: 13px; margin-bottom: 12px; }
-  .facts dt { color: var(--dim); } .facts dd { margin: 0; overflow-wrap: anywhere; }
-  .views { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
-  .view { border: 2px solid transparent; border-radius: 9px; overflow: hidden; background: #000; }
-  .view.chosen { border-color: var(--pick); box-shadow: 0 0 0 3px #3ecf6e33; }
-  .view img { width: 100%; display: block; cursor: zoom-in; }
-  .view .cap { font-size: 11px; color: var(--dim); padding: 5px 7px; background: var(--panel); }
-  .view.chosen .cap { color: var(--ok); font-weight: 600; }
-  pre { margin: 0; background: #0b0d10; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
-        font: 12px/1.45 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; }
-  details { margin-top: 10px; } summary { cursor: pointer; color: var(--dim); font-size: 12px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { text-align: left; color: var(--dim); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 4px 6px; }
-  td { padding: 6px; border-top: 1px solid var(--line); vertical-align: top; }
-  tr.row { cursor: pointer; } tr.row:hover { background: #1c2128; } tr.row.sel { background: #1d2a3a; }
-  .feed { max-height: 560px; overflow: auto; font-size: 12.5px; }
-  .feed div { padding: 4px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: 62px 70px 1fr; gap: 8px; }
-  .feed .t { color: var(--dim); font-variant-numeric: tabular-nums; }
-  .feed .k { color: var(--dim); text-transform: uppercase; font-size: 10.5px; letter-spacing: .05em; padding-top: 2px; }
-  .feed .k.intent, .feed .k.gate { color: var(--accent); } .feed .k.say { color: var(--ok); }
-  .feed .k.link_alert, .feed .k.distance { color: var(--warn); }
-  .empty { color: var(--dim); font-style: italic; }
-  .follow { margin-left: auto; font-size: 12px; color: var(--dim); display: flex; gap: 6px; align-items: center; }
+  [hidden] { display: none !important; }
+  html { background: var(--ground); }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 500 15px/1.45 var(--font);
+         font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+  ::selection { background: var(--yellow); color: var(--ink); }
+  :focus-visible { outline: 3px solid var(--yellow); outline-offset: 2px; box-shadow: 0 0 0 5px var(--ink); }
+  .board ::-webkit-scrollbar, .scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+  .board ::-webkit-scrollbar-thumb, .scroll::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 5px; border: 2px solid var(--board); }
+  .board ::-webkit-scrollbar-track { background: var(--board); }
+  button, select, input { font: inherit; color: inherit; }
+  img { display: block; }
+
+  /* ---- information band ---------------------------------------------- */
+  .band { position: sticky; top: 0; z-index: 5; display: flex; align-items: stretch; gap: 0;
+          background: var(--charcoal); color: var(--white); min-height: 56px; }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 0 20px 0 16px; background: var(--ink); }
+  .brand svg { width: 28px; height: 28px; }
+  .brand b { font-size: 21px; font-weight: 700; letter-spacing: -0.01em; }
+  .brand span { color: var(--board-dim); font-size: 14px; font-weight: 500; }
+  .status { display: flex; flex: 1; min-width: 0; overflow-x: auto; }
+  .st { flex: none; display: flex; flex-direction: column; justify-content: center; padding: 6px 18px; border-left: 1px solid #3c3d40;
+        transition: opacity .25s ease-out; }
+  .st small { font-size: 11.5px; font-weight: 600; color: #bcbbb6; letter-spacing: .02em; white-space: nowrap; }
+  .st span { font-size: 16px; font-weight: 700; white-space: nowrap; display: flex; align-items: center; gap: 7px; }
+  .st i { width: 9px; height: 9px; border-radius: 2px; background: #6b6b68; flex: none; }
+  .st.ok i { background: var(--yellow); } .st.bad i { background: var(--red); }
+  .st.bad span { color: #ff9d94; }
+  .st.stale { opacity: .6; }
+  .clock { display: flex; align-items: center; padding: 0 18px; font-size: 24px; font-weight: 700; letter-spacing: .01em;
+           background: var(--ink); white-space: nowrap; }
+  .clock small { font-size: 14px; color: var(--board-dim); margin-left: 3px; font-weight: 600; }
+
+  /* ---- live STOP (a real alarm, while it happens) --------------------- */
+  #live-stop { position: sticky; top: 56px; z-index: 4; display: none; align-items: center; gap: 22px;
+               background: var(--red); color: var(--white); padding: 14px 24px; }
+  #live-stop.on { display: flex; }
+  #live-stop b { font-size: 38px; font-weight: 800; letter-spacing: -0.01em; }
+  #live-stop span { font-size: 17px; font-weight: 600; }
+  #live-stop em { margin-left: auto; font-style: normal; font-weight: 700; font-size: 14px; border: 2px solid var(--white);
+                  border-radius: 4px; padding: 2px 8px; }
+
+  main { max-width: 1680px; margin: 0 auto; padding: 22px 24px 64px; display: grid; gap: 40px; }
+
+  /* ---- plates (section signs) ----------------------------------------- */
+  .plate-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; }
+  h2.plate { display: inline-flex; align-items: center; gap: 10px; margin: 0; background: var(--charcoal); color: var(--white);
+             font-size: 18px; font-weight: 700; padding: 7px 14px; border-radius: 4px; letter-spacing: -0.005em; }
+  h2.plate.red { background: var(--red); }
+  .plate-row .note { color: var(--ink-2); font-size: 14px; }
+
+  /* ---- now: the latest question -------------------------------------- */
+  .now { display: grid; grid-template-columns: minmax(0, 64fr) minmax(320px, 36fr); gap: 24px; align-items: start; }
+  .heard { display: flex; align-items: baseline; gap: 14px; margin: 0 0 14px; min-height: 40px; }
+  .tag { flex: none; display: inline-block; background: var(--ink); color: var(--yellow); font-size: 13px; font-weight: 700;
+         padding: 3px 8px 2px; border-radius: 3px; letter-spacing: .03em; transform: translateY(-3px); }
+  .heard q { font-size: 28px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.2; text-wrap: balance; }
+  .heard .when { margin-left: auto; color: var(--ink-2); font-size: 14px; white-space: nowrap; }
+  .follow { flex: none; border: 2px solid var(--ink); background: transparent; border-radius: 4px; padding: 3px 10px;
+            font-size: 13px; font-weight: 700; cursor: pointer; }
+  .follow[aria-pressed="true"] { background: var(--ink); color: var(--yellow); }
+  .follow:hover { background: var(--ink-2); color: var(--white); border-color: var(--ink-2); }
+
+  .sign { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: stretch; background: var(--yellow);
+          color: var(--ink); border-radius: var(--r); min-height: 196px; overflow: hidden; }
+  .sign .arrow { width: 196px; display: grid; place-items: center; border-right: 4px solid var(--ink); }
+  .sign .arrow svg { width: 132px; height: 132px; transition: transform .45s cubic-bezier(.16, 1, .3, 1); }
+  .sign .words { padding: 22px 28px; display: flex; flex-direction: column; justify-content: center; min-width: 0; gap: 4px; }
+  .sign .dir { font-size: 22px; font-weight: 700; }
+  .sign .subject { font-size: 64px; font-weight: 700; letter-spacing: -0.025em; line-height: 1.02; overflow-wrap: anywhere; }
+  .sign .subject.long { font-size: 46px; }
+  .sign .detail { font-size: 19px; font-weight: 600; color: #3a3325; }
+  .sign .dist { background: var(--ink); color: var(--yellow); margin: 18px; border-radius: 4px; padding: 14px 22px; min-width: 190px;
+                display: flex; flex-direction: column; justify-content: center; }
+  .sign .dist b { font-size: 58px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; white-space: nowrap; }
+  .sign .dist b small { font-size: 28px; margin-left: 4px; }
+  .sign .dist span { color: var(--white); font-size: 14px; font-weight: 600; margin-top: 8px; }
+  .sign .dist.none b { font-size: 30px; color: var(--board-dim); }
+  .sign.info { background: var(--charcoal); color: var(--white); }
+  .sign.info .detail { color: #d5d3cd; } .sign.info .arrow { border-color: #4a4b4e; }
+  .sign.idle .subject { font-size: 46px; }
+  .sign.idle .examples { display: flex; flex-wrap: wrap; gap: 8px 10px; margin-top: 10px; }
+  .sign.idle .examples span { background: var(--ink); color: var(--yellow); border-radius: 4px; padding: 4px 10px; font-size: 16px; font-weight: 600; }
+
+  .said { display: flex; align-items: baseline; gap: 14px; margin: 12px 0 0; background: var(--ink); color: var(--white);
+          border-radius: var(--r); padding: 13px 18px; font-size: 20px; font-weight: 600; min-height: 52px; }
+  .said .tag { background: var(--yellow); color: var(--ink); transform: translateY(-2px); }
+  .said .none { color: var(--board-dim); font-weight: 500; font-size: 16px; }
+
+  .evidence { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; margin-top: 18px; }
+  .pick { margin: 0; position: relative; background: var(--board); border-radius: var(--r); overflow: hidden; height: 340px; }
+  .pick img { width: 100%; height: 100%; object-fit: contain; cursor: zoom-in; }
+  .pick figcaption { position: absolute; left: 10px; bottom: 10px; background: var(--ink); color: var(--white);
+                     font-size: 14px; font-weight: 600; padding: 4px 10px; border-radius: 4px; }
+  .pick figcaption b { color: var(--yellow); }
+  .pick .empty { color: var(--board-dim); display: grid; place-items: center; height: 100%; padding: 20px; text-align: center; }
+
+  ol.stations { list-style: none; margin: 0; padding: 0; display: grid; align-content: start; }
+  ol.stations li { display: grid; grid-template-columns: 16px 1fr auto; column-gap: 12px; padding: 0 0 14px; position: relative; }
+  ol.stations li::before { content: ""; grid-row: 1 / 3; width: 12px; height: 12px; margin-top: 5px; border-radius: 2px;
+                           background: var(--ink); z-index: 1; }
+  ol.stations li:not(:last-child)::after { content: ""; position: absolute; left: 5px; top: 17px; bottom: 0; width: 2px; background: var(--ink); }
+  ol.stations li.off::before { background: var(--ground); outline: 2px solid #8d8b85; outline-offset: -2px; }
+  ol.stations li.off:not(:last-child)::after { background: #b3b0a9; }
+  ol.stations b { font-size: 16px; font-weight: 700; }
+  ol.stations .t { font-size: 16px; font-weight: 700; text-align: right; }
+  ol.stations .d { grid-column: 2 / 4; color: var(--ink-2); font-size: 14px; }
+  .stations-note { color: var(--ink-2); font-size: 12.5px; margin: 2px 0 0 28px; }
+
+  .stamps { display: flex; gap: 8px; margin-top: 14px; overflow-x: auto; padding-bottom: 4px; }
+  .stamp { flex: 0 0 auto; position: relative; background: var(--board); border-radius: 4px; overflow: hidden; cursor: pointer;
+           border: 3px solid transparent; padding: 0; }
+  .stamp img { height: 92px; width: auto; }
+  .stamp span { position: absolute; left: 0; right: 0; bottom: 0; background: #000b; color: var(--white); font-size: 12.5px;
+                font-weight: 600; padding: 1px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stamp.chosen { border-color: var(--yellow); outline: 2px solid var(--ink); }
+  .stamp.chosen span { background: var(--yellow); color: var(--ink); font-weight: 700; }
+  .stamp.shown { border-color: var(--white); }
+  .stamp:hover { border-color: var(--ink-2); }
+
+  /* ---- flight-board panels -------------------------------------------- */
+  .board { background: var(--board); color: var(--white); border-radius: var(--r); overflow: hidden; }
+  .board-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--board-line); }
+  .board-head h2 { margin: 0; font-size: 18px; font-weight: 700; }
+  .board-head .note { margin-left: auto; color: var(--board-dim); font-size: 13px; }
+  .convo { overflow-y: auto; max-height: 700px; }
+  .convo div { display: grid; grid-template-columns: 74px 96px 1fr; gap: 10px; padding: 9px 16px; border-bottom: 1px solid var(--board-line); }
+  .convo .t { color: var(--board-dim); font-size: 13.5px; padding-top: 2px; }
+  .convo .k { font-size: 12.5px; font-weight: 700; letter-spacing: .04em; padding-top: 3px; color: var(--board-dim); }
+  .convo .k.k-heard { color: var(--yellow); } .convo .k.k-said { color: var(--white); }
+  .convo .k.k-stop { color: #ff8479; }
+  .convo .x { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+  .convo .x.quiet { color: var(--board-dim); font-weight: 500; font-size: 14.5px; }
+  .convo div:first-child { background: var(--board-2); }
+  .board .empty { color: var(--board-dim); padding: 18px 16px; margin: 0; }
+
+  /* ---- live cameras --------------------------------------------------- */
+  .feed { position: relative; background: var(--board); border-radius: var(--r); overflow: hidden; }
+  .feed img { width: 100%; height: auto; min-height: 120px; transition: opacity .3s ease-out, filter .3s ease-out; }
+  .feed.stale img { opacity: .4; filter: grayscale(1); }
+  .feed .flag { position: absolute; bottom: 10px; right: 10px; background: var(--red); color: var(--white); font-weight: 700;
+                font-size: 14px; padding: 3px 10px; border-radius: 4px; display: none; }
+  .feed.stale .flag { display: block; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 20px; color: var(--ink-2); font-size: 13.5px; margin-top: 8px; }
+  .key { display: inline-block; width: 14px; height: 10px; border: 2.5px solid; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  #det-wrap { margin-top: 22px; }
+  /* Gate-style chips naming each camera view (the images carry no text). */
+  .chips { position: absolute; inset: 0 0 auto 0; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; pointer-events: none; }
+  .chip { justify-self: start; margin: 8px; background: var(--yellow); color: var(--ink); font-weight: 700; font-size: 13px;
+          line-height: 1; padding: 5px 8px 4px; border-radius: 3px; white-space: nowrap; }
+  .chip.big { font-size: 18px; padding: 7px 11px 6px; margin: 12px; }
+
+  /* ---- recorded car alarm --------------------------------------------- */
+  .recorded { display: inline-flex; gap: 10px; align-items: center; background: var(--blue); color: var(--white);
+              font-weight: 700; font-size: 15px; padding: 7px 12px; border-radius: 4px; }
+  .recorded small { font-weight: 600; font-size: 14px; color: #d8e7f6; }
+  .clip-pick { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 14px; }
+  .clip-pick select { background: var(--white); border: 2px solid var(--ink); border-radius: 4px; padding: 4px 8px; font-weight: 600; color: var(--ink); }
+  .replay { display: grid; grid-template-columns: minmax(0, 46fr) minmax(0, 54fr); gap: 22px; align-items: start; }
+  .replay-view { background: var(--board); border-radius: var(--r); overflow: hidden; aspect-ratio: 1; position: relative; }
+  .replay-view img { width: 100%; height: 100%; object-fit: cover; }
+  .replay-view .clock-tag { position: absolute; left: 10px; bottom: 10px; background: var(--blue); color: var(--white);
+                            font-weight: 700; font-size: 14px; padding: 3px 9px; border-radius: 4px; }
+  /* The replay sign is the answer sign's grammar, charcoal until it turns red for STOP. */
+  .rsign { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; border-radius: var(--r); background: var(--charcoal);
+           color: var(--white); min-height: 150px; overflow: hidden; transition: background-color .12s linear; }
+  .rsign .arrow { width: 150px; display: grid; place-items: center; border-right: 4px solid #4a4b4e; }
+  .rsign .arrow svg { width: 96px; height: 96px; }
+  .rsign .words { padding: 18px 22px; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+  .rsign .words b { font-size: 34px; font-weight: 800; letter-spacing: -0.015em; line-height: 1.08; }
+  .rsign .words span { font-size: 16px; font-weight: 600; color: #d5d3cd; margin-top: 6px; }
+  .rsign .dist { background: var(--ink); color: var(--white); margin: 14px; border-radius: 4px; padding: 10px 18px; min-width: 150px;
+                 display: flex; flex-direction: column; justify-content: center; }
+  .rsign .dist b { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; white-space: nowrap; }
+  .rsign .dist b small { font-size: 18px; margin-left: 3px; }
+  .rsign .dist span { font-size: 13.5px; font-weight: 600; margin-top: 6px; color: #d5d3cd; }
+  .rsign.stop { background: var(--red); }
+  .rsign.stop .arrow { border-color: var(--ink); }
+  .rsign.stop .words span { color: #ffe3e0; }
+  .rsign.stop .dist b { color: var(--yellow); }
+  .readouts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin: 14px 0; border-top: 3px solid var(--ink); }
+  .readouts div { padding: 8px 12px 0 0; }
+  .readouts small { display: block; color: var(--ink-2); font-size: 13px; font-weight: 600; }
+  .readouts b { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+  .readouts b.hot { color: var(--red-2); }
+  .chart { background: var(--board); border-radius: var(--r); padding: 10px 12px 6px; }
+  .chart svg { width: 100%; height: 210px; display: block; }
+  .chart .legend { color: var(--board-dim); margin: 2px 0 4px; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+  .btn { background: var(--ink); color: var(--yellow); border: 0; border-radius: 4px; padding: 8px 16px; font-weight: 700; font-size: 15px;
+         cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+  .btn svg { width: 14px; height: 14px; }
+  .btn:hover { background: var(--yellow); color: var(--ink); }
+  .btn:disabled { background: #b8b5ae; color: #efede8; cursor: default; }
+  input[type=range] { flex: 1 1 160px; min-width: 0; accent-color: var(--ink); height: 28px; }
+  .controls .time { font-weight: 700; min-width: 108px; text-align: right; }
+  .strip { margin-top: 12px; background: var(--board); border-radius: 4px; overflow: hidden; }
+  .strip img { width: 100%; height: auto; }
+  .rule { margin: 12px 0 0; color: var(--ink-2); font-size: 14.5px; max-width: 80ch; }
+  .rule b { color: var(--ink); }
+  .no-clips { background: var(--charcoal); color: var(--white); border-radius: var(--r); padding: 22px 24px; max-width: 900px; }
+  .no-clips b { font-size: 22px; display: block; margin-bottom: 6px; }
+  .no-clips p { margin: 6px 0 0; color: #d5d3cd; font-size: 16px; }
+  .no-clips code { background: var(--ink); color: var(--yellow); padding: 1px 6px; border-radius: 3px; font-size: 14.5px; }
+
+  /* ---- recent questions (departures board) ---------------------------- */
+  table { width: 100%; border-collapse: collapse; }
+  .fids th { text-align: left; color: var(--board-dim); font-size: 12.5px; font-weight: 700; letter-spacing: .04em; padding: 10px 14px;
+             border-bottom: 1px solid var(--board-line); white-space: nowrap; }
+  .fids td { overflow-wrap: anywhere; padding: 11px 14px; border-bottom: 1px solid var(--board-line); font-size: 16px; font-weight: 600; vertical-align: top; }
+  .fids tr.row { cursor: pointer; } .fids tr.row:hover td { background: var(--board-2); }
+  .fids tr.sel td { background: #2a2610; }
+  .fids td:first-child, .fids .result { white-space: nowrap; overflow-wrap: normal; }
+  .fids .result { font-weight: 700; letter-spacing: .03em; font-size: 14px; }
+  .fids .found { color: var(--yellow); } .fids .not_found { color: var(--board-dim); }
+  .fids .described { color: var(--white); } .fids .unavailable { color: #ff8479; }
+  .fids .dim { color: var(--board-dim); }
+
+  /* ---- team diagnostics ----------------------------------------------- */
+  details.diag > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 10px;
+                           background: var(--charcoal); color: var(--white); font-size: 18px; font-weight: 700; padding: 7px 14px; border-radius: 4px; }
+  details.diag > summary::-webkit-details-marker { display: none; }
+  details.diag > summary svg { width: 14px; height: 14px; transition: transform .2s ease-out; }
+  details.diag[open] > summary svg { transform: rotate(90deg); }
+  details.diag > summary + .note { color: var(--ink-2); font-size: 14px; margin-left: 12px; }
+  .diag-body { display: grid; gap: 22px; margin-top: 16px; }
+  .facts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0; border-top: 3px solid var(--ink); }
+  .facts-grid div { padding: 10px 14px 10px 0; }
+  .facts-grid small { display: block; color: var(--ink-2); font-size: 13px; font-weight: 600; }
+  .facts-grid b { font-size: 17px; font-weight: 700; }
+  .facts-grid span { display: block; color: var(--ink-2); font-size: 13.5px; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
+  h3 { font-size: 16px; margin: 0 0 8px; font-weight: 700; }
+  dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 14.5px; }
+  dl.kv dt { color: var(--ink-2); font-weight: 600; } dl.kv dd { margin: 0; overflow-wrap: anywhere; }
+  pre { margin: 8px 0 0; background: var(--board); color: #e8e6e1; border-radius: 4px; padding: 10px 12px; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+        white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; }
+  pre::selection, pre *::selection { background: var(--yellow); color: var(--ink); }
+  .hz-grid { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 14px; }
+  .hz-box { padding: 12px 14px; }
+  .hz-box h3.sub { margin: 0 0 8px; font-size: 13px; color: var(--board-dim); font-weight: 700; letter-spacing: .02em; }
+  .hz-mini { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 14.5px; margin: 6px 0 12px; }
+  .hz-mini b { font-size: 17px; }
+  .rules { font-size: 14.5px; color: var(--ink-2); margin: 0; max-width: 90ch; } .rules b { color: var(--ink); }
+  .k-alarm, .k-alarm_low { color: #ff8479; font-weight: 700; }
+  .k-waiting, .k-not_coming, .k-too_far { color: var(--amber); }
+  .k-ignored { color: var(--board-dim); }
+  .hz-table td, .hz-table th { font-size: 13.5px; padding: 6px 8px; border-bottom: 1px solid var(--board-line); text-align: left; vertical-align: top; }
+  .hz-table th { color: var(--board-dim); font-size: 12px; }
+  .pfeed span { overflow-wrap: anywhere; min-width: 0; }
+  .hz-table { display: block; overflow-x: auto; }
+  .alarms div, .pfeed div { display: grid; grid-template-columns: 70px 88px 1fr; gap: 8px; padding: 6px 0; border-top: 1px solid var(--board-line); font-size: 13.5px; }
+  .alarms, .pfeed { max-height: 420px; overflow: auto; }
+  .alarms .t, .pfeed .t { color: var(--board-dim); }
+  .pfeed .k { color: var(--board-dim); font-size: 12px; font-weight: 700; letter-spacing: .03em; padding-top: 1px; }
+  .dim { color: var(--board-dim); }
+  .ok-t { color: var(--yellow); } .bad-t { color: #ff8479; }
+  .hz-mini .bad-t, dl.kv .bad-t { color: var(--red-2); }
+
   dialog { border: 0; padding: 0; background: transparent; max-width: 96vw; }
-  dialog img { max-width: 96vw; max-height: 92vh; display: block; border-radius: 8px; }
-  dialog::backdrop { background: #000c; }
+  dialog img { max-width: 96vw; max-height: 92vh; border-radius: 6px; }
+  dialog::backdrop { background: #000d; }
+
+  @media (max-width: 1180px) {
+    .now, .replay { grid-template-columns: minmax(0, 1fr); }
+    #convo { min-height: 0; } .convo { max-height: 380px; }
+    .two, .hz-grid { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 760px) {
+    main { padding: 16px 16px 48px; gap: 30px; }
+    .band { flex-wrap: wrap; } .clock { display: none; }
+    .status { flex-basis: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: visible; }
+    .st { padding: 6px 10px; } .st span { font-size: 14px; white-space: normal; }
+    .rsign { grid-template-columns: minmax(0, 1fr); } .rsign .arrow { width: auto; height: 100px; border-right: 0; border-bottom: 4px solid #4a4b4e; }
+    .rsign .arrow svg { width: 70px; height: 70px; } .rsign .words b { font-size: 26px; }
+    .chip { font-size: 10px; padding: 3px 4px 2px; margin: 3px; max-width: calc(100% - 6px); overflow: hidden; text-overflow: clip; }
+    .chip.big { font-size: 14px; padding: 5px 8px 4px; margin: 8px; }
+    .sign { grid-template-columns: minmax(0, 1fr); } .sign .arrow { width: auto; height: 120px; border-right: 0; border-bottom: 4px solid var(--ink); }
+    .sign .arrow svg { width: 88px; height: 88px; } .sign .subject { font-size: 44px; } .sign .dist { margin: 0 18px 18px; }
+    .heard q { font-size: 22px; } .heard { flex-wrap: wrap; }
+    .evidence { grid-template-columns: minmax(0, 1fr); } .pick { height: 260px; }
+    .readouts { grid-template-columns: repeat(2, 1fr); }
+    .fids th:nth-child(n+5), .fids td:nth-child(n+5) { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
 <body>
-<header>
-  <h1>Cane debug view</h1>
-  <span class="dim" id="uptime"></span>
-  <label class="follow"><input type="checkbox" id="follow" checked> follow newest question</label>
-</header>
-<main>
-  <div class="tiles" id="tiles"></div>
-
-  <section class="live">
-    <h2>360 camera, live <span class="dim" id="live-note" style="text-transform:none;letter-spacing:0"></span></h2>
-    <img id="live" alt="The six 60-degree views from the 360 camera">
-    <div class="order"><span>Each view is labelled with where it points from the wearer (L = left, R = right).</span></div>
-  </section>
-
-  <div class="cols">
-    <section>
-      <h2>Question</h2>
-      <div id="question"><p class="empty">No questions yet. Say "Hey Cane, ..." or type one in the phone's debug panel.</p></div>
-    </section>
-    <section>
-      <h2>Phone: heard, decided, said</h2>
-      <div class="feed" id="feed"><p class="empty">Nothing from the phone yet.</p></div>
-    </section>
+<header class="band">
+  <div class="brand">
+    <svg viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="4" fill="#ffd200"/><path d="M14 22 V7 M8 13 L14 7 L20 13" stroke="#1a1a1a" stroke-width="3.2" fill="none"/></svg>
+    <b>Cane</b><span>live view</span>
   </div>
+  <div class="status" id="status" aria-live="polite"></div>
+  <div class="clock" id="clock"></div>
+</header>
+<div id="live-stop" role="alert"><b id="live-stop-words"></b><span id="live-stop-why"></span><em>LIVE</em></div>
 
-  <section>
-    <h2>Recent questions</h2>
-    <table>
-      <thead><tr><th>Time</th><th>Question</th><th>Status</th><th>Picked</th><th>Bearing</th><th>Box</th><th>Distance</th><th>Gemini</th></tr></thead>
-      <tbody id="history"></tbody>
-    </table>
+<main>
+  <section class="now" aria-label="Latest question">
+    <div>
+      <p class="heard"><span class="tag">HEARD</span><q id="heard-q">&hellip;</q>
+        <span class="when" id="heard-when"></span>
+        <button class="follow" id="follow" aria-pressed="true" title="Show each new question as it arrives">Follow newest</button></p>
+      <div class="sign idle" id="sign"></div>
+      <p class="said" id="said"></p>
+      <div class="evidence">
+        <figure class="pick" id="pick"><div class="empty">The image Gemini picks appears here, with its box.</div></figure>
+        <div>
+          <ol class="stations" id="stations"></ol>
+          <p class="stations-note">Times from when the question reached the laptop.</p>
+        </div>
+      </div>
+      <div class="stamps" id="stamps" aria-label="Every image sent to Gemini"></div>
+    </div>
+    <aside class="board" id="convo">
+      <div class="board-head"><h2>Conversation</h2><span class="note">what the phone heard and said</span></div>
+      <div class="convo" id="convo-rows"><p class="empty">Nothing from the phone yet.</p></div>
+    </aside>
   </section>
+
+  <section id="live-sec" aria-label="Live cameras">
+    <div class="plate-row"><h2 class="plate">360 camera &middot; live</h2><span class="note" id="live-note">the six views Gemini is sent, tilted down to see tables and the floor; each is labelled with where it points</span></div>
+    <div class="feed" id="live-feed"><img id="live" alt="The 360 camera as six views, from 120 degrees left through ahead to behind"><div class="chips" id="live-chips"></div><span class="flag" id="live-flag">STALLED</span></div>
+    <div id="det-wrap" hidden>
+      <div class="plate-row"><h2 class="plate">Object detection &middot; live</h2><span class="note" id="det-note"></span></div>
+      <div class="feed" id="det-feed"><img id="det" alt="The detector's views with every detection boxed"><div class="chips" id="det-chips"></div><span class="flag">STALLED</span></div>
+      <div class="legend">
+        <span><span class="key" style="border-color:var(--red)"></span>car or bus coming at the wearer: alarm</span>
+        <span><span class="key" style="border-color:var(--amber)"></span>car or bus, not coming</span>
+        <span><span class="key" style="border-color:#ffffff;background:#1a1a1a"></span>everything else detected</span>
+        <span>number = closing speed, m/s (+ = getting closer)</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="replay-sec" aria-label="Recorded car alarm">
+    <div class="plate-row">
+      <h2 class="plate">Car alarm</h2>
+      <span class="recorded" id="rec-plate" hidden>RECORDED <small id="rec-when"></small></span>
+      <label class="clip-pick" id="clip-pick" hidden>Run <select id="clip-select"></select></label>
+    </div>
+    <div id="replay"></div>
+  </section>
+
+  <section aria-label="Recent questions">
+    <div class="board">
+      <div class="board-head"><h2>Recent questions</h2><span class="note">select one to show it above</span></div>
+      <table class="fids"><thead><tr><th>Time</th><th>Question</th><th>Result</th><th>Direction</th><th>Distance</th><th>Gemini</th></tr></thead>
+        <tbody id="history"></tbody></table>
+    </div>
+  </section>
+
+  <details class="diag" id="diag">
+    <summary><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M4 2 L10 7 L4 12" stroke="#fff" stroke-width="2.4" fill="none"/></svg>Team diagnostics</summary>
+    <div class="diag-body">
+      <div class="facts-grid" id="tiles"></div>
+      <div class="two">
+        <div><h3>Selected question</h3><div id="q-facts"></div></div>
+        <div class="board"><div class="board-head"><h2 style="font-size:15px">Phone: heard, decided, said</h2></div>
+          <div class="hz-box"><div class="pfeed" id="feed"><p class="empty">Nothing from the phone yet.</p></div></div></div>
+      </div>
+      <section id="hazards">
+        <div class="plate-row"><h2 class="plate">Hazards: cars coming at you</h2></div>
+        <p class="rules" id="hz-rules"></p>
+        <div class="hz-mini" id="hz-mini"></div>
+        <div class="hz-grid">
+          <div class="board hz-box"><h3 class="sub">Radar (you in the middle, ahead is up)</h3><svg id="hz-radar" viewBox="-130 -130 260 260" width="100%"></svg></div>
+          <div class="board hz-box"><h3 class="sub">Approach speed of each vehicle, last 30 s</h3><svg id="hz-chart" viewBox="0 0 600 240" width="100%" preserveAspectRatio="none"></svg>
+            <div class="legend dim" id="hz-chart-legend"></div></div>
+        </div>
+        <div class="two" style="margin-top:14px">
+          <div class="board hz-box"><h3 class="sub">Latest detections and why</h3>
+            <table class="hz-table"><thead><tr><th>Track</th><th>Class</th><th>Conf</th><th>Bearing</th><th>Band</th><th>Closing</th><th>Verdict</th><th>Sent</th></tr></thead>
+            <tbody id="hz-rows"></tbody></table></div>
+          <div class="board hz-box"><h3 class="sub">Alarms (laptop verdict, then what the phone said)</h3><div class="alarms" id="hz-alarms"></div></div>
+        </div>
+      </section>
+    </div>
+  </details>
 </main>
 <dialog id="zoom"><img id="zoom-img" alt=""></dialog>
 
 <script>
 const $ = (id) => document.getElementById(id);
-let selected = null;
-let lastState = null;
-
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const clock = (ms) => ms ? new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "-";
-const ago = (ms, now) => ms == null ? "never" : `${Math.max(0, Math.round((now - ms) / 1000))} s ago`;
+const clock = (ms) => ms ? new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }) : "-";
 const num = (v, d = 0) => v == null ? "-" : Number(v).toFixed(d);
+const secs = (ms) => ms == null ? "-" : `${(ms / 1000).toFixed(1)} s`;
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private window */ } },
+};
 
-function tile(title, big, small, cls = "") {
-  return `<div class="tile"><h3>${title}</h3><div class="big ${cls}">${big}</div><div class="small">${small}</div></div>`;
+let selected = null;
+let follow = true;
+let lastState = null;
+let shownView = null;
+
+// ---------------------------------------------------------------- words
+// = BearingSector.phrase (ios/CaneKit/Sources/CaneOutput/BearingSector.swift)
+function bearingWords(b) {
+  if (b == null) return null;
+  const a = Math.abs(b), left = b < 0;
+  if (a < 15) return "straight ahead";
+  if (a < 60) return left ? "ahead to the left" : "ahead to the right";
+  if (a < 120) return left ? "to your left" : "to your right";
+  if (a <= 165) return left ? "behind you to the left" : "behind you to the right";
+  return "directly behind you";
+}
+// = SpeechPhrase.vehicleComingWords
+function vehicleWords(cls, b) {
+  const v = cls ? cls[0].toUpperCase() + cls.slice(1) : "Car";
+  const a = Math.abs(b ?? 0);
+  if (a < 60) return `Stop! ${v} coming ahead.`;
+  if (a < 120) return `Stop! ${v} coming from your ${b < 0 ? "left" : "right"}.`;
+  return `${v} coming behind you!`;
+}
+const BAND_WORDS = { near: "within 5 m", mid: "5 to 15 m", far: "beyond 15 m" };
+function feet(m) {
+  const inches = Math.round(m * 39.3701);
+  return `${Math.floor(inches / 12)} ft ${inches % 12} in`;
+}
+const DISTANCE_WHY = {
+  out_of_view: "outside the depth camera's view", no_sensor: "no depth camera on this phone",
+  too_far: "beyond TrueDepth's 3 m reach", unreadable: "depth unreadable there",
+};
+
+function arrowSvg(b) {
+  return `<svg viewBox="0 0 100 100" style="transform: rotate(${b}deg)" aria-hidden="true">
+    <path d="M50 90 V16 M17 49 L50 16 L83 49" stroke="currentColor" stroke-width="15" fill="none" stroke-linejoin="miter" stroke-miterlimit="10"/></svg>`;
 }
 
-function renderTiles(s) {
-  const p = s.phone, x = s.x4, g = s.gemini, v = s.voice;
-  const d = p.depth;
-  const depthFresh = d && s.now_ms - d.at_ms < 3000;
-  const depthOk = depthFresh && d.trustworthy === "yes";
-  const liveOk = x.fps > 5 && (x.frame_age_ms ?? 9999) < 1000;
-  const srcNone = x.source === "none";
-  const voiceTotal = Object.values(v.by_source).reduce((a, b) => a + b, 0);
-  $("tiles").innerHTML = [
-    tile("Phone link", p.connected ? "connected" : "no phone", p.link_alert ? `phone says: ${esc(p.link_alert)}` : `last seen ${ago(p.last_seen_ms, s.now_ms)}`, p.connected ? "ok" : "bad"),
-    tile("360 camera", srcNone ? "off" : (x.problem ? "no frames" : (x.fps == null ? "still photo"
-           : ((x.frame_age_ms ?? 0) > 3000 ? `STALLED ${Math.round(x.frame_age_ms / 1000)} s` : `${num(x.fps, 1)} fps`))),
-         srcNone ? "phone camera only (./startcane x4 for the 360)" : (x.problem ? esc(x.problem) : `${esc(x.source)} · ${x.resolution ?? "?"}${x.fps == null ? " · not live" : ` · frame ${num(x.frame_age_ms)} ms old`}`),
-         srcNone ? "" : (x.fps == null ? "" : ((x.frame_age_ms ?? 0) > 3000 ? "bad" : (liveOk ? "ok" : "warn")))),
-    tile("Gemini", g.latency_last_ms != null ? `${(g.latency_last_ms / 1000).toFixed(1)} s` : "-",
-         `${g.questions} asked · median ${g.latency_median_ms != null ? (g.latency_median_ms / 1000).toFixed(1) + " s" : "-"} · max ${g.latency_max_ms != null ? (g.latency_max_ms / 1000).toFixed(1) + " s" : "-"}`),
-    tile("Answers", Object.entries(g.by_status).map(([k, n]) => `${n} ${k.replace("_", " ")}`).join(" · ") || "-",
-         `picked phone ${g.picked_phone} · picked 360 ${g.picked_360} · with box ${g.with_box}`),
-    tile("Front depth", depthFresh ? `${num(d.metres, 2)} m` : "-",
-         depthFresh ? `ahead · coverage ${num(d.coverage * 100)}% · ${esc(d.accuracy)}${depthOk ? "" : " · NOT TRUSTED"}` : "no TrueDepth readings", depthFresh ? (depthOk ? "ok" : "warn") : ""),
-    tile("Voice", voiceTotal ? `${v.by_source.elevenlabs ?? 0}/${voiceTotal} natural` : "-",
-         `median wait ${v.wait_median_ms ?? "-"} ms · phone voice ${v.by_source.phone ?? 0}`),
-    tile("Mic", p.mic_peak != null ? `${Math.round(p.mic_peak * 100)}%` : "-", "peak level (room noise shows here)", p.mic_peak > 0.85 ? "warn" : ""),
+// Split-flap: letters cycle and settle left to right when a new answer lands.
+const FLAP = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+function flap(el, text) {
+  if (REDUCED || !text) { el.textContent = text; return; }
+  const frames = 14;
+  let f = 0;
+  clearInterval(el._flap);
+  el._flap = setInterval(() => {
+    f++;
+    const settled = Math.floor((f / frames) * text.length);
+    el.textContent = [...text].map((c, i) => (i < settled || c === " " ? c : FLAP[(Math.random() * FLAP.length) | 0])).join("");
+    if (f >= frames) { clearInterval(el._flap); el.textContent = text; }
+  }, 32);
+}
+
+// ---------------------------------------------------------------- band
+function stItem(label, value, cls = "") {
+  return `<div class="st ${cls}"><small>${label}</small><span><i></i>${value}</span></div>`;
+}
+
+function renderBand(s) {
+  const p = s.phone, x = s.x4, g = s.gemini, h = s.hazards;
+  const d = p.depth, depthFresh = d && s.now_ms - d.at_ms < 3000;
+  const off = x.source === "none", still = x.fps == null && !off;
+  const stalled = !off && !still && (x.frame_age_ms ?? 0) > 1500;
+  const x4 = off ? ["Off", "stale"] : x.problem ? ["No frames", "bad"] : still ? ["Still photo", ""]
+    : stalled ? [`Stalled ${Math.round(x.frame_age_ms / 1000)} s`, "bad"] : [`${num(x.fps, 1)} fps`, "ok"];
+  const hzStale = h && h.active && (h.latest_age_ms ?? 1e9) > 3000;
+  $("status").innerHTML = [
+    stItem("Phone", p.connected ? (p.link_alert ? esc(p.link_alert) : "Connected") : "Not connected", p.connected && !p.link_alert ? "ok" : "bad"),
+    stItem("360 camera", x4[0], x4[1]),
+    stItem("Gemini", g.latency_median_ms != null ? `${secs(g.latency_median_ms)} typical` : "Waiting", g.questions ? "ok" : "stale"),
+    stItem("TrueDepth", depthFresh ? `${num(d.metres, 2)} m ahead` : "No reading", depthFresh ? (d.trustworthy === "yes" ? "ok" : "") : "stale"),
+    stItem("Detection", !h || !h.active ? "Off" : hzStale ? "Stalled" : `${num(h.responses_per_s, 1)} per s`, !h || !h.active ? "stale" : hzStale ? "bad" : "ok"),
   ].join("");
-  $("uptime").textContent = `laptop up ${Math.floor(s.uptime_s / 60)} min · ${clock(s.now_ms)}`;
 }
 
-function distanceText(q) {
-  const d = q.phone?.distance;
-  if (!d) return q.answer.phone_box ? "(waiting for phone)" : "-";
-  if (d.outcome === "measured") return `${num(d.metres, 2)} m (${num(d.coverage * 100)}% coverage)`;
-  return d.outcome.replace("_", " ") + (d.metres != null ? ` · ${num(d.metres, 2)} m` : "");
+function tickClock() {
+  const now = new Date();
+  $("clock").innerHTML = `${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}<small>${String(now.getSeconds()).padStart(2, "0")}</small>`;
 }
 
-function pickedText(q) {
-  if (q.chosen == null) return "-";
-  return q.phone_views.includes(q.chosen) ? "phone" : `360 #${q.chosen}`;
+// ---------------------------------------------------------------- the latest question
+function pickedName(q, i) {
+  if (i == null) return "-";
+  if (q.phone_views.includes(i)) return "phone camera";
+  const m = (q.labels[i] || "").match(/centred (.+?)[,.]/);
+  return m ? `360 view, ${m[1]}` : `360 view ${i}`;
 }
 
-function renderQuestion(q) {
-  if (!q) return;
+function shortName(q, i) {
+  if (q.phone_views.includes(i)) return "Phone";
+  const m = (q.labels[i] || "").match(/centred (straight ahead|directly behind|(\d+) degrees to the (left|right))/);
+  if (!m) return `360 view ${i}`;
+  return m[1] === "straight ahead" ? "Ahead" : m[1] === "directly behind" ? "Behind" : `${m[2]} ${m[3] === "left" ? "L" : "R"}`;
+}
+
+function renderIdle() {
+  $("heard-q").textContent = "…";
+  $("heard-when").textContent = "";
+  const sign = $("sign");
+  sign.className = "sign idle";
+  sign.innerHTML = `<div class="arrow">${arrowSvg(0)}</div><div class="words">
+    <div class="subject">Say &ldquo;Hey Cane, &hellip;&rdquo;</div>
+    <div class="examples"><span>Is there a bathroom around?</span><span>How far is the Sprite can?</span><span>What&rsquo;s in front of me?</span></div></div><div></div>`;
+  $("said").innerHTML = `<span class="tag">SAID</span><span class="none">Cane&rsquo;s spoken answer appears here.</span>`;
+  $("stations").innerHTML = "";
+  $("stamps").innerHTML = "";
+}
+
+function renderQuestion(q, fresh) {
+  if (!q) { renderIdle(); return; }
   const a = q.answer;
-  const views = q.labels.map((label, i) => {
-    const isPhone = q.phone_views.includes(i);
-    const chosen = i === q.chosen;
-    const short = isPhone ? "phone camera" : label.replace(/^Image \d+: 360 camera on the wearer's shoulder, a 60-degree view centred /, "360: ").replace(/\.$/, "");
-    return `<div class="view ${chosen ? "chosen" : ""}"><img src="/query/${q.query_id}/${i}.jpg" data-full="/query/${q.query_id}/${i}.jpg" alt="${esc(label)}">
-      <div class="cap">${i} · ${esc(short)}${chosen ? " · GEMINI PICKED THIS" : ""}</div></div>`;
-  }).join("");
+  $("heard-q").textContent = q.utterance;
+  $("heard-when").textContent = clock(q.t_ms);
+
+  const sign = $("sign");
+  const dist = q.phone?.distance;
+  const words = bearingWords(a.bearing_deg);
+  let cls = "sign", subject = "", dir = "", detail = "", right = "", arrow = "";
+  if (a.status === "found" || a.status === "described") {
+    subject = a.subject || (a.status === "described" ? "Around you" : q.target || "");
+    dir = a.status === "found" && words ? words[0].toUpperCase() + words.slice(1) : "";
+    detail = a.detail || "";
+    arrow = a.bearing_deg != null ? arrowSvg(a.bearing_deg) : "";
+    if (dist && dist.outcome === "measured") {
+      right = `<div class="dist"><b>${num(dist.metres, 2)}<small>m</small></b><span>${feet(dist.metres)} &middot; TrueDepth</span></div>`;
+    } else if (dist) {
+      right = `<div class="dist none"><b>&ndash; m</b><span>${esc(DISTANCE_WHY[dist.outcome] || dist.outcome.replace("_", " "))}</span></div>`;
+    } else if (a.phone_box) {
+      right = `<div class="dist none"><b>&hellip;</b><span>measuring with TrueDepth</span></div>`;
+    }
+  } else if (a.status === "not_found") {
+    cls += " info";
+    subject = q.target ? `No ${q.target} in view` : "Nothing found";
+    detail = `Gemini looked at all ${q.labels.length} images`;
+  } else {
+    cls += " info";
+    subject = "Looking around is unavailable";
+    detail = q.error || "the laptop could not reach Gemini";
+  }
+  sign.className = cls;
+  const long = subject.length > 20;
+  sign.innerHTML = `<div class="arrow">${arrow}</div>
+    <div class="words">${dir ? `<div class="dir">${esc(dir)}</div>` : ""}<div class="subject${long ? " long" : ""}"></div>
+      ${detail ? `<div class="detail">${esc(detail)}</div>` : ""}</div>${right || "<div></div>"}`;
+  if (!arrow) sign.querySelector(".arrow").style.display = "none";
+  const subjectEl = sign.querySelector(".subject");
+  if (fresh) flap(subjectEl, subject); else subjectEl.textContent = subject;
+
   const said = q.phone?.said?.text;
-  $("question").innerHTML = `
-    <div class="q-head"><span class="utt">"${esc(q.utterance)}"</span>
-      <span class="pill ${a.status}">${a.status.replace("_", " ")}</span>
-      <span class="dim">${esc(q.kind)}${q.target ? " · target: " + esc(q.target) : ""} · ${clock(q.t_ms)} · ${q.query_id}</span></div>
-    <dl class="facts">
-      <dt>Phone said</dt><dd>${said ? esc(said) : '<span class="empty">(not yet / not reported)</span>'}</dd>
-      <dt>Subject</dt><dd>${esc(a.subject) || "-"}</dd>
-      <dt>Detail</dt><dd>${esc(a.detail) || "-"}</dd>
-      <dt>Bearing</dt><dd>${a.bearing_deg != null ? `${a.bearing_deg}° (${a.bearing_deg < 0 ? "left" : a.bearing_deg > 0 ? "right" : "ahead"})` : "-"}</dd>
-      <dt>Picked image</dt><dd>${pickedText(q)}</dd>
-      <dt>Phone box</dt><dd>${a.phone_box ? `x ${a.phone_box.x_min}–${a.phone_box.x_max}, y ${a.phone_box.y_min}–${a.phone_box.y_max}` : "-"}</dd>
-      <dt>Distance</dt><dd>${distanceText(q)}</dd>
-      <dt>Gemini time</dt><dd>${a.latency_ms} ms${q.error ? ` · <span class="bad">${esc(q.error)}</span>` : ""}</dd>
-      ${q.facts ? `<dt>Looked up</dt><dd>${esc(q.facts)}</dd>` : ""}
-    </dl>
-    <div class="views">${views || '<p class="empty">No images were sent.</p>'}</div>
-    <details><summary>Raw Gemini reply</summary><pre>${esc(JSON.stringify(q.reply, null, 2))}</pre></details>
-    <details><summary>Answer sent to the phone</summary><pre>${esc(JSON.stringify(a, null, 2))}</pre></details>`;
+  $("said").innerHTML = `<span class="tag">SAID</span>${said ? `&ldquo;${esc(said)}&rdquo;` : `<span class="none">waiting for the phone to speak&hellip;</span>`}`;
+
+  // Evidence: the picked image, big; every image, small.
+  const show = shownView ?? q.chosen ?? (q.phone_views[0] ?? 0);
+  if (q.labels.length) {
+    $("pick").innerHTML = `<img src="/query/${q.query_id}/${show}.jpg" alt="${esc(q.labels[show])}" data-full="/query/${q.query_id}/${show}.jpg">
+      <figcaption>${show === q.chosen ? "<b>Gemini picked</b> " : ""}${esc(pickedName(q, show))}</figcaption>`;
+  } else {
+    $("pick").innerHTML = `<div class="empty">No images were sent for this question.</div>`;
+  }
+  $("stamps").innerHTML = q.labels.map((label, i) => `<button class="stamp ${i === q.chosen ? "chosen" : ""} ${i === show && i !== q.chosen ? "shown" : ""}" data-i="${i}" title="${esc(label)}">
+      <img src="/query/${q.query_id}/${i}.jpg" alt=""><span>${i === q.chosen ? "PICKED &middot; " : ""}${esc(shortName(q, i))}</span></button>`).join("");
+
+  // Stations, in order, each timed from the question's arrival.
+  const t0 = q.t_ms - (a.latency_ms ?? 0);
+  const at = (ms) => ms == null ? "" : `+${((ms - t0) / 1000).toFixed(1)} s`;
+  const stations = [
+    { name: "Heard", t: "0.0 s", d: `${esc(q.kind.replace("_", " "))}${q.target ? ` &middot; looking for <b>${esc(q.target)}</b>` : ""}` },
+    { name: "Looked", t: "", d: `${q.labels.length} images: ${q.phone_views.length ? "phone camera + " : ""}${q.labels.length - q.phone_views.length} views of the 360` },
+    { name: "Gemini answered", t: at(q.t_ms), d: q.chosen != null ? `picked the ${esc(pickedName(q, q.chosen))}` : esc(a.status.replace("_", " ")) },
+    dist ? { name: "TrueDepth measured", t: at(dist.at_ms), d: dist.outcome === "measured" ? `${num(dist.metres, 2)} m inside Gemini's box` : esc(DISTANCE_WHY[dist.outcome] || dist.outcome) }
+      : { name: "TrueDepth", t: "", d: a.phone_box ? "waiting for the phone" : "not needed: answer came from the 360 view", off: true },
+    q.phone?.said ? { name: "Cane spoke", t: at(q.phone.said.at_ms), d: "through the earbuds" } : { name: "Cane spoke", t: "", d: "waiting", off: true },
+  ];
+  $("stations").innerHTML = stations.map((s) => `<li class="${s.off ? "off" : ""}"><b>${s.name}</b><span class="t">${s.t}</span><span class="d">${s.d}</span></li>`).join("");
 }
 
-function renderHistory(s) {
-  const rows = [...s.queries].reverse().map((q) => `
-    <tr class="row ${q.query_id === selected ? "sel" : ""}" data-id="${q.query_id}">
-      <td>${clock(q.t_ms)}</td><td>${esc(q.utterance)}</td>
-      <td><span class="pill ${q.answer.status}">${q.answer.status.replace("_", " ")}</span></td>
-      <td>${pickedText(q)}</td><td>${q.answer.bearing_deg ?? "-"}</td>
-      <td>${q.answer.phone_box ? "yes" : "-"}</td><td>${distanceText(q)}</td>
-      <td>${(q.answer.latency_ms / 1000).toFixed(1)} s</td></tr>`).join("");
-  $("history").innerHTML = rows || '<tr><td colspan="8" class="empty">None yet.</td></tr>';
-}
-
-function feedText(e) {
+// ---------------------------------------------------------------- conversation
+function convoRow(e) {
   const d = e.data;
   switch (e.kind) {
-    case "transcript": return esc(d.text);
-    case "intent": return `<b>${esc(d.intent)}</b> ← "${esc(d.command)}"`;
-    case "gate": return `wake word: ${esc(d.result)}`;
-    case "say": return esc(d.text);
-    case "answer": return `answer ${esc(d.status)} ${esc(d.subject)} bearing ${esc(d.bearing)} (${d.latency_ms} ms)`;
-    case "distance": return `distance: ${esc(d.outcome)}${d.metres != null ? " " + num(d.metres, 2) + " m" : ""}`;
-    case "link": return d.connected ? "link up" : "link down";
-    case "link_alert": return `link alert: ${esc(d.problem)}`;
-    default: return esc(JSON.stringify(d));
+    case "transcript": return ["HEARD", "heard", `&ldquo;${esc(d.text.trim())}&rdquo;`];
+    case "say": return ["SAID", "said", esc(d.text)];
+    case "intent": return ["UNDERSTOOD", "", `${esc(String(d.intent).replace(/([A-Z])/g, " $1").toLowerCase())}${d.command ? ` <span class="dim">&middot; ${esc(d.command)}</span>` : ""}`, true];
+    case "distance": return ["MEASURED", "", d.outcome === "measured" ? `${num(d.metres, 2)} m` : esc(DISTANCE_WHY[d.outcome] || d.outcome), true];
+    case "hazard": return ["ALARM", "stop", `hazard alert, level ${esc(d.urgency)}`];
+    case "link": return ["LINK", "", d.connected ? "phone connected" : "phone lost the laptop", true];
+    case "link_alert": return ["LINK", "stop", esc(d.problem), true];
+    default: return null;
   }
 }
 
-function renderFeed(s) {
-  if (!s.feed.length) return;
-  const box = $("feed");
-  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
-  box.innerHTML = s.feed.map((e) => `<div><span class="t">${clock(e.t_ms)}</span><span class="k ${e.kind}">${e.kind}</span><span>${feedText(e)}</span></div>`).join("");
-  if (atBottom) box.scrollTop = box.scrollHeight;
+function renderConvo(s) {
+  const rows = [...s.feed].reverse().map((e) => {
+    const r = convoRow(e);
+    return r ? `<div><span class="t">${clock(e.t_ms)}</span><span class="k ${r[1] ? "k-" + r[1] : ""}">${r[0]}</span><span class="x ${r[3] ? "quiet" : ""}">${r[2]}</span></div>` : "";
+  }).filter(Boolean).slice(0, 40);
+  if (rows.length) $("convo-rows").innerHTML = rows.join("");
 }
 
+// ---------------------------------------------------------------- history
+function distanceShort(q) {
+  const d = q.phone?.distance;
+  if (!d) return q.answer.phone_box ? "measuring" : "&ndash;";
+  return d.outcome === "measured" ? `${num(d.metres, 2)} m` : `<span class="dim">${esc(d.outcome.replace("_", " "))}</span>`;
+}
+
+function renderHistory(s) {
+  const newest = s.queries[s.queries.length - 1]?.query_id;
+  const arrived = newest && renderHistory.top !== undefined && newest !== renderHistory.top;
+  renderHistory.top = newest ?? null;
+  $("history").innerHTML = [...s.queries].reverse().map((q) => `
+    <tr class="row ${q.query_id === selected ? "sel" : ""}" data-id="${q.query_id}" tabindex="0">
+      <td class="dim">${clock(q.t_ms)}</td><td>${esc(q.utterance)}</td>
+      <td class="result ${q.answer.status}">${q.answer.status.replace("_", " ").toUpperCase()}</td>
+      <td>${esc(bearingWords(q.answer.bearing_deg) ?? "–")}</td><td>${distanceShort(q)}</td>
+      <td>${secs(q.answer.latency_ms)}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="dim">No questions yet. Say &ldquo;Hey Cane, &hellip;&rdquo; to the phone.</td></tr>`;
+  if (arrived) { const cell = $("history").querySelector("tr.row .result"); if (cell) flap(cell, cell.textContent); }
+}
+
+// ---------------------------------------------------------------- live cameras
+function setChips(el, names, big = false) {
+  const html = (names || []).map((n) => `<span class="chip${big ? " big" : ""}">${esc(n)}</span>`).join("");
+  if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+}
+
+function renderLive(s) {
+  const x = s.x4, off = x.source === "none";
+  $("live-sec").hidden = off;
+  if (!off && !$("live").dataset.streaming) { $("live").dataset.streaming = "1"; $("live").src = `/live.mjpg?t=${Date.now()}`; }
+  const stalled = x.fps != null && (x.frame_age_ms ?? 0) > 1500;
+  $("live-feed").classList.toggle("stale", stalled || !!x.problem);
+  $("live-flag").textContent = x.problem ? "NO FRAMES" : `STALLED ${Math.round((x.frame_age_ms ?? 0) / 1000)} s`;
+  setChips($("live-chips"), x.tiles);
+  const h = s.hazards;
+  $("det-wrap").hidden = !(h && h.active);
+  if (h && h.active) {
+    if (!$("det").dataset.streaming) { $("det").dataset.streaming = "1"; $("det").src = `/hazards.mjpg?t=${Date.now()}`; }
+    const stale = (h.latest_age_ms ?? 1e9) > 3000;
+    $("det-feed").classList.toggle("stale", stale);
+    setChips($("det-chips"), h.crop_names);
+    const seen = Object.entries(h.last_minute.detections).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${n} ${c}`).join(", ");
+    $("det-note").textContent = `YOLO on seven views including the floor${seen ? ` · last minute: ${seen}` : ""}`;
+    renderLiveStop(h, s.now_ms);
+  } else {
+    $("live-stop").classList.remove("on");
+  }
+}
+
+function renderLiveStop(h, now) {
+  const rows = h.latest && (h.latest_age_ms ?? 1e9) < 2500 ? h.latest.rows.filter((r) => r.kind.startsWith("alarm")) : [];
+  const top = rows.sort((a, b) => (b.closing_mps ?? 0) - (a.closing_mps ?? 0))[0];
+  $("live-stop").classList.toggle("on", !!top);
+  if (top) {
+    $("live-stop-words").textContent = vehicleWords(top.cls, top.bearing_deg);
+    $("live-stop-why").textContent = `closing ${num(top.closing_mps, 1)} m/s · ${BAND_WORDS[top.range_band] || "?"}`;
+  }
+}
+
+// ---------------------------------------------------------------- recorded car alarm
+const replay = { list: [], id: null, doc: null, i: 0, playing: false, timer: null, cache: [] };
+
+async function loadClips() {
+  let list;
+  try { list = await (await fetch("/clips.json")).json(); } catch (e) { return; }
+  const ids = list.map((c) => c.id).join();
+  if (ids === replay.list.map((c) => c.id).join() && replay.doc) return;
+  replay.list = list;
+  if (!list.length) {
+    $("rec-plate").hidden = true; $("clip-pick").hidden = true;
+    $("replay").innerHTML = `<div class="no-clips"><b>No recorded alarm yet</b>
+      <p>The alarm can&rsquo;t be staged here, so it is shown from a real run. Start <code>./startcane full</code> with the phone connected,
+      stand near a road, and let a car come toward the camera. Every alarm is saved on its own, with the seconds before it, to
+      <code>backend/logs/hazard_clips</code>, and plays back here.</p></div>`;
+    return;
+  }
+  $("clip-select").innerHTML = list.map((c) => `<option value="${c.id}">${new Date(c.started_ms).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })} &middot; ${esc(c.cls || "car")} ${c.max_closing_mps != null ? num(c.max_closing_mps, 1) + " m/s" : ""} &middot; ${c.duration_s} s</option>`).join("");
+  $("clip-pick").hidden = list.length < 2;
+  const keep = list.some((c) => c.id === replay.id) ? replay.id : (store.get("cane.clip") && list.some((c) => c.id === store.get("cane.clip")) ? store.get("cane.clip") : list[0].id);
+  $("clip-select").value = keep;
+  if (keep !== replay.id || !replay.doc) openClip(keep);
+}
+
+async function openClip(id) {
+  pause();
+  let doc;
+  try { doc = await (await fetch(`/clips/${id}/clip.json`)).json(); } catch (e) { return; }
+  replay.id = id; replay.doc = doc; replay.i = 0;
+  store.set("cane.clip", id);
+  replay.cache = doc.frames.map((_, i) => { const im = new Image(); im.src = `/clips/${id}/f${String(i).padStart(3, "0")}.jpg`; return im; });
+  $("rec-plate").hidden = false;
+  $("rec-when").textContent = new Date(doc.started_ms).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const r = doc.rules;
+  $("replay").innerHTML = `
+    <div class="replay">
+      <div>
+        <div class="replay-view"><img id="rp-img" alt="The detector's view of the approaching vehicle, recorded"><div class="chips" id="rp-chip"></div><span class="clock-tag" id="rp-clock"></span></div>
+      </div>
+      <div>
+        <div class="rsign" id="rp-sign"><div class="arrow" id="rp-arrow"></div><div class="words"><b id="rp-words"></b><span id="rp-sub"></span></div>
+          <div class="dist"><b id="rp-speed"></b><span>closing speed</span></div></div>
+        <div class="readouts" id="rp-read"></div>
+        <div class="chart"><svg id="rp-chart" viewBox="0 0 600 190" preserveAspectRatio="none" aria-label="Closing speed of each vehicle over the recording"></svg>
+          <div class="legend" id="rp-legend"></div></div>
+        <div class="controls">
+          <button class="btn" id="rp-play"></button>
+          <button class="btn" id="rp-again" title="From the start"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 2 V12 M12 2 L4 7 L12 12 Z" stroke="currentColor" stroke-width="2" fill="currentColor"/></svg>Start</button>
+          <input type="range" id="rp-seek" min="0" max="${doc.frames.length - 1}" value="0" aria-label="Position in the recording">
+          <span class="time" id="rp-time"></span>
+        </div>
+      </div>
+    </div>
+    <div class="strip feed"><img id="rp-strip" alt="All seven detector views at this moment"><div class="chips" id="rp-chips"></div></div>
+    <p class="rule">Alarm rule, the same as the phone&rsquo;s: a <b>${r.vehicles.join(" or ")}</b> within about 15 m closing at <b>${r.approach_mps} m/s or faster</b>.
+      A slower car is the wearer walking toward a parked one; a far one never alarms.</p>`;
+  $("rp-play").addEventListener("click", () => (replay.playing ? pause() : play()));
+  $("rp-again").addEventListener("click", () => { seek(0); play(); });
+  $("rp-seek").addEventListener("input", (e) => { pause(); seek(Number(e.target.value)); });
+  setChips($("rp-chips"), doc.crop_names);
+  drawClipChart();
+  seek(0);
+  setPlayButton();
+}
+
+function focusRow(rows) {
+  const v = rows.filter((r) => r.cls === "car" || r.cls === "bus");
+  if (!v.length) return null;
+  const score = (r) => [r.kind.startsWith("alarm") ? 1 : 0, r.closing_mps != null ? 1 : 0, r.closing_mps ?? -99];
+  return v.sort((a, b) => { const x = score(a), y = score(b); return y[0] - x[0] || y[1] - x[1] || y[2] - x[2]; })[0];
+}
+
+function seek(i) {
+  const doc = replay.doc; if (!doc) return;
+  replay.i = Math.max(0, Math.min(doc.frames.length - 1, i));
+  const f = doc.frames[replay.i], n = String(replay.i).padStart(3, "0");
+  $("rp-img").src = `/clips/${replay.id}/f${n}.jpg`;
+  $("rp-strip").src = `/clips/${replay.id}/s${n}.jpg`;
+  const t = f.t_ms - doc.started_ms, total = doc.ended_ms - doc.started_ms;
+  $("rp-time").textContent = `${(t / 1000).toFixed(1)} / ${(total / 1000).toFixed(1)} s`;
+  $("rp-clock").textContent = `RECORDED · ${clock(f.t_ms)}`;
+  $("rp-seek").value = replay.i;
+
+  // The sign holds red for 1.5 s after the last alarming frame, as the phone would.
+  let alarmRow = null;
+  for (let j = replay.i; j >= 0 && f.t_ms - doc.frames[j].t_ms <= 1500; j--) {
+    alarmRow = doc.frames[j].rows.filter((r) => r.kind.startsWith("alarm")).sort((a, b) => b.closing_mps - a.closing_mps)[0];
+    if (alarmRow) break;
+  }
+  const row = alarmRow || focusRow(f.rows);
+  const sign = $("rp-sign");
+  sign.classList.toggle("stop", !!alarmRow);
+  const said = doc.said.filter((x) => x.t_ms <= f.t_ms).pop();
+  const shown = alarmRow || row;
+  let words, sub;
+  if (alarmRow) {
+    words = vehicleWords(alarmRow.cls, alarmRow.bearing_deg);
+    sub = said ? `The phone said it at ${clock(said.t_ms)}` : "What the phone says for this direction";
+  } else if (row) {
+    const label = { waiting: "measuring its speed", not_coming: "not coming at you", too_far: "coming, but too far to matter" }[row.kind] || row.kind;
+    words = `${row.cls[0].toUpperCase() + row.cls.slice(1)} · ${label}`;
+    sub = "No alarm. Cane stays quiet.";
+  } else {
+    words = "No vehicle in view"; sub = "Cane stays quiet.";
+  }
+  $("rp-words").textContent = words;
+  $("rp-sub").textContent = sub;
+  $("rp-arrow").innerHTML = shown && shown.bearing_deg != null ? arrowSvg(shown.bearing_deg) : "";
+  const c = shown?.closing_mps;
+  $("rp-speed").innerHTML = c == null ? "&ndash;" : `${c > 0 ? "+" : ""}${num(c, 1)}<small>m/s</small>`;
+  const deg = shown?.bearing_deg;
+  $("rp-read").innerHTML = `
+    <div><small>Bearing</small><b>${deg == null ? "–" : deg === 0 ? "0° ahead" : `${Math.abs(Math.round(deg))}° ${deg < 0 ? "left" : "right"}`}</b></div>
+    <div><small>Distance band</small><b>${shown ? esc(BAND_WORDS[shown.range_band] || "unknown") : "–"}</b></div>
+    <div><small>Detector confidence</small><b>${shown ? num(shown.confidence * 100) + "%" : "–"}</b></div>`;
+  setChips($("rp-chip"), f.focus_crop != null && doc.crop_names ? [doc.crop_names[f.focus_crop]] : [], true);
+  const cursor = $("rp-cursor");
+  if (cursor) { const x = (t / Math.max(1, total)) * 600; cursor.setAttribute("x1", x); cursor.setAttribute("x2", x); }
+  // Alarm spans turn red only once the playhead has reached them.
+  for (const r of document.querySelectorAll("#rp-chart rect.span")) {
+    const on = Number(r.dataset.t) <= f.t_ms;
+    r.setAttribute("fill", on ? "#d52b1e" : "#3a3a3a");
+    r.setAttribute("fill-opacity", on ? ".35" : ".55");
+  }
+}
+
+const TRACK_COLOURS = ["#ffd200", "#7fc4ff", "#ffffff", "#b99cff", "#7fe0c5"];
+function drawClipChart() {
+  const doc = replay.doc, W = 600, H = 190, yMin = -3, yMax = 10, total = Math.max(1, doc.ended_ms - doc.started_ms);
+  const X = (t) => ((t - doc.started_ms) / total) * W, Y = (v) => H - ((Math.max(yMin, Math.min(yMax, v)) - yMin) / (yMax - yMin)) * H;
+  let out = "";
+  // Alarm spans, shaded.
+  doc.frames.forEach((f, i) => {
+    if (!f.rows.some((r) => r.kind.startsWith("alarm"))) return;
+    const next = doc.frames[i + 1];
+    out += `<rect class="span" data-t="${f.t_ms}" x="${X(f.t_ms).toFixed(1)}" y="0" width="${Math.max(2, (next ? X(next.t_ms) : W) - X(f.t_ms)).toFixed(1)}" height="${H}" fill="#3a3a3a" fill-opacity=".55"/>`;
+  });
+  for (let v = -2; v <= 10; v += 2) out += `<line x1="0" x2="${W}" y1="${Y(v)}" y2="${Y(v)}" stroke="#2e2e2e"/><text x="4" y="${Y(v) - 3}" fill="#a3a29d" font-size="13">${v}</text>`;
+  out += `<line x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}" stroke="#555"/>`;
+  const thr = doc.rules.approach_mps;
+  out += `<line x1="0" x2="${W}" y1="${Y(thr)}" y2="${Y(thr)}" stroke="#ff5a4d" stroke-width="2" stroke-dasharray="7 5"/>
+    <text x="${W - 6}" y="${Y(thr) - 5}" fill="#ff8479" font-size="12" font-weight="700" text-anchor="end">alarm at ${thr} m/s</text>`;
+  const tracks = {};
+  doc.frames.forEach((f) => f.rows.forEach((r) => {
+    if ((r.cls === "car" || r.cls === "bus") && r.closing_mps != null) (tracks[r.track_id] ||= { cls: r.cls, pts: [] }).pts.push([f.t_ms, r.closing_mps]);
+  }));
+  const legend = [];
+  Object.entries(tracks).forEach(([id, tr], k) => {
+    const col = TRACK_COLOURS[k % TRACK_COLOURS.length];
+    out += `<polyline points="${tr.pts.map(([t, v]) => `${X(t).toFixed(1)},${Y(v).toFixed(1)}`).join(" ")}" fill="none" stroke="${col}" stroke-width="2.5"/>`;
+    legend.push(`<span><span class="key" style="border-color:${col}"></span>${esc(tr.cls)} ${esc(id)}</span>`);
+  });
+  out += `<line id="rp-cursor" x1="0" x2="0" y1="0" y2="${H}" stroke="#ffffff" stroke-width="2"/>`;
+  $("rp-chart").innerHTML = out;
+  $("rp-legend").innerHTML = legend.join("") + `<span>closing speed, m/s, over the recording</span>`;
+}
+
+function setPlayButton() {
+  const b = $("rp-play"); if (!b) return;
+  b.innerHTML = replay.playing
+    ? `<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="2" y="2" width="3.5" height="10" fill="currentColor"/><rect x="8.5" y="2" width="3.5" height="10" fill="currentColor"/></svg>Pause`
+    : `<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 2 L12 7 L3 12 Z" fill="currentColor"/></svg>Play`;
+}
+
+function play() {
+  const doc = replay.doc; if (!doc) return;
+  if (replay.i >= doc.frames.length - 1) seek(0);
+  replay.playing = true; setPlayButton();
+  const step = () => {
+    if (!replay.playing) return;
+    if (replay.i >= doc.frames.length - 1) { replay.playing = false; setPlayButton(); return; }
+    const wait = Math.min(600, Math.max(40, doc.frames[replay.i + 1].t_ms - doc.frames[replay.i].t_ms));
+    replay.timer = setTimeout(() => { seek(replay.i + 1); step(); }, wait);
+  };
+  step();
+}
+function pause() { replay.playing = false; clearTimeout(replay.timer); setPlayButton(); }
+
+// ---------------------------------------------------------------- team diagnostics
+function fact(label, big, small = "") { return `<div><small>${label}</small><b>${big}</b>${small ? `<span>${small}</span>` : ""}</div>`; }
+
+function renderDiag(s, q) {
+  const p = s.phone, x = s.x4, g = s.gemini, v = s.voice, d = p.depth;
+  const depthFresh = d && s.now_ms - d.at_ms < 3000;
+  const voiceTotal = Object.values(v.by_source).reduce((a, b) => a + b, 0);
+  $("tiles").innerHTML = [
+    fact("Phone link", p.connected ? "connected" : "no phone", p.link_alert ? `phone says: ${esc(p.link_alert)}` : `last seen ${p.last_seen_ms ? Math.round((s.now_ms - p.last_seen_ms) / 1000) + " s ago" : "never"}`),
+    fact("360 camera", x.source === "none" ? "off" : esc(x.source), x.source === "none" ? "phone camera only (./startcane x4 for the 360)" : `${x.resolution ?? "?"}${x.fps != null ? ` · ${num(x.fps, 1)} fps · frame ${num(x.frame_age_ms)} ms old` : " · not live"}${x.problem ? ` · ${esc(x.problem)}` : ""}`),
+    fact("Gemini", g.latency_last_ms != null ? `last ${secs(g.latency_last_ms)}` : "-", `${g.questions} asked · median ${secs(g.latency_median_ms)} · max ${secs(g.latency_max_ms)}`),
+    fact("Answers", Object.entries(g.by_status).map(([k, n]) => `${n} ${k.replace("_", " ")}`).join(" · ") || "-", `picked phone ${g.picked_phone} · picked 360 ${g.picked_360} · with box ${g.with_box}`),
+    fact("Front depth", depthFresh ? `${num(d.metres, 2)} m` : "-", depthFresh ? `coverage ${num(d.coverage * 100)}% · ${esc(d.accuracy)}${d.trustworthy === "yes" ? "" : " · NOT TRUSTED"}` : "no TrueDepth readings"),
+    fact("Voice", voiceTotal ? `${v.by_source.elevenlabs ?? 0}/${voiceTotal} natural` : "-", `median wait ${v.wait_median_ms ?? "-"} ms · phone voice ${v.by_source.phone ?? 0}`),
+    fact("Mic", p.mic_peak != null ? `${Math.round(p.mic_peak * 100)}%` : "-", "peak level (room noise shows here)"),
+    fact("Laptop", `up ${Math.floor(s.uptime_s / 60)} min`, clock(s.now_ms)),
+  ].join("");
+  if (q) {
+    const a = q.answer;
+    $("q-facts").innerHTML = `<dl class="kv">
+      <dt>Query</dt><dd>${esc(q.query_id)} · ${esc(q.kind)}${q.target ? " · " + esc(q.target) : ""}</dd>
+      <dt>Status</dt><dd>${esc(a.status)}${a.confidence ? " · " + esc(a.confidence) : ""}</dd>
+      <dt>Bearing</dt><dd>${a.bearing_deg != null ? `${a.bearing_deg}°` : "-"}</dd>
+      <dt>Phone box</dt><dd>${a.phone_box ? `x ${a.phone_box.x_min}–${a.phone_box.x_max}, y ${a.phone_box.y_min}–${a.phone_box.y_max}` : "-"}</dd>
+      <dt>Gemini time</dt><dd>${a.latency_ms} ms${q.error ? ` · <span class="bad-t">${esc(q.error)}</span>` : ""}</dd>
+      ${q.facts ? `<dt>Looked up</dt><dd>${esc(q.facts)}</dd>` : ""}</dl>
+      <pre>${esc(JSON.stringify({ gemini_reply: q.reply, answer_sent: a }, null, 2))}</pre>`;
+  }
+  if (s.feed.length) {
+    $("feed").innerHTML = [...s.feed].reverse().map((e) => `<div><span class="t">${clock(e.t_ms)}</span><span class="k">${esc(e.kind.toUpperCase())}</span><span>${esc(JSON.stringify(e.data))}</span></div>`).join("");
+  }
+  try { renderHazards(s); } catch (e) { console.error(e); }
+}
+
+const BAND_R = { near: 38, mid: 76, far: 112 };
+const KIND_COLOUR = { alarm: "#ff5a4d", alarm_low: "#ff5a4d", waiting: "#ffbe00", not_coming: "#ffbe00", too_far: "#ffbe00", ignored: "#a3a29d" };
+
+function renderHazards(s) {
+  const h = s.hazards;
+  if (!h || !h.active) {
+    $("hz-rules").innerHTML = "No detector running. Hazard detection runs in <b>./startcane full</b>.";
+    $("hz-mini").innerHTML = ""; return;
+  }
+  const r = h.rules, lm = h.last_minute;
+  $("hz-rules").innerHTML = `Alarm when: <b>${r.vehicles.join(" or ")}</b> within ~15 m (<b>near</b> or <b>mid</b>) is closing at <b>&ge; ${r.approach_mps} m/s</b>; never when far. Box confidence under ${r.stop_confidence} &rarr; one level lower. Everything else stays silent.`;
+  const stale = (h.latest_age_ms ?? 1e9) > 3000;
+  $("hz-mini").innerHTML = `<span>Detector <b class="${stale ? "bad-t" : ""}">${h.responses_per_s}/s</b>${stale ? ` (stalled ${Math.round(h.latest_age_ms / 1000)} s)` : ""}</span>
+    <span>Alarms last minute <b>${lm.alarms}</b></span><span>Sent to phone last minute <b>${lm.sent}</b></span>`;
+  const rows = h.latest ? h.latest.rows : [];
+  renderRadar(rows);
+  renderChart(h.tracks, s.now_ms, r.approach_mps);
+  const order = { alarm: 0, alarm_low: 1, too_far: 2, not_coming: 3, waiting: 4, ignored: 5 };
+  $("hz-rows").innerHTML = [...rows].sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9)).map((x) => `<tr>
+    <td>${esc(x.track_id ?? "-")}</td><td>${esc(x.cls)}</td><td>${x.confidence}</td><td>${x.bearing_deg ?? "-"}</td><td>${esc(x.range_band ?? "-")}</td>
+    <td>${x.closing_mps == null ? "-" : (x.closing_mps > 0 ? "+" : "") + x.closing_mps.toFixed(1)}</td><td class="k-${x.kind}">${esc(x.why)}</td><td>${x.sent ? "yes" : "-"}</td></tr>`).join("")
+    || '<tr><td colspan="8" class="dim">Nothing detected in the latest frame.</td></tr>';
+  $("hz-alarms").innerHTML = [...h.alarms].reverse().map((a) => {
+    const said = a.phone_said.length ? [...new Set(a.phone_said)].map(esc).join(" · ") : '<span class="dim">nothing (phone muted, old app, or not connected)</span>';
+    return `<div><span class="t">${clock(a.t_ms)}</span><span class="k-${a.kind}">${a.kind === "alarm" ? "ALARM" : "LOWER"}</span>
+      <span><b>${esc(a.cls)} ${esc(a.track_id ?? "")}</b> at ${a.bearing_deg ?? "?"}° (${esc(a.range_band ?? "?")}), up to ${a.max_closing_mps.toFixed(1)} m/s,
+      ${a.frames} frame${a.frames === 1 ? "" : "s"}${a.sent ? "" : " <span class='bad-t'>NOT SENT to phone</span>"}<br><span class="dim">phone said:</span> ${said}</span></div>`;
+  }).join("") || '<p class="empty dim">No alarms yet.</p>';
+}
+
+function renderRadar(rows) {
+  let out = "";
+  for (const [band, rad] of Object.entries(BAND_R)) out += `<circle r="${rad}" fill="none" stroke="#2e2e2e"/><text x="3" y="${-rad + 11}" fill="#77756f" font-size="8">${band}</text>`;
+  out += `<text x="0" y="-118" fill="#77756f" font-size="8" text-anchor="middle">ahead</text><circle r="5" fill="#ffd200"/>`;
+  for (const row of rows) {
+    if (row.bearing_deg == null) continue;
+    const rad = BAND_R[row.range_band] ?? 122, a = row.bearing_deg * Math.PI / 180;
+    const x = Math.sin(a) * rad, y = -Math.cos(a) * rad, c = KIND_COLOUR[row.kind] || "#a3a29d";
+    out += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${row.kind.startsWith("alarm") ? 8 : 5}" fill="${c}"/>`;
+    out += `<text x="${(x + 8).toFixed(1)}" y="${(y + 3).toFixed(1)}" fill="${c}" font-size="8.5">${esc(row.cls)}${row.closing_mps != null ? " " + row.closing_mps.toFixed(1) : ""}</text>`;
+  }
+  $("hz-radar").innerHTML = out;
+}
+
+function renderChart(tracks, now, threshold) {
+  const W = 600, H = 240, yMin = -4, yMax = 10, span = 30000;
+  const X = (t) => W - (now - t) / span * W, Y = (v) => H - (v - yMin) / (yMax - yMin) * H;
+  let out = "";
+  for (let v = yMin; v <= yMax; v += 2) out += `<line x1="0" x2="${W}" y1="${Y(v)}" y2="${Y(v)}" stroke="#2e2e2e"/><text x="4" y="${Y(v) - 2}" fill="#77756f" font-size="10">${v}</text>`;
+  out += `<line x1="0" x2="${W}" y1="${Y(threshold)}" y2="${Y(threshold)}" stroke="#ff5a4d" stroke-dasharray="6 4"/>`;
+  const legend = [];
+  Object.entries(tracks).forEach(([track, info], i) => {
+    const col = TRACK_COLOURS[i % TRACK_COLOURS.length];
+    const pts = info.points.filter((p) => p[1] != null).map((p) => `${X(p[0]).toFixed(1)},${Y(Math.max(yMin, Math.min(yMax, p[1]))).toFixed(1)}`);
+    if (pts.length) out += `<polyline points="${pts.join(" ")}" fill="none" stroke="${col}" stroke-width="2"/>`;
+    legend.push(`<span><span class="key" style="border-color:${col}"></span>${esc(info.cls)} ${esc(track)}</span>`);
+  });
+  $("hz-chart").innerHTML = out + (legend.length ? "" : `<text x="${W / 2}" y="${H / 2}" fill="#77756f" font-size="13" text-anchor="middle">no cars or buses in the last 30 s</text>`);
+  $("hz-chart-legend").innerHTML = legend.join("");
+}
+
+// ---------------------------------------------------------------- loop
 async function poll() {
   if (location.protocol === "file:") {
-    $("tiles").innerHTML = tile("Wrong address", "open http://localhost:8780",
-      "this is the page file itself; the live page is served by ./startcane", "bad");
+    $("status").innerHTML = stItem("Wrong address", "Open http://localhost:8780 (served by ./startcane)", "bad");
     return;
   }
   let s;
   try {
     s = await (await fetch("/state.json")).json();
   } catch (e) {
-    $("tiles").innerHTML = tile("Laptop", "not reachable", "is ./startcane still running? (the page retries every second)", "bad");
+    $("status").innerHTML = stItem("Laptop", "Not reachable. Is ./startcane still running?", "bad");
     return;
   }
   try {
     lastState = s;
-    renderTiles(s);
-    renderFeed(s);
+    renderBand(s);
+    renderConvo(s);
+    renderLive(s);
     const newest = s.queries[s.queries.length - 1];
-    if ($("follow").checked && newest) selected = newest.query_id;
-    const q = s.queries.find((x) => x.query_id === selected);
-    const key = q ? JSON.stringify([q.query_id, q.phone, q.answer]) : "";
-    if (key !== poll.lastKey) { renderQuestion(q); poll.lastKey = key; }
-    renderHistory(s);
-    const off = s.x4.source === "none";
-    $("live").closest("section").style.display = off ? "none" : "";
-    // One long-lived video stream; reopened only if it drops (laptop restart).
-    if (!off && !$("live").dataset.streaming) {
-      $("live").dataset.streaming = "1";
-      $("live").src = `/live.mjpg?t=${Date.now()}`;
+    if (follow && newest) selected = newest.query_id;
+    const q = s.queries.find((x) => x.query_id === selected) || (follow ? newest : null);
+    const key = q ? JSON.stringify([q.query_id, q.phone, q.answer, shownView]) : "";
+    if (key !== poll.lastKey) {
+      const fresh = q && q.query_id !== poll.lastId && poll.lastId !== undefined;
+      if (q && q.query_id !== poll.lastId) shownView = null;
+      renderQuestion(q, fresh);
+      poll.lastKey = q ? JSON.stringify([q.query_id, q.phone, q.answer, shownView]) : "";
+      poll.lastId = q ? q.query_id : null;
     }
-    $("live-note").textContent = off ? "" : (s.x4.problem ? `· ${s.x4.problem}` : `· ${s.x4.source}`);
+    renderHistory(s);
+    if ($("diag").open) renderDiag(s, q);
   } catch (e) {
-    // A drawing bug must not look like a dead laptop.
-    console.error(e);
-    $("uptime").textContent = `page error: ${e.message}`;
+    console.error(e); // a drawing bug must not look like a dead laptop
   }
 }
 
-$("history").addEventListener("click", (e) => {
-  const row = e.target.closest("tr.row");
+function setFollow(on) {
+  follow = on;
+  $("follow").setAttribute("aria-pressed", String(on));
+  if (on) { shownView = null; poll.lastKey = null; poll(); }
+}
+
+$("follow").addEventListener("click", () => setFollow(!follow));
+function pickRow(row) {
   if (!row) return;
-  selected = row.dataset.id;
-  $("follow").checked = false;
-  poll.lastKey = null;
-  poll();
+  selected = row.dataset.id; shownView = null; setFollow(false);
+  poll.lastKey = null; poll();
+  scrollTo({ top: 0, behavior: REDUCED ? "auto" : "smooth" });
+}
+$("history").addEventListener("click", (e) => pickRow(e.target.closest("tr.row")));
+$("history").addEventListener("keydown", (e) => { if (e.key === "Enter") pickRow(e.target.closest("tr.row")); });
+$("stamps").addEventListener("click", (e) => {
+  const b = e.target.closest(".stamp"); if (!b) return;
+  shownView = Number(b.dataset.i); poll.lastKey = null; poll();
 });
-$("question").addEventListener("click", (e) => {
-  const img = e.target.closest("img[data-full]");
-  if (!img) return;
-  $("zoom-img").src = img.dataset.full;
-  $("zoom").showModal();
+$("pick").addEventListener("click", (e) => {
+  const img = e.target.closest("img[data-full]"); if (!img) return;
+  $("zoom-img").src = img.dataset.full; $("zoom").showModal();
 });
 $("zoom").addEventListener("click", () => $("zoom").close());
-$("live").addEventListener("error", () => {
-  setTimeout(() => { delete $("live").dataset.streaming; }, 2000);
-});
+$("clip-select").addEventListener("change", (e) => openClip(e.target.value));
+$("diag").open = store.get("cane.diag") === "1";
+$("diag").addEventListener("toggle", () => { store.set("cane.diag", $("diag").open ? "1" : "0"); if (lastState) renderDiag(lastState, null); });
+for (const id of ["live", "det"]) {
+  $(id).addEventListener("error", () => setTimeout(() => { delete $(id).dataset.streaming; }, 2000));
+}
 
-poll();
-setInterval(poll, 1000);
+renderIdle();
+tickClock(); setInterval(tickClock, 1000);
+poll(); setInterval(poll, 1000);
+loadClips(); setInterval(loadClips, 10000);
 </script>
 </body>
 </html>

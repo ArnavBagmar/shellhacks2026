@@ -230,8 +230,15 @@ class AVFoundationSource:  # pragma: no cover - needs real hardware
             names.append(label)
             if needle in label.lower():
                 matches.append(device)
+        real = pick_real_camera(matches, lambda d: str(d.localizedName())) if matches else None
+        if real is not None:
+            return real
         if matches:
-            return pick_real_camera(matches, lambda d: str(d.localizedName()))
+            raise CameraNotFoundError(
+                f"the X4 is not connected (only {', '.join(str(d.localizedName()) for d in matches)} "
+                "matched, which is software, not the camera). Plug the X4 in over USB-C, choose "
+                "Webcam on its screen, and check its screen has not gone to sleep."
+            )
         raise CameraNotFoundError(
             f"no camera matching {name_substring!r}; connected cameras: {names or ['none']}. "
             "Plug the X4 in over USB-C and choose Webcam on its screen."
@@ -284,14 +291,15 @@ class AVFoundationSource:  # pragma: no cover - needs real hardware
         return True
 
 
-def pick_real_camera(devices: list[object], name_of: Callable[[object], str]) -> object:
-    """The first match that is not a software ("virtual") camera, else the
-    first match.
+def pick_real_camera(devices: list[object], name_of: Callable[[object], str]) -> object | None:
+    """The first match that is not a software ("virtual") camera, or None.
+    Never the virtual one: it has no 2880x1440 mode, and picking it turned
+    "the X4 is unplugged" into a confusing format error (2026-09-26).
     """
     for device in devices:
         if not any(word in name_of(device).lower() for word in VIRTUAL_CAMERA_WORDS):
             return device
-    return devices[0]
+    return None
 
 
 def open_x4(
