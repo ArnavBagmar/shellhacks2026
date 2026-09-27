@@ -24,10 +24,11 @@ struct ChestDisplayView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 Spacer(minLength: 16)
+                // Small while the debug panel (and its map) is open, so both fit.
                 OrbView(activity: model.activity, level: model.level)
-                    .frame(maxWidth: 300, maxHeight: 300)
+                    .frame(maxWidth: showDebug ? 90 : 300, maxHeight: showDebug ? 90 : 300)
                     .aspectRatio(1, contentMode: .fit)
-                    .padding(40)
+                    .padding(showDebug ? 8 : 40)
                 statusLine
                     .padding(.top, 4)
                 Spacer(minLength: 16)
@@ -40,6 +41,8 @@ struct ChestDisplayView: View {
         .animation(.snappy, value: model.linkProblem)
         .contentShape(Rectangle())
         .onTapGesture(count: 3) { withAnimation(.snappy) { showDebug.toggle() } }
+        .onChange(of: showDebug) { _, shown in model.watchNavigation(shown) }
+        .onDisappear { model.watchNavigation(false) }
         .onLongPressGesture(minimumDuration: 2) { model.stopWalking() }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Cane is running. Two-finger double-tap to stop.")
@@ -141,6 +144,12 @@ struct ChestDisplayView: View {
 
     private var debugPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let nav = model.navDebug {
+                NavigationMapView(debug: nav)
+            } else {
+                Text("Not navigating. Say “Hey Cane, navigate me to …” and the route shows here.")
+                    .font(.caption).foregroundStyle(.white.opacity(0.5))
+            }
             HStack {
                 TextField("Type a command, e.g. is there a bathroom around", text: $command)
                     .textFieldStyle(.roundedBorder)
@@ -151,7 +160,7 @@ struct ChestDisplayView: View {
             if let depth = model.depthLine {
                 Text(depth).font(.callout.monospaced().bold()).foregroundStyle(.cyan)
             }
-            ForEach(Array(model.notes.enumerated()), id: \.offset) { _, line in
+            ForEach(Array(model.notes.suffix(model.navDebug == nil ? 12 : 3).enumerated()), id: \.offset) { _, line in
                 Text(line).font(.caption.monospaced()).foregroundStyle(.white.opacity(0.6))
             }
             Text("Long-press 2 s to stop · triple-tap hides this")

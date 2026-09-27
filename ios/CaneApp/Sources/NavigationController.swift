@@ -148,6 +148,12 @@ final class NavigationController {
         return true
     }
 
+    /// For the debug map (triple-tap the chest screen); nil when not navigating.
+    func debugInfo() async -> NavigationDebug? {
+        guard let engine, let destination else { return nil }
+        return NavigationDebug(query: destination, lastCue: lastCue, snapshot: await engine.snapshot())
+    }
+
     /// "Repeat that": the last direction, or why there is none.
     func repeatLast() async {
         guard isActive, let destination else { return await say("You're not navigating right now.") }
@@ -195,4 +201,12 @@ final class NavigationController {
     private func say(_ text: String) async {
         await arbiter.say(SpokenPhrase(text: text), on: .prompt, maxWaitMs: 3_000)
     }
+}
+
+/// What the debug map shows: the navigation snapshot plus what was asked
+/// for and the last thing said.
+struct NavigationDebug: Equatable, Sendable {
+    let query: String
+    let lastCue: String?
+    let snapshot: NavigationSnapshot
 }

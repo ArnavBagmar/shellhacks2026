@@ -264,6 +264,11 @@ final class Runtime {
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
     }
 
+    /// The debug map's data; nil when no route is running.
+    func navigationDebug() async -> NavigationDebug? {
+        await navigation.debugInfo()
+    }
+
     /// The typed command from the setup screen (no microphone needed).
     func typed(_ text: String) {
         let voice = voice

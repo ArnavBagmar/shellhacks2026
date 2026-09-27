@@ -28,6 +28,9 @@ final class AppModel {
     /// Live TrueDepth reading for the debug panel; nil when this phone
     /// has no depth sensor or none has arrived yet.
     private(set) var depthLine: String?
+    /// The debug map's data, refreshed once a second while it is shown.
+    private(set) var navDebug: NavigationDebug?
+    private var navWatch: Task<Void, Never>?
     /// The laptop link is down: shown as a banner on the chest screen.
     private(set) var linkProblem: Runtime.LinkProblem?
 
@@ -67,6 +70,7 @@ final class AppModel {
     }
 
     func stopWalking() {
+        watchNavigation(false)
         runtime?.stop()
         runtime = nil
         mode = .setup
@@ -86,6 +90,21 @@ final class AppModel {
 
     func settingsChanged() {
         settingsBox.update(settings.snapshot)
+    }
+
+    /// Starts or stops refreshing the debug map (triple-tap panel).
+    func watchNavigation(_ on: Bool) {
+        navWatch?.cancel()
+        navWatch = nil
+        guard on else { navDebug = nil; return }
+        navWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let runtime = self?.runtime else { return }
+                let info = await runtime.navigationDebug()
+                self?.navDebug = info
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
     }
 
     func typed(_ text: String) {
