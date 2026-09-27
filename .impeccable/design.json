@@ -1,0 +1,517 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-27T00:00:00Z",
+  "title": "Design System: Cane Live View",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Concourse Terrazzo",
+        "canonical": "oklch(91.7% 0.003 165.1)",
+        "tonalRamp": [
+          "#0a0b0b",
+          "#242525",
+          "#414242",
+          "#606261",
+          "#818382",
+          "#a4a5a4",
+          "#c8cac9",
+          "#edefee"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Sign Black",
+        "canonical": "oklch(21.8% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "ink-soft": {
+        "role": "neutral",
+        "displayName": "Worn Black",
+        "canonical": "oklch(40.5% 0.007 95.2)",
+        "tonalRamp": [
+          "#0c0b08",
+          "#262521",
+          "#43423e",
+          "#62615d",
+          "#83827e",
+          "#a6a5a0",
+          "#cac9c4",
+          "#f0eeea"
+        ]
+      },
+      "signal-yellow": {
+        "role": "primary",
+        "displayName": "Signal Yellow",
+        "canonical": "oklch(87.7% 0.180 93.1)",
+        "tonalRamp": [
+          "#120a00",
+          "#302300",
+          "#534000",
+          "#775e00",
+          "#9d7f00",
+          "#c6a100",
+          "#f1c400",
+          "#ffec69"
+        ]
+      },
+      "charcoal": {
+        "role": "neutral",
+        "displayName": "Band Charcoal",
+        "canonical": "oklch(29.7% 0.004 264.5)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#242527",
+          "#414244",
+          "#606163",
+          "#818285",
+          "#a4a5a7",
+          "#c8c9cc",
+          "#edeef1"
+        ]
+      },
+      "charcoal-text-soft": {
+        "role": "neutral",
+        "displayName": "Charcoal Soft Text",
+        "tonalRamp": [
+          "#141414",
+          "#1f1f1f",
+          "#2e2e2e",
+          "#3a3a3a",
+          "#4a4b4e",
+          "#77756f",
+          "#a3a29d",
+          "#d5d3cd"
+        ],
+        "canonical": "oklch(86.7% 0.008 91.5)",
+        "note": "Literal in the CSS (4 uses), not yet a :root custom property."
+      },
+      "charcoal-rule": {
+        "role": "neutral",
+        "displayName": "Charcoal Rule",
+        "tonalRamp": [
+          "#141414",
+          "#1f1f1f",
+          "#2e2e2e",
+          "#3a3a3a",
+          "#4a4b4e",
+          "#77756f",
+          "#a3a29d",
+          "#d5d3cd"
+        ],
+        "canonical": "oklch(41.3% 0.005 271.3)",
+        "note": "Literal in the CSS (3 uses), not yet a :root custom property."
+      },
+      "board": {
+        "role": "neutral",
+        "displayName": "Flight-Board Black",
+        "tonalRamp": [
+          "#141414",
+          "#1f1f1f",
+          "#2e2e2e",
+          "#3a3a3a",
+          "#4a4b4e",
+          "#77756f",
+          "#a3a29d",
+          "#d5d3cd"
+        ],
+        "canonical": "oklch(19.1% 0.000 89.9)",
+        "note": "The board family shares the project's own warm-grey scale (#141414 to #d5d3cd), used literally in the stylesheet."
+      },
+      "board-raised": {
+        "role": "neutral",
+        "displayName": "Board Raised",
+        "tonalRamp": [
+          "#141414",
+          "#1f1f1f",
+          "#2e2e2e",
+          "#3a3a3a",
+          "#4a4b4e",
+          "#77756f",
+          "#a3a29d",
+          "#d5d3cd"
+        ],
+        "canonical": "oklch(23.9% 0.000 89.9)"
+      },
+      "board-line": {
+        "role": "neutral",
+        "displayName": "Board Line",
+        "tonalRamp": [
+          "#141414",
+          "#1f1f1f",
+          "#2e2e2e",
+          "#3a3a3a",
+          "#4a4b4e",
+          "#77756f",
+          "#a3a29d",
+          "#d5d3cd"
+        ],
+        "canonical": "oklch(30.1% 0.000 89.9)"
+      },
+      "board-dim": {
+        "role": "neutral",
+        "displayName": "Board Dim",
+        "tonalRamp": [
+          "#141414",
+          "#1f1f1f",
+          "#2e2e2e",
+          "#3a3a3a",
+          "#4a4b4e",
+          "#77756f",
+          "#a3a29d",
+          "#d5d3cd"
+        ],
+        "canonical": "oklch(71.2% 0.007 97.4)"
+      },
+      "white": {
+        "role": "neutral",
+        "displayName": "White",
+        "canonical": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "stop-red": {
+        "role": "secondary",
+        "displayName": "Stop Red",
+        "canonical": "oklch(56.7% 0.207 29.5)",
+        "tonalRamp": [
+          "#230000",
+          "#530000",
+          "#880000",
+          "#ba0000",
+          "#e43c2d",
+          "#ff7360",
+          "#ffaea0",
+          "#ffe3dc"
+        ]
+      },
+      "stop-red-deep": {
+        "role": "secondary",
+        "displayName": "Stop Red Deep",
+        "canonical": "oklch(47.5% 0.174 29.5)",
+        "tonalRamp": [
+          "#230000",
+          "#520000",
+          "#870000",
+          "#ae271c",
+          "#d64f3f",
+          "#ff7462",
+          "#ffafa1",
+          "#ffe3dc"
+        ]
+      },
+      "alarm-text": {
+        "role": "secondary",
+        "displayName": "Alarm Salmon",
+        "canonical": "oklch(74.9% 0.151 26.6)",
+        "tonalRamp": [
+          "#230000",
+          "#530000",
+          "#80040d",
+          "#a6332f",
+          "#cd584f",
+          "#f57b71",
+          "#ffada3",
+          "#ffe3dd"
+        ],
+        "note": "Literal #ff8479 in CSS and chart SVG; for use on black boards only."
+      },
+      "alarm-line": {
+        "role": "secondary",
+        "displayName": "Alarm Line",
+        "tonalRamp": [
+          "#230000",
+          "#530000",
+          "#80040d",
+          "#a6332f",
+          "#cd584f",
+          "#f57b71",
+          "#ffada3",
+          "#ffe3dd"
+        ],
+        "note": "Literal #ff5a4d in chart SVG strokes (threshold line, alarm radar marks)."
+      },
+      "recorded-blue": {
+        "role": "tertiary",
+        "displayName": "Recorded Blue",
+        "canonical": "oklch(47.9% 0.139 252.2)",
+        "tonalRamp": [
+          "#00003a",
+          "#001f65",
+          "#004088",
+          "#1262ad",
+          "#3c85d2",
+          "#60a9f9",
+          "#99ceff",
+          "#d6f2ff"
+        ]
+      },
+      "amber": {
+        "role": "tertiary",
+        "displayName": "Caution Amber",
+        "canonical": "oklch(83.8% 0.172 83.6)",
+        "tonalRamp": [
+          "#140800",
+          "#362000",
+          "#583c00",
+          "#7e5b00",
+          "#ac7800",
+          "#d09b0b",
+          "#febd00",
+          "#ffe99b"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Answer sign subject; 46px for long subjects, 44px on phones. Distance figure uses the same voice at 58px."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Replay sign words (34px/800); live STOP banner at 38px/800."
+      },
+      "quote": {
+        "displayName": "Quote",
+        "purpose": "The heard question after the HEARD tag; 22px on phones."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section plates and flight-board headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Running text, notes, rule paragraphs (max 80ch)."
+      },
+      "value": {
+        "displayName": "Value",
+        "purpose": "Status-band values, station names and times, board cells."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "HEARD/SAID tags, board column heads and row kinds, gate chips. Uppercase short words."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Raw JSON in team diagnostics only."
+      }
+    },
+    "constraints": [
+      "Font is Avenir Next from the system (installed on the demo Mac, the user's choice); the user declined a web-font download. Keep the fallback stack; no @font-face, no external resources."
+    ],
+    "shadows": [
+      {
+        "name": "focus-halo",
+        "value": "outline: 3px solid #ffd200; outline-offset: 2px; box-shadow: 0 0 0 5px #1a1a1a",
+        "purpose": "The only box-shadow in the system: black halo completing the yellow focus ring so it reads on pale ground and black boards."
+      }
+    ],
+    "motion": [
+      {
+        "name": "arrow-turn",
+        "value": "transform .45s cubic-bezier(.16, 1, .3, 1)",
+        "purpose": "The answer sign's arrow rotating to a new bearing."
+      },
+      {
+        "name": "split-flap",
+        "value": "14 frames x 32ms, letters settle left to right",
+        "purpose": "The sign subject (and a new recent-question result) flipping in when a new answer lands."
+      },
+      {
+        "name": "stop-flip",
+        "value": "background-color .12s linear",
+        "purpose": "Replay sign turning Stop Red at the alarming frame; held 1.5 s after the last alarm."
+      },
+      {
+        "name": "status-fade",
+        "value": "opacity .25s ease-out",
+        "purpose": "Status items dimming to 60% when stale."
+      },
+      {
+        "name": "feed-stall",
+        "value": "opacity .3s ease-out, filter .3s ease-out",
+        "purpose": "Camera feed greying to 40% when stalled."
+      },
+      {
+        "name": "disclosure",
+        "value": "transform .2s ease-out",
+        "purpose": "Diagnostics chevron rotating 90deg."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "@media (prefers-reduced-motion: reduce) { * { transition: none } } and split-flap skipped",
+        "purpose": "All motion off for reduced-motion users."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "stack",
+        "value": "1180px"
+      },
+      {
+        "name": "phone",
+        "value": "760px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Answer Sign",
+      "kind": "custom",
+      "refersTo": "answer-sign",
+      "description": "The hero: yellow direction sign with drawn arrow at the true bearing, subject words and a black TrueDepth distance inset.",
+      "html": "<div class=\"ds-sign\"><div class=\"ds-sign-arrow\"><svg viewBox=\"0 0 100 100\" style=\"transform:rotate(0deg)\" aria-hidden=\"true\"><path d=\"M50 90 V16 M17 49 L50 16 L83 49\" stroke=\"currentColor\" stroke-width=\"15\" fill=\"none\" stroke-linejoin=\"miter\"/></svg></div><div class=\"ds-sign-words\"><div class=\"ds-sign-dir\">Straight ahead</div><div class=\"ds-sign-subject\">Monster can</div><div class=\"ds-sign-detail\">on the table</div></div><div class=\"ds-sign-dist\"><b>1.13<small>m</small></b><span>3 ft 8 in · TrueDepth</span></div></div>",
+      "css": ":host{--ground:#e2e4e3;--ink:#1a1a1a;--ink-2:#4a4945;--yellow:#ffd200;--charcoal:#2c2d2f;--board:#141414;--board-2:#1f1f1f;--board-line:#2e2e2e;--board-dim:#a3a29d;--white:#fff;--red:#d52b1e;--blue:#0b5ea8;--r:6px;--font:\"Avenir Next\", Avenir, \"Helvetica Neue\", Helvetica, Arial, sans-serif;}.ds-sign{font-family:var(--font);font-variant-numeric:tabular-nums;display:grid;grid-template-columns:auto minmax(0,1fr) auto;background:var(--yellow);color:var(--ink);border-radius:var(--r);min-height:196px;overflow:hidden;}.ds-sign-arrow{width:196px;display:grid;place-items:center;border-right:4px solid var(--ink);}.ds-sign-arrow svg{width:132px;height:132px;transition:transform .45s cubic-bezier(.16,1,.3,1);}.ds-sign-words{padding:22px 28px;display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;}.ds-sign-dir{font-size:22px;font-weight:700;}.ds-sign-subject{font-size:64px;font-weight:700;letter-spacing:-.025em;line-height:1.02;}.ds-sign-detail{font-size:19px;font-weight:600;color:#3a3325;}.ds-sign-dist{background:var(--ink);color:var(--yellow);margin:18px;border-radius:4px;padding:14px 22px;min-width:190px;display:flex;flex-direction:column;justify-content:center;}.ds-sign-dist b{font-size:58px;font-weight:700;letter-spacing:-.02em;line-height:1;white-space:nowrap;}.ds-sign-dist small{font-size:28px;margin-left:4px;}.ds-sign-dist span{color:var(--white);font-size:14px;font-weight:600;margin-top:8px;}"
+    },
+    {
+      "name": "SAID Strip",
+      "kind": "custom",
+      "refersTo": "said-strip",
+      "description": "Black bar under the sign carrying Cane's spoken words after a yellow SAID tag.",
+      "html": "<p class=\"ds-said\"><span class=\"ds-tag\">SAID</span>“Straight ahead, Monster can, about 4 feet away.”</p>",
+      "css": ":host{--ground:#e2e4e3;--ink:#1a1a1a;--ink-2:#4a4945;--yellow:#ffd200;--charcoal:#2c2d2f;--board:#141414;--board-2:#1f1f1f;--board-line:#2e2e2e;--board-dim:#a3a29d;--white:#fff;--red:#d52b1e;--blue:#0b5ea8;--r:6px;--font:\"Avenir Next\", Avenir, \"Helvetica Neue\", Helvetica, Arial, sans-serif;}.ds-said{font-family:var(--font);display:flex;align-items:baseline;gap:14px;margin:0;background:var(--ink);color:var(--white);border-radius:var(--r);padding:13px 18px;font-size:20px;font-weight:600;}.ds-said .ds-tag{flex:none;background:var(--yellow);color:var(--ink);font-size:13px;font-weight:700;letter-spacing:.03em;padding:3px 8px 2px;border-radius:3px;transform:translateY(-2px);}"
+    },
+    {
+      "name": "Status Band",
+      "kind": "nav",
+      "refersTo": "status-band",
+      "description": "Sticky charcoal information band: black brand block, caption/value status items with square pips, black clock block.",
+      "html": "<header class=\"ds-band\"><div class=\"ds-brand\"><svg viewBox=\"0 0 28 28\" aria-hidden=\"true\"><rect width=\"28\" height=\"28\" rx=\"4\" fill=\"#ffd200\"/><path d=\"M14 22 V7 M8 13 L14 7 L20 13\" stroke=\"#1a1a1a\" stroke-width=\"3.2\" fill=\"none\"/></svg><b>Cane</b><span>live view</span></div><div class=\"ds-st ds-ok\"><small>Phone</small><span><i></i>Connected</span></div><div class=\"ds-st ds-bad\"><small>360 camera</small><span><i></i>Stalled 3 s</span></div><div class=\"ds-st ds-stale\"><small>TrueDepth</small><span><i></i>No reading</span></div><div class=\"ds-clock\">02:35<small>58</small></div></header>",
+      "css": ":host{--ground:#e2e4e3;--ink:#1a1a1a;--ink-2:#4a4945;--yellow:#ffd200;--charcoal:#2c2d2f;--board:#141414;--board-2:#1f1f1f;--board-line:#2e2e2e;--board-dim:#a3a29d;--white:#fff;--red:#d52b1e;--blue:#0b5ea8;--r:6px;--font:\"Avenir Next\", Avenir, \"Helvetica Neue\", Helvetica, Arial, sans-serif;}.ds-band{font-family:var(--font);font-variant-numeric:tabular-nums;display:flex;align-items:stretch;background:var(--charcoal);color:var(--white);min-height:56px;}.ds-brand{display:flex;align-items:center;gap:10px;padding:0 20px 0 16px;background:var(--ink);}.ds-brand svg{width:28px;height:28px;}.ds-brand b{font-size:21px;font-weight:700;}.ds-brand span{color:var(--board-dim);font-size:14px;font-weight:500;}.ds-st{display:flex;flex-direction:column;justify-content:center;padding:6px 18px;border-left:1px solid #3c3d40;}.ds-st small{font-size:11.5px;font-weight:600;color:#bcbbb6;}.ds-st span{font-size:16px;font-weight:700;display:flex;align-items:center;gap:7px;white-space:nowrap;}.ds-st i{width:9px;height:9px;border-radius:2px;background:#6b6b68;}.ds-ok i{background:var(--yellow);}.ds-bad i{background:var(--red);}.ds-bad span{color:#ff9d94;}.ds-stale{opacity:.6;}.ds-clock{margin-left:auto;display:flex;align-items:center;padding:0 18px;font-size:24px;font-weight:700;background:var(--ink);}.ds-clock small{font-size:14px;color:var(--board-dim);margin-left:3px;font-weight:600;}"
+    },
+    {
+      "name": "Flight Board",
+      "kind": "card",
+      "refersTo": "flight-board",
+      "description": "Black FIDS panel for time-ordered logs: heading row, hairline-ruled rows, uppercase kind labels coloured by meaning.",
+      "html": "<div class=\"ds-board\"><div class=\"ds-board-head\"><h2>Conversation</h2><span>what the phone heard and said</span></div><div class=\"ds-row ds-new\"><span class=\"ds-t\">02:35:43</span><span class=\"ds-k ds-said\">SAID</span><span class=\"ds-x\">Straight ahead, Monster can, about 4 feet away.</span></div><div class=\"ds-row\"><span class=\"ds-t\">02:35:42</span><span class=\"ds-k ds-heard\">HEARD</span><span class=\"ds-x\">“Hey Cane, how far is the monster can?”</span></div><div class=\"ds-row\"><span class=\"ds-t\">02:35:41</span><span class=\"ds-k ds-stop\">ALARM</span><span class=\"ds-x\">hazard alert, level high</span></div></div>",
+      "css": ":host{--ground:#e2e4e3;--ink:#1a1a1a;--ink-2:#4a4945;--yellow:#ffd200;--charcoal:#2c2d2f;--board:#141414;--board-2:#1f1f1f;--board-line:#2e2e2e;--board-dim:#a3a29d;--white:#fff;--red:#d52b1e;--blue:#0b5ea8;--r:6px;--font:\"Avenir Next\", Avenir, \"Helvetica Neue\", Helvetica, Arial, sans-serif;}.ds-board{font-family:var(--font);font-variant-numeric:tabular-nums;background:var(--board);color:var(--white);border-radius:var(--r);overflow:hidden;}.ds-board-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--board-line);}.ds-board-head h2{margin:0;font-size:18px;font-weight:700;}.ds-board-head span{margin-left:auto;color:var(--board-dim);font-size:13px;}.ds-row{display:grid;grid-template-columns:74px 96px 1fr;gap:10px;padding:9px 16px;border-bottom:1px solid var(--board-line);}.ds-row:hover,.ds-new{background:var(--board-2);}.ds-t{color:var(--board-dim);font-size:13.5px;padding-top:2px;}.ds-k{font-size:12.5px;font-weight:700;letter-spacing:.04em;padding-top:3px;color:var(--board-dim);}.ds-heard{color:var(--yellow);}.ds-said{color:var(--white);}.ds-stop{color:#ff8479;}.ds-x{font-size:16px;font-weight:600;}"
+    },
+    {
+      "name": "Section Plate",
+      "kind": "chip",
+      "refersTo": "plate",
+      "description": "Charcoal section sign with a plain note beside it; the RECORDED plate is its blue sibling.",
+      "html": "<div class=\"ds-plate-row\"><h2 class=\"ds-plate\">Car alarm</h2><span class=\"ds-recorded\">RECORDED <small>Sun, Sep 27, 02:34</small></span><span class=\"ds-note\">played back from disk</span></div>",
+      "css": ":host{--ground:#e2e4e3;--ink:#1a1a1a;--ink-2:#4a4945;--yellow:#ffd200;--charcoal:#2c2d2f;--board:#141414;--board-2:#1f1f1f;--board-line:#2e2e2e;--board-dim:#a3a29d;--white:#fff;--red:#d52b1e;--blue:#0b5ea8;--r:6px;--font:\"Avenir Next\", Avenir, \"Helvetica Neue\", Helvetica, Arial, sans-serif;}.ds-plate-row{font-family:var(--font);display:flex;align-items:center;gap:12px;flex-wrap:wrap;}.ds-plate{margin:0;background:var(--charcoal);color:var(--white);font-size:18px;font-weight:700;padding:7px 14px;border-radius:4px;letter-spacing:-.005em;}.ds-recorded{display:inline-flex;gap:10px;align-items:center;background:var(--blue);color:var(--white);font-weight:700;font-size:15px;padding:7px 12px;border-radius:4px;}.ds-recorded small{font-weight:600;font-size:14px;color:#d8e7f6;}.ds-note{color:var(--ink-2);font-size:14px;}"
+    },
+    {
+      "name": "Replay Sign",
+      "kind": "custom",
+      "refersTo": "replay-sign",
+      "description": "The answer sign's grammar for the recorded alarm: charcoal at rest, flips to Stop Red at the alarming frame. Hover the sample to see the STOP state.",
+      "html": "<div class=\"ds-rsign\"><div class=\"ds-rsign-arrow\"><svg viewBox=\"0 0 100 100\" style=\"transform:rotate(-58deg)\" aria-hidden=\"true\"><path d=\"M50 90 V16 M17 49 L50 16 L83 49\" stroke=\"currentColor\" stroke-width=\"15\" fill=\"none\" stroke-linejoin=\"miter\"/></svg></div><div class=\"ds-rsign-words\"><b>Stop! Car coming ahead.</b><span>What the phone says for this direction</span></div><div class=\"ds-rsign-dist\"><b>+2.2<small>m/s</small></b><span>closing speed</span></div></div>",
+      "css": ":host{--ground:#e2e4e3;--ink:#1a1a1a;--ink-2:#4a4945;--yellow:#ffd200;--charcoal:#2c2d2f;--board:#141414;--board-2:#1f1f1f;--board-line:#2e2e2e;--board-dim:#a3a29d;--white:#fff;--red:#d52b1e;--blue:#0b5ea8;--r:6px;--font:\"Avenir Next\", Avenir, \"Helvetica Neue\", Helvetica, Arial, sans-serif;}.ds-rsign{font-family:var(--font);font-variant-numeric:tabular-nums;display:grid;grid-template-columns:auto minmax(0,1fr) auto;border-radius:var(--r);background:var(--charcoal);color:var(--white);min-height:150px;overflow:hidden;transition:background-color .12s linear;}.ds-rsign-arrow{width:150px;display:grid;place-items:center;border-right:4px solid #4a4b4e;}.ds-rsign-arrow svg{width:96px;height:96px;}.ds-rsign-words{padding:18px 22px;display:flex;flex-direction:column;justify-content:center;min-width:0;}.ds-rsign-words b{font-size:34px;font-weight:800;letter-spacing:-.015em;line-height:1.08;}.ds-rsign-words span{font-size:16px;font-weight:600;color:#d5d3cd;margin-top:6px;}.ds-rsign-dist{background:var(--ink);color:var(--white);margin:14px;border-radius:4px;padding:10px 18px;min-width:150px;display:flex;flex-direction:column;justify-content:center;}.ds-rsign-dist b{font-size:40px;font-weight:700;letter-spacing:-.02em;line-height:1;white-space:nowrap;}.ds-rsign-dist small{font-size:18px;margin-left:3px;}.ds-rsign-dist span{font-size:13.5px;font-weight:600;margin-top:6px;color:#d5d3cd;}.ds-rsign:hover{background:var(--red);}.ds-rsign:hover .ds-rsign-arrow{border-color:var(--ink);}.ds-rsign:hover .ds-rsign-words span{color:#ffe3e0;}.ds-rsign:hover .ds-rsign-dist b{color:var(--yellow);}"
+    },
+    {
+      "name": "Gate Chip",
+      "kind": "chip",
+      "refersTo": "gate-chip",
+      "description": "Yellow chip with black lettering naming a camera view, pinned top-left on the image.",
+      "html": "<div class=\"ds-feed\"><span class=\"ds-chip\">C0 · ahead</span><span class=\"ds-chip ds-big\">C5 · 60 L</span></div>",
+      "css": ":host{--ground:#e2e4e3;--ink:#1a1a1a;--ink-2:#4a4945;--yellow:#ffd200;--charcoal:#2c2d2f;--board:#141414;--board-2:#1f1f1f;--board-line:#2e2e2e;--board-dim:#a3a29d;--white:#fff;--red:#d52b1e;--blue:#0b5ea8;--r:6px;--font:\"Avenir Next\", Avenir, \"Helvetica Neue\", Helvetica, Arial, sans-serif;}.ds-feed{font-family:var(--font);background:var(--board);border-radius:var(--r);height:90px;display:flex;align-items:flex-start;}.ds-chip{margin:8px;background:var(--yellow);color:var(--ink);font-weight:700;font-size:13px;line-height:1;padding:5px 8px 4px;border-radius:3px;white-space:nowrap;}.ds-big{font-size:18px;padding:7px 11px 6px;margin:12px;}"
+    },
+    {
+      "name": "Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Black with yellow lettering, inverts on hover; drawn 14px glyph optional.",
+      "html": "<div class=\"ds-controls\"><button class=\"ds-btn\"><svg viewBox=\"0 0 14 14\" aria-hidden=\"true\"><path d=\"M3 2 L12 7 L3 12 Z\" fill=\"currentColor\"/></svg>Play</button><button class=\"ds-btn\"><svg viewBox=\"0 0 14 14\" aria-hidden=\"true\"><path d=\"M2 2 V12 M12 2 L4 7 L12 12 Z\" stroke=\"currentColor\" stroke-width=\"2\" fill=\"currentColor\"/></svg>Start</button><button class=\"ds-btn\" disabled>Play</button></div>",
+      "css": ":host{--ground:#e2e4e3;--ink:#1a1a1a;--ink-2:#4a4945;--yellow:#ffd200;--charcoal:#2c2d2f;--board:#141414;--board-2:#1f1f1f;--board-line:#2e2e2e;--board-dim:#a3a29d;--white:#fff;--red:#d52b1e;--blue:#0b5ea8;--r:6px;--font:\"Avenir Next\", Avenir, \"Helvetica Neue\", Helvetica, Arial, sans-serif;}:focus-visible{outline:3px solid var(--yellow,#ffd200);outline-offset:2px;box-shadow:0 0 0 5px var(--ink,#1a1a1a);}.ds-controls{display:flex;gap:10px;}.ds-btn{font-family:var(--font);background:var(--ink);color:var(--yellow);border:0;border-radius:4px;padding:8px 16px;font-weight:700;font-size:15px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;}.ds-btn svg{width:14px;height:14px;}.ds-btn:hover{background:var(--yellow);color:var(--ink);}.ds-btn:disabled{background:#b8b5ae;color:#efede8;cursor:default;}.ds-btn:focus-visible{outline:3px solid var(--yellow);outline-offset:2px;box-shadow:0 0 0 5px var(--ink);}"
+    },
+    {
+      "name": "Follow Toggle",
+      "kind": "button",
+      "refersTo": "toggle-pressed",
+      "description": "Outlined black toggle; pressed state is black with yellow lettering.",
+      "html": "<button class=\"ds-follow\" aria-pressed=\"true\">Follow newest</button> <button class=\"ds-follow\" aria-pressed=\"false\">Follow newest</button>",
+      "css": ":host{--ground:#e2e4e3;--ink:#1a1a1a;--ink-2:#4a4945;--yellow:#ffd200;--charcoal:#2c2d2f;--board:#141414;--board-2:#1f1f1f;--board-line:#2e2e2e;--board-dim:#a3a29d;--white:#fff;--red:#d52b1e;--blue:#0b5ea8;--r:6px;--font:\"Avenir Next\", Avenir, \"Helvetica Neue\", Helvetica, Arial, sans-serif;}.ds-follow{font-family:var(--font);border:2px solid var(--ink);background:transparent;color:var(--ink);border-radius:4px;padding:3px 10px;font-size:13px;font-weight:700;cursor:pointer;}.ds-follow[aria-pressed=true]{background:var(--ink);color:var(--yellow);}.ds-follow:hover{background:var(--ink-2);color:var(--white);border-color:var(--ink-2);}.ds-follow:focus-visible{outline:3px solid var(--yellow);outline-offset:2px;box-shadow:0 0 0 5px var(--ink);}"
+    },
+    {
+      "name": "Stations",
+      "kind": "custom",
+      "refersTo": "stations",
+      "description": "Timed route of what happened to a question: square stops on a 2px line; skipped stations hollow.",
+      "html": "<ol class=\"ds-stations\"><li><b>Heard</b><span class=\"ds-t\">0.0 s</span><span class=\"ds-d\">find · looking for <b>monster can</b></span></li><li><b>Gemini answered</b><span class=\"ds-t\">+0.0 s</span><span class=\"ds-d\">picked the phone camera</span></li><li class=\"ds-off\"><b>Cane spoke</b><span class=\"ds-t\"></span><span class=\"ds-d\">waiting</span></li></ol>",
+      "css": ":host{--ground:#e2e4e3;--ink:#1a1a1a;--ink-2:#4a4945;--yellow:#ffd200;--charcoal:#2c2d2f;--board:#141414;--board-2:#1f1f1f;--board-line:#2e2e2e;--board-dim:#a3a29d;--white:#fff;--red:#d52b1e;--blue:#0b5ea8;--r:6px;--font:\"Avenir Next\", Avenir, \"Helvetica Neue\", Helvetica, Arial, sans-serif;}.ds-stations{font-family:var(--font);font-variant-numeric:tabular-nums;list-style:none;margin:0;padding:0;color:var(--ink);}.ds-stations li{display:grid;grid-template-columns:16px 1fr auto;column-gap:12px;padding:0 0 14px;position:relative;}.ds-stations li::before{content:'';grid-row:1/3;width:12px;height:12px;margin-top:5px;border-radius:2px;background:var(--ink);z-index:1;}.ds-stations li:not(:last-child)::after{content:'';position:absolute;left:5px;top:17px;bottom:0;width:2px;background:var(--ink);}.ds-stations li.ds-off::before{background:var(--ground);outline:2px solid #8d8b85;outline-offset:-2px;}.ds-stations>li>b,.ds-t{font-size:16px;font-weight:700;}.ds-t{text-align:right;}.ds-d{grid-column:2/4;color:var(--ink-2);font-size:14px;}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Concourse",
+    "overview": "The page is an airport concourse. Its ground is pale terrazzo, and on it stand the three kinds of sign a traveller already knows how to read: signal-yellow direction signs with black lettering and a drawn arrow, charcoal information bands with white text, and black flight-board panels that list what happened in time order. Cane's answer is always a direction sign (arrow, words, distance), so a judge standing at arm's length reads it the way they would read a gate sign: without being taught.\n\nDensity is mixed on purpose. The answer sign and the STOP moments are huge and sparse; the flight boards and diagnostics are dense and quiet. Colour is used as signage, not decoration: yellow means direction and \"this one\", red means STOP and nothing else, blue means RECORDED and nothing else. There are no cards, no drop shadows and no glow. Surfaces are flat plates with small sign radii, separated by colour and by the ground showing between them.\n\nThe one piece of theatre is borrowed from the departure hall: when a new answer lands, the sign's subject flips letter by letter like a split-flap display and settles left to right, and the recorded alarm's sign flips from charcoal to red at the frame the rule fires.",
+    "keyCharacteristics": [
+      "Pale concourse ground; every block of content is a flat, solid sign plate.",
+      "Yellow direction sign with a drawn arrow is the hero, always.",
+      "Black flight-board panels for anything that is a log or a list over time.",
+      "Red is reserved for STOP; blue is reserved for RECORDED.",
+      "One typeface (Avenir Next), heavy weights, tabular numerals everywhere.",
+      "Split-flap letter settle on new answers; instant red flip on alarm."
+    ],
+    "rules": [
+      {
+        "name": "The Signage-Only Colour Rule",
+        "body": "Every chromatic colour is a sign meaning. Yellow is direction and selection, red is STOP, blue is RECORDED, amber is \"vehicle, not alarming\". If a colour does not answer \"what does this sign mean\", it does not belong.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Red Rule",
+        "body": "Stop Red never decorates. It appears only when an alarm is live, recorded at its alarm frame, or a feed has stalled. A red element on a calm page is a bug.",
+        "section": "colors"
+      },
+      {
+        "name": "The Blue Is a Recording Rule",
+        "body": "Anything played back from disk wears Recorded Blue; anything live never does.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Numbers Rule",
+        "body": "`font-variant-numeric: tabular-nums` is set on the body. Every number that updates live keeps its width.",
+        "section": "typography"
+      },
+      {
+        "name": "The Heavy Sign Rule",
+        "body": "Anything a judge must read from arm's length is 600 or heavier. 500 is for secondary prose only.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat Plate Rule",
+        "body": "Signs are painted plates, not floating cards. Separate them with ground, a rule or a change of material, never with a shadow or glow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do show every answer as a direction sign: drawn arrow at the true bearing, words, and a distance inset.",
+      "Do keep signal yellow paired with black: black lettering on yellow, or yellow lettering on black.",
+      "Do put anything time-ordered on a black flight board with hairline row rules.",
+      "Do mark every played-back recording with the blue RECORDED plate, and keep live views free of blue.",
+      "Do set every live number in tabular figures at 600 weight or heavier.",
+      "Do honour reduced motion: the split-flap flip and all transitions switch off under `prefers-reduced-motion`.",
+      "Do keep the page self-contained: Avenir Next from the system with its fallback stack, no web fonts, no external resources."
+    ],
+    "donts": [
+      "Don't use Stop Red for anything but STOP, alarms and stalled feeds.",
+      "Don't add drop shadows, glows or floating cards; separate plates with ground, rules or material.",
+      "Don't build a dark tile-grid ops dashboard; the ground is pale and the answer sign leads.",
+      "Don't round beyond the sign radii (6px large, 4px plates, 3px tags) or use circles for pips and station stops.",
+      "Don't place yellow text on the pale ground or on white; it has no contrast there.",
+      "Don't stage anything as live that was recorded."
+    ]
+  }
+}

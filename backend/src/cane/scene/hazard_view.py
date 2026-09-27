@@ -46,7 +46,8 @@ VIEW_CROP_PX = 200
 RED = (60, 60, 240)
 AMBER = (0, 190, 255)
 GREY = (170, 170, 170)
-GREEN = (80, 210, 80)
+#: Everything else the detector saw (people, chairs...): shown, never announced.
+WHITE = (235, 235, 235)
 
 
 def now_ms() -> int:
@@ -72,7 +73,7 @@ def verdict(cls: str, closing: float | None, confidence: float, band: str | None
     return "alarm", f"COMING {closing:.1f} m/s: 'Stop! Car coming...'"
 
 
-_COLOURS = {"alarm": RED, "alarm_low": RED, "waiting": AMBER, "not_coming": AMBER, "too_far": AMBER, "ignored": GREY}
+_COLOURS = {"alarm": RED, "alarm_low": RED, "waiting": AMBER, "not_coming": AMBER, "too_far": AMBER, "ignored": WHITE}
 
 
 class HazardBoard:
@@ -97,7 +98,8 @@ class HazardBoard:
 
     # ------------------------------------------------------------- writers
 
-    def record(self, response: Any, built: tuple[Any, ...], sent: tuple[Any, ...]) -> None:
+    def record(self, response: Any, built: tuple[Any, ...], sent: tuple[Any, ...]) -> list[dict[str, Any]]:
+        """One inference response; returns its rows (for the clip recorder)."""
         from cane.bridge.dewarp import CROPSET_YAWS_DEG
         from cane.bridge.events import bearing_for_detection
 
@@ -136,6 +138,7 @@ class HazardBoard:
                 if row["kind"].startswith("alarm"):
                     self._alarm(track or "?", row, t)
             self._prune(t)
+        return rows
 
     def _alarm(self, track: str, row: dict[str, Any], t: int) -> None:
         """Open a row for a new approach, or update the one in progress."""
@@ -152,8 +155,10 @@ class HazardBoard:
         self._open_alarm[track] = episode
         self._alarms.append(episode)
 
-    def on_phone(self, kind: str, data: dict[str, Any]) -> None:
-        """The phone's side: `hazard` (urgency) and `say` right after it."""
+    def on_phone(self, kind: str, data: dict[str, Any]) -> str | None:
+        """The phone's side: `hazard` (urgency) and `say` right after it.
+        Returns the words when they were the hazard's own announcement.
+        """
         t = now_ms()
         with self._lock:
             if kind == "hazard":
@@ -166,6 +171,8 @@ class HazardBoard:
                     if t - alarm["t_last_ms"] < ALARM_EPISODE_GAP_S * 1000:
                         alarm["phone_said"].append(data.get("text"))
                         break
+                return str(data.get("text") or "") or None
+        return None
 
     def _prune(self, t: int) -> None:
         horizon = t - int(TRACK_HISTORY_S * 1000)
@@ -190,6 +197,7 @@ class HazardBoard:
                 "active": self._latest is not None,
                 "rules": {"vehicles": ["car", "bus"], "approach_mps": APPROACH_MPS, "stop_confidence": STOP_CONFIDENCE},
                 "responses_per_s": round(len(recent) / 5.0, 1),
+                "crop_names": crop_names(),
                 "latest": self._latest,
                 "latest_age_ms": None if self._latest is None else t - self._latest["t_ms"],
                 "tracks": {
@@ -230,31 +238,49 @@ class HazardBoard:
             return jpeg
 
 
-def _detector_strip(frame: np.ndarray, rows: list[dict[str, Any]]) -> bytes:
-    from cane.bridge.dewarp import CROPSET_YAWS_DEG, NADIR_CROP_INDEX, dewarp_equirect
+def crop_names() -> list[str]:
+    """The detector strip's tiles, left to right (crop order)."""
+    from cane.bridge.dewarp import CROPSET_YAWS_DEG, NADIR_CROP_INDEX
 
-    crops = dewarp_equirect(frame, VIEW_CROP_PX, t_arrival_laptop_ms=0)
-    tiles = [image.copy() for image in crops.images]
+    return [crop_name(i) for i in range(max(len(CROPSET_YAWS_DEG), NADIR_CROP_INDEX + 1))]
+
+
+def crop_name(index: int) -> str:
+    """"C3 60 L": the crop's index and where it points from the wearer."""
+    from cane.bridge.dewarp import CROPSET_YAWS_DEG, NADIR_CROP_INDEX
+
+    yaw = CROPSET_YAWS_DEG[index] if index < len(CROPSET_YAWS_DEG) else 0.0
+    name = "floor" if index == NADIR_CROP_INDEX else (
+        "ahead" if yaw == 0 else ("behind" if abs(yaw) == 180 else f"{abs(yaw):g} {'R' if yaw > 0 else 'L'}"))
+    return f"C{index} · {name}"
+
+
+def draw_rows(tiles: list[np.ndarray], rows: list[dict[str, Any]]) -> None:
+    """Boxes on the detector's crops, in place: red alarm, amber vehicle,
+    white anything else, with the closing speed beside the class.
+    """
     for row in rows:
         index = row["crop_index"]
         if not 0 <= index < len(tiles):
             continue
+        s = tiles[index].shape[0]
+        scale = s / VIEW_CROP_PX
         cx, cy, w, h = row["box"]
-        s = VIEW_CROP_PX
         p0 = (int((cx - w / 2) * s), int((cy - h / 2) * s))
         p1 = (int((cx + w / 2) * s), int((cy + h / 2) * s))
         colour = _COLOURS.get(row["kind"], GREY)
-        cv2.rectangle(tiles[index], p0, p1, colour, 3 if row["kind"].startswith("alarm") else 1)
+        alarm = row["kind"].startswith("alarm")
+        cv2.rectangle(tiles[index], p0, p1, colour, max(1, round((3 if alarm else 1.5) * scale)))
         speed = "" if row["closing_mps"] is None else f" {row['closing_mps']:+.1f}"
-        cv2.putText(tiles[index], f"{row['cls']}{speed}", (p0[0], max(12, p0[1] - 4)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, colour, 1, cv2.LINE_AA)
-    labelled = []
-    for index, tile in enumerate(tiles):
-        yaw = CROPSET_YAWS_DEG[index] if index < len(CROPSET_YAWS_DEG) else 0.0
-        name = "floor" if index == NADIR_CROP_INDEX else (
-            "ahead" if yaw == 0 else ("behind" if abs(yaw) == 180 else f"{abs(yaw):g} {'R' if yaw > 0 else 'L'}"))
-        cv2.rectangle(tile, (0, 0), (VIEW_CROP_PX, 20), (0, 0, 0), -1)
-        cv2.putText(tile, f"C{index} {name}", (6, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
-        labelled.append(tile)
-    ok, buf = cv2.imencode(".jpg", np.hstack(labelled), [cv2.IMWRITE_JPEG_QUALITY, 70])
+        cv2.putText(tiles[index], f"{row['cls']}{speed}", (p0[0], max(int(12 * scale), p0[1] - 4)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42 * scale, colour, max(1, round(scale)), cv2.LINE_AA)
+
+
+def _detector_strip(frame: np.ndarray, rows: list[dict[str, Any]]) -> bytes:
+    from cane.bridge.dewarp import dewarp_equirect
+
+    crops = dewarp_equirect(frame, VIEW_CROP_PX, t_arrival_laptop_ms=0)
+    tiles = [image.copy() for image in crops.images]
+    draw_rows(tiles, rows)  # the page names the tiles (``crop_names``)
+    ok, buf = cv2.imencode(".jpg", np.hstack(tiles), [cv2.IMWRITE_JPEG_QUALITY, 70])
     return buf.tobytes() if ok else b""

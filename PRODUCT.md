@@ -10,7 +10,7 @@ Design scope is the laptop debug page only (`backend/src/cane/scene/debug_page.h
 
 ## Users
 
-- **ShellHacks 2026 judges** watching the debug page live on the laptop while the team demos the smart cane. They need to see, at a glance and in real time, what the system perceives and decides.
+- **ShellHacks 2026 judges** watching the debug page live on the laptop's own screen (no projector) while the team demos the smart cane. They need to see, at a glance and in real time, what the system perceives and decides.
 - **The team** (Kavi, Arnav, Stanley) running and debugging the demo from the same page: camera feeds, Gemini picks, hazard verdicts and stats.
 
 The cane's actual wearer is a blind or low-vision walker who never looks at a screen. They are not an audience for this page, but the page is showing a tool built for them.
@@ -19,7 +19,9 @@ The cane's actual wearer is a blind or low-vision walker who never looks at a sc
 
 The smart cane is an assistive extension to the white cane. A chest-mounted iPhone listens for "Hey Cane" and answers spoken questions ("is there a bathroom around?", "how far is the Sprite can?") using Gemini over the phone's front camera and a head-worn Insta360 X4 360 view. It also sounds "Stop! Car coming from your left." when a car or bus is closing on the wearer.
 
-The debug page makes this invisible pipeline visible: live 360 feed and dewarped crops, which image and box Gemini picked, what the phone heard, decided and said, and the hazard board (radar, closing-speed chart, per-detection verdicts, alarm episodes).
+The core of the project is **giving the wearer their surroundings**: Gemini answers about what is around and where, object detection on the 360 view, and metric distances from the phone's TrueDepth camera. The car alarm is one important feature, but it is not the centre.
+
+The debug page makes this invisible pipeline visible: live 360 feed and dewarped crops, what the phone heard, which image and box Gemini picked, the TrueDepth distance inside that box, what the phone said, object detections, and the hazard board (radar, closing-speed chart, per-detection verdicts, alarm episodes).
 
 Success this weekend: **win the ShellHacks demo.** The page is the live view the judges watch.
 
@@ -33,7 +35,8 @@ The page shows real perception as it happens, not a mock: the actual frames Gemi
 - Served by `debug_view.py` (`DebugHub`, stdlib HTTP server bound to 127.0.0.1 only). The page polls `/state.json` and shows MJPEG streams `/live.mjpg` and `/hazards.mjpg`.
 - The hazards section appears only when detection runs (`startcane full`).
 - Runs on the team's MacBook during a live hackathon demo, on venue Wi-Fi or with no internet at all.
-- Open: whether judges see the laptop screen directly or on a projector or larger display, and at what resolution.
+- Judges view it on the MacBook's own screen, standing or sitting close by. Nothing is projected.
+- The car alarm cannot be triggered live at the venue: no real car will drive at the wearer. The live demo is spoken questions, Gemini's answers, detections and TrueDepth distances. The alarm has to be shown some other way, such as a clearly labelled recorded run or an explanation of the rule, never staged as live.
 
 ## Capabilities and Constraints
 
@@ -57,8 +60,9 @@ The page shows real perception as it happens, not a mock: the actual frames Gemi
 
 ## Product Principles
 
-1. **Show the real pipeline, live.** Every number and box comes from the running system. Empty or disconnected states say so plainly instead of faking activity.
-2. **Legible from a judge's distance.** A judge who glances at the page should understand what Cane just saw, decided and said.
-3. **Safety moments dominate.** A car alarm is the most important event on the page and must be unmistakable when it fires.
-4. **Debuggable first.** The team still has to diagnose a failing demo from this page. Clarity for judges must not remove the diagnostics.
-5. **Never break the demo.** Offline, dependency-free and fast. The page should degrade gracefully when a feed stalls.
+1. **Surroundings first.** The hero story is question → what Cane saw → where it is → how far → what it said. The car alarm is a supporting feature.
+2. **Show the real pipeline, live.** Every number and box comes from the running system. Empty or disconnected states say so plainly instead of faking activity.
+3. **Legible on a laptop screen at arm's length.** A judge who glances at the page should understand what Cane just saw, decided and said.
+4. **Safety moments are unmistakable.** When a car alarm does fire, it must dominate the page. Anything recorded is labelled as a recording.
+5. **Still debuggable.** The team still has to diagnose a failing demo from this page. Clarity for judges must not remove the diagnostics.
+6. **Never break the demo.** Offline, dependency-free and fast. The page should degrade gracefully when a feed stalls.
