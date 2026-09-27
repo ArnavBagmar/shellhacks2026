@@ -86,7 +86,7 @@ public actor NavigationEngine {
         do {
             let place = try await resolver.resolve(freeText: freeText, near: origin.latLng)
             resolved = place
-            await route(from: origin, to: place.latLng, announce: announce.map { hook in { await hook(place, $0) } })
+            await route(from: origin, to: place.latLng, announce: announce.map { hook in { @Sendable route in await hook(place, route) } })
         } catch let error as NavigationError {
             fail(error)
         } catch {
