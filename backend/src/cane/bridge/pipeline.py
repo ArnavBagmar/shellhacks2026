@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Callable, Protocol
 
+from cane.bridge.car_alerts import CarAlertSwitch, without_vehicles
 from cane.bridge.capture.base import Frame
 from cane.bridge.capture.grab_thread import GrabThread
 from cane.bridge.config import BridgeConfig
@@ -170,7 +171,11 @@ class BridgePipeline:
         hazard_observer: Callable[
             [InferenceResponse, tuple[AwarenessEvent, ...], tuple[AwarenessEvent, ...]], None
         ] | None = None,
+        car_alerts: CarAlertSwitch | None = None,
     ) -> None:
+        #: The live view's car-alert switch: off drops every vehicle from each
+        #: response before anything else sees it.
+        self._car_alerts = car_alerts
         #: The debug page: every response, every event built from it, and the
         #: ones actually sent. Never on the warning path -- errors are logged.
         self._hazard_observer = hazard_observer
@@ -416,6 +421,8 @@ class BridgePipeline:
         return self._steer_undelivered
 
     async def _handle_response(self, response: InferenceResponse) -> None:
+        if self._car_alerts is not None and not self._car_alerts.on:
+            response = without_vehicles(response)
         source = self._source()
         events = events_from_response(
             response, CROPSET_YAWS_DEG, self._config.delta_deg, source

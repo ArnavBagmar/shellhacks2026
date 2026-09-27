@@ -140,6 +140,12 @@ class HazardRecorder:
             if self._clip is not None:
                 self._clip.said.append({"t_ms": t_ms, "text": text})
 
+    def discard(self) -> None:
+        """Drop the pre-roll and any clip being recorded (car alerts off)."""
+        with self._lock:
+            self._clip = None
+            self._buffer.clear()
+
     def flush(self, timeout_s: float = 5.0) -> None:
         """Tests: wait until everything offered is drawn."""
         deadline = time.monotonic() + timeout_s

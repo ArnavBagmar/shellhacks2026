@@ -215,6 +215,17 @@
   .recorded { display: inline-flex; gap: 10px; align-items: center; background: var(--blue); color: var(--white);
               font-weight: 700; font-size: 15px; padding: 7px 12px; border-radius: 4px; }
   .recorded small { font-weight: 600; font-size: 14px; color: #d8e7f6; }
+  /* The car-alert switch: a sign plate, yellow when alerts are on. */
+  .car-switch { display: inline-flex; align-items: center; gap: 10px; border: 2px solid var(--ink); border-radius: 4px;
+                background: var(--white); color: var(--ink); font: inherit; font-weight: 700; font-size: 15px; padding: 6px 12px; cursor: pointer; }
+  .car-switch i { width: 30px; height: 16px; border-radius: 8px; background: var(--ground-2); position: relative; flex: none; }
+  .car-switch i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%;
+                         background: var(--ink); transition: left .15s ease-out; }
+  .car-switch[aria-pressed="true"] { background: var(--yellow); }
+  .car-switch[aria-pressed="true"] i { background: var(--ink); }
+  .car-switch[aria-pressed="true"] i::after { left: 16px; background: var(--yellow); }
+  .car-switch:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+  .car-off { color: var(--ink-2); font-size: 14px; font-weight: 600; }
   .clip-pick { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 14px; }
   .clip-pick select { background: var(--white); border: 2px solid var(--ink); border-radius: 4px; padding: 4px 8px; font-weight: 600; color: var(--ink); }
   .replay { display: grid; grid-template-columns: minmax(0, 46fr) minmax(0, 54fr); gap: 22px; align-items: start; }
@@ -417,6 +428,8 @@
     <div class="plate-row">
       <h2 class="plate">Car alarm</h2>
       <span class="recorded" id="rec-plate" hidden>RECORDED <small id="rec-when"></small></span>
+      <button type="button" class="car-switch" id="car-switch" aria-pressed="true" hidden><i aria-hidden="true"></i><span id="car-switch-label">Car alerts on</span></button>
+      <span class="car-off" id="car-off" hidden>Cars and buses are ignored: nothing is detected, alerted or saved.</span>
       <label class="clip-pick" id="clip-pick" hidden>Run <select id="clip-select"></select></label>
     </div>
     <div id="replay"></div>
@@ -734,6 +747,28 @@ function renderLiveStop(h, now) {
 
 // ---------------------------------------------------------------- recorded car alarm
 const replay = { list: [], id: null, doc: null, i: 0, playing: false, timer: null, cache: [] };
+
+// ---------------------------------------------------------------- car alerts
+function renderCarSwitch(c) {
+  const btn = $("car-switch");
+  btn.hidden = !c || !c.available;
+  $("car-off").hidden = !c || !c.available || c.on;
+  if (!c || !c.available || renderCarSwitch.busy) return;
+  btn.setAttribute("aria-pressed", String(c.on));
+  $("car-switch-label").textContent = c.on ? "Car alerts on" : "Car alerts off";
+}
+$("car-switch").addEventListener("click", async () => {
+  const btn = $("car-switch");
+  const on = btn.getAttribute("aria-pressed") !== "true";
+  renderCarSwitch.busy = true;
+  btn.setAttribute("aria-pressed", String(on));
+  $("car-switch-label").textContent = on ? "Car alerts on" : "Car alerts off";
+  try {
+    await fetch("/car-alerts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on }) });
+  } catch (e) { /* the next poll shows the real state */ }
+  renderCarSwitch.busy = false;
+  poll();
+});
 
 async function loadClips() {
   let list;
@@ -1170,6 +1205,7 @@ async function poll() {
     renderBand(s);
     renderConvo(s);
     renderLive(s);
+    renderCarSwitch(s.car_alerts);
     if (s.guide) guideLoop(); else renderGuide(null);
     const newest = s.queries[s.queries.length - 1];
     if (follow && newest) selected = newest.query_id;

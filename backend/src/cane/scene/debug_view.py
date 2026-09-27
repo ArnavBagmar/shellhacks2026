@@ -122,6 +122,7 @@ class DebugHub:
         source_name: str = "none",
         delta_deg: float = 0.0,
         clips_dir: Path | None = None,
+        car_alerts: Any | None = None,
     ) -> None:
         from cane.scene.hazard_clips import HazardRecorder
         from cane.scene.hazard_view import HazardBoard
@@ -130,6 +131,9 @@ class DebugHub:
         self.hazards = HazardBoard(delta_deg=delta_deg)
         #: Every car alarm, saved for replay (the alarm can't be staged live).
         self.clips = HazardRecorder(live_frame, clips_dir)
+        #: The car-alert switch (``startcane full`` only): off, no vehicle is
+        #: shown, alerted or saved.
+        self.car_alerts = car_alerts
         self._lock = threading.Lock()
         self._live_frame = live_frame
         self._frame_counter = frame_counter
@@ -196,7 +200,17 @@ class DebugHub:
     def record_hazards(self, response: Any, built: tuple[Any, ...], sent: tuple[Any, ...]) -> None:
         """The bridge's ``hazard_observer``: one inference response."""
         rows = self.hazards.record(response, built, sent)
-        self.clips.offer(now_ms(), rows)
+        if self.car_alerts is None or self.car_alerts.on:
+            self.clips.offer(now_ms(), rows)
+
+    def set_car_alerts(self, on: bool) -> bool:
+        """The page's switch. Off also drops a recording in progress."""
+        if self.car_alerts is None:
+            return False
+        self.car_alerts.set(on)
+        if not on:
+            self.clips.discard()
+        return True
 
     def hazard_jpeg(self, max_age_s: float = LIVE_REFRESH_S) -> bytes | None:
         return self.hazards.view_jpeg(self._live_frame, max_age_s)
@@ -336,6 +350,8 @@ class DebugHub:
                 "feed": list(self._feed),
                 "hazards": self.hazards.state(),
                 "guide": self._guide_state(),
+                "car_alerts": {"available": self.car_alerts is not None,
+                               "on": self.car_alerts.on if self.car_alerts is not None else False},
             }
 
     def query_image(self, query_id: str, index: int) -> bytes | None:
@@ -580,6 +596,28 @@ def serve_debug(hub: DebugHub, port: int = DEFAULT_PORT, host: str = "127.0.0.1"
                     last, sent_at = jpeg, started
                 time.sleep(max(0.0, period - (time.monotonic() - started)))
 
+        def do_POST(self) -> None:  # noqa: N802 - http.server API
+            """Only ``/car-alerts``. A JSON body forces a browser preflight, so
+            no other web page can flip the switch behind the operator's back.
+            """
+            host = (self.headers.get("Host") or "").split(":", 1)[0]
+            if self.path != "/car-alerts" or host not in ("127.0.0.1", "localhost") \
+                    or (self.headers.get("Content-Type") or "").split(";")[0].strip() != "application/json":
+                self._send(403, "text/plain", b"forbidden")
+                return
+            try:
+                length = min(int(self.headers.get("Content-Length") or 0), 1_000)
+                on = json.loads(self.rfile.read(length) or b"{}").get("on")
+            except (ValueError, AttributeError):
+                on = None
+            if not isinstance(on, bool):
+                self._send(400, "text/plain", b"send {\"on\": true|false}")
+                return
+            if not hub.set_car_alerts(on):
+                self._send(409, "text/plain", b"car alerts run only with ./startcane full")
+                return
+            self._send(200, "application/json", json.dumps({"on": on}).encode())
+
         def _send(self, status: int, content_type: str, body: bytes) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
@@ -604,6 +642,7 @@ PORT_ENV = "CANE_DEBUG_PORT"
 def start_debug_view(
     *, grab: Any | None = None, still: np.ndarray | None = None, port: int | None = None,
     delta_deg: float = 0.0,
+    car_alerts: Any | None = None,
 ) -> DebugHub | None:
     """The page for one run: live frames from ``grab`` (a ``GrabThread``) or
     one ``still`` image, the phone's diagnostics from the ``cane.phone``
@@ -628,6 +667,7 @@ def start_debug_view(
             frame_arrival_ms=lambda: (f.t_arrival_laptop_ms if (f := newest()) is not None else None),
             source_name=str(grab.source_name),
             delta_deg=delta_deg,
+            car_alerts=car_alerts,
         )
     elif still is not None:
         hub = DebugHub(live_frame=lambda: still, source_name="still test photo")

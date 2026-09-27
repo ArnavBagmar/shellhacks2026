@@ -296,10 +296,14 @@ async def run_bridge(
     # Local page at http://localhost:8780 (CANE_DEBUG_PORT=0: off): cameras,
     # Gemini's picks and the hazard view. Rides with --scene (`startcane full`).
     debug = None
+    car_alerts = None
     if scene_vlm is not None:
         from cane.scene.debug_view import start_debug_view
 
-        debug = start_debug_view(grab=grab, delta_deg=config.delta_deg)
+        from cane.bridge.car_alerts import CarAlertSwitch
+
+        car_alerts = CarAlertSwitch.from_env()
+        debug = start_debug_view(grab=grab, delta_deg=config.delta_deg, car_alerts=car_alerts)
     if scene_vlm is not None:
         clear_ways = LatestClearWay()
         scene_hook = SceneHook(
@@ -345,6 +349,7 @@ async def run_bridge(
             local_detector=local.detector_name,
             frames_ignored=lambda: server.frames_ignored,
             hazard_observer=debug.record_hazards if debug is not None else None,
+            car_alerts=car_alerts,
         )
         grab.start()
         _log_banner(config, args, local)

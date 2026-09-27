@@ -23,7 +23,9 @@
 # Every mode saves what Gemini saw per question under backend/logs/views/, and
 # serves the live view (for judges and debugging) at http://localhost:8780
 # (CANE_DEBUG_PORT=0: off). `full` also saves every car alarm to
-# backend/logs/hazard_clips/, which the live view replays labelled RECORDED.
+# backend/logs/hazard_clips/, which the live view replays labelled RECORDED;
+# the live view's "Car alerts" switch (or CANE_CAR_ALERTS=off to start off)
+# turns cars and buses off entirely: not detected, alerted or saved.
 # Extra arguments after `front`/`still`/`x4` go straight to `python -m cane.scene`.
 # A second phone needs its own port: CANE_PORT=8766 ./startcane
 # Backpack, lid closed: run `sudo pmset -a disablesleep 1` once first (undo: 0).
@@ -239,6 +241,7 @@ full() {
   say "logs -> backend/logs/{laptop,inference}-$(date +%Y%m%d).log"
   say "live view -> http://localhost:${CANE_DEBUG_PORT:-8780}  (question, answer, cameras, detection)"
   say "car alarms -> saved to backend/logs/hazard_clips/ and replayed on the live view"
+  say "car alerts: ${CANE_CAR_ALERTS:-on}   (switch on the live view; off = cars ignored, nothing saved; CANE_CAR_ALERTS=off to start off)"
   local status=0
   PYTHONPATH=src caffeinate -i uv run --env-file .env \
     --extra yolo --extra depth --extra vision --extra mac --extra scene \
@@ -334,6 +337,6 @@ case "$cmd" in
   phone|install)  phone ;;
   test|tests)     tests ;;
   logs|log)       logs ;;
-  -h|--help|help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h|--help|help) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//' ;;
   *)              die "unknown command '$cmd' (try ./startcane help)" ;;
 esac
