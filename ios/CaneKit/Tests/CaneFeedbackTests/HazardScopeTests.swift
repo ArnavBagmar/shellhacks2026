@@ -1,3 +1,4 @@
+import Foundation
 import CaneContracts
 import XCTest
 
@@ -13,10 +14,15 @@ final class HazardScopeTests: XCTestCase {
         try Make.event(source: .x4Cloud, trackId: track, cls: cls, rangeBand: band, closingMps: closing)
     }
 
-    func testAnApproachingCarOrBusIsAHazard() throws {
-        XCTAssertTrue(scope.admits(try x4(.car, closing: 2.0)))
-        XCTAssertTrue(scope.admits(try x4(.bus, closing: 4.5, band: .mid)))
+    func testACloseApproachingCarOrBusIsAHazard() throws {
+        XCTAssertTrue(scope.admits(try x4(.car, closing: 4.0)))
         XCTAssertTrue(scope.admits(try x4(.car, closing: HazardScope.approachMps)))
+        XCTAssertTrue(scope.admits(try x4(.bus, closing: 2.0, band: .mid)), "5-15 m: early enough to stop")
+    }
+
+    func testOnlyWhenClose() throws {
+        XCTAssertFalse(scope.admits(try x4(.car, closing: 20.0, band: .far)), "far never alarms")
+        XCTAssertFalse(scope.admits(try Make.event(source: .x4Cloud, cls: .car, closingMps: 6.0)), "no band: read as far")
     }
 
     func testACarThatIsNotComingAtYouIsNot() throws {
@@ -24,6 +30,7 @@ final class HazardScopeTests: XCTestCase {
         XCTAssertFalse(scope.admits(try x4(.car, closing: -3.0)), "driving away")
         XCTAssertFalse(scope.admits(try x4(.car, closing: nil)), "no motion measured yet")
         XCTAssertFalse(scope.admits(try x4(.car, closing: 1.2)), "the wearer walking up to a parked car")
+        XCTAssertFalse(scope.admits(try x4(.car, closing: 1.4)), "just under the 1.5 m/s bar")
         XCTAssertFalse(scope.admits(try x4(.parkedCar, closing: 3.0)))
     }
 
@@ -40,9 +47,9 @@ final class HazardScopeTests: XCTestCase {
     }
 
     func testACarComingAtYouIsAlwaysTheTopAlarm() throws {
-        // Crosswalk: even far away and only just moving, it is "Stop".
-        XCTAssertEqual(scope.decide(try x4(.car, closing: 1.6, band: .far)).urgency, UrgencyLevel.immediate)
-        XCTAssertEqual(scope.decide(try x4(.bus, closing: 6.0, band: .near)).urgency, UrgencyLevel.immediate)
+        XCTAssertEqual(scope.decide(try x4(.car, closing: 1.6, band: .near)).urgency, UrgencyLevel.immediate)
+        XCTAssertEqual(scope.decide(try x4(.bus, closing: 1.6, band: .mid)).urgency, UrgencyLevel.immediate)
+        XCTAssertEqual(scope.decide(try x4(.car, closing: 5.0, band: .far)).urgency, UrgencyLevel.ambient)
         XCTAssertEqual(scope.decide(try x4(.person, closing: 4.0)).urgency, UrgencyLevel.ambient)
     }
 
@@ -67,5 +74,22 @@ final class HazardScopeTests: XCTestCase {
         XCTAssertEqual(sink.presented.map(\.cls), [.car])
         let counters = await subject.counters
         XCTAssertEqual(counters.outOfScope, 2)
+    }
+
+    func testTheDebugPageUsesTheSameRules() throws {
+        // backend/src/cane/scene/hazard_view.py explains every verdict to a
+        // tester; it must say what the phone actually does.
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("backend/src/cane/scene/hazard_view.py")
+        let source = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(source.contains("APPROACH_MPS = \(HazardScope.approachMps)"))
+        let close = RangeBand.allCases.filter { HazardScope.isClose(band: $0, closingMps: 100) }
+            .map { "\"\($0.rawValue)\"" }
+        XCTAssertTrue(source.contains("CLOSE_BANDS = frozenset({\(close.joined(separator: ", "))})"), "\(close)")
+        XCTAssertTrue(source.contains("STOP_CONFIDENCE = \(String(format: "%.2f", UrgencyPolicy.minStopConfidence))"))
+        let vehicles = ObjectClass.allCases.filter(HazardScope.isVehicle).map { "\"\($0.rawValue)\"" }
+        XCTAssertTrue(source.contains("VEHICLES = frozenset({\(vehicles.joined(separator: ", "))})"), "\(vehicles)")
     }
 }

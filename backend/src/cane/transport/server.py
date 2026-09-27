@@ -57,6 +57,15 @@ QueryHandler = Callable[[SceneQuery], Awaitable[None]]
 SpeakHandler = Callable[[SpeakRequest], Awaitable[VoiceClip]]
 
 
+def _listen_hosts(host: str) -> str | list[str]:
+    """``0.0.0.0`` ("every interface") also listens on IPv6. A T-Mobile
+    phone hotspot is IPv6-only (2026-09-26): the laptop's only IPv4 address
+    there is 464XLAT's private 192.0.0.2, which the phone cannot reach, so
+    the phone must connect over IPv6.
+    """
+    return [host, "::"] if host == "0.0.0.0" else host
+
+
 class EventLinkServer:
     """``async with EventLinkServer(host, port, ping_interval_s, pipeline_delay_d_ms) as srv:``
 
@@ -131,7 +140,7 @@ class EventLinkServer:
 
     async def __aenter__(self) -> EventLinkServer:
         self._server = await websockets.serve(
-            self._handle_connection, self._host, self._port, max_size=MAX_FRAME_BYTES
+            self._handle_connection, _listen_hosts(self._host), self._port, max_size=MAX_FRAME_BYTES
         )
         self._ping_task = asyncio.create_task(self._ping_loop())
         return self

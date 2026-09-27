@@ -293,9 +293,14 @@ async def run_bridge(
     # below -- no IPC, and nothing in the steering modules changes. Left as
     # None without --scene, which keeps the default run byte-identical.
     clear_ways: LatestClearWay | None = None
+    # Local page at http://localhost:8780 (CANE_DEBUG_PORT=0: off): cameras,
+    # Gemini's picks and the hazard view. Rides with --scene (`startcane full`).
+    debug = None
     if scene_vlm is not None:
         from cane.scene.debug_view import start_debug_view
 
+        debug = start_debug_view(grab=grab, delta_deg=config.delta_deg)
+    if scene_vlm is not None:
         clear_ways = LatestClearWay()
         scene_hook = SceneHook(
             SceneQueryService(
@@ -304,8 +309,7 @@ async def run_bridge(
                 clear_ways=clear_ways,
                 delta_deg=config.delta_deg,
                 weather=weather_from_env(),
-                # Local page at http://localhost:8780 (CANE_DEBUG_PORT=0: off).
-                debug=start_debug_view(grab=grab),
+                debug=debug,
                 # Gemini's views only; the detector keeps its level crops.
                 layout=HEAD_WORN_LAYOUT,
             )
@@ -339,6 +343,7 @@ async def run_bridge(
             monitor=monitor, source_provider=lambda: uplink.last_source,
             local_detector=local.detector_name,
             frames_ignored=lambda: server.frames_ignored,
+            hazard_observer=debug.record_hazards if debug is not None else None,
         )
         grab.start()
         _log_banner(config, args, local)

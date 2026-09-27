@@ -167,7 +167,13 @@ class BridgePipeline:
         source_provider: Callable[[], Source] | None = None,
         local_detector: str | None = None,
         frames_ignored: Callable[[], int] | None = None,
+        hazard_observer: Callable[
+            [InferenceResponse, tuple[AwarenessEvent, ...], tuple[AwarenessEvent, ...]], None
+        ] | None = None,
     ) -> None:
+        #: The debug page: every response, every event built from it, and the
+        #: ones actually sent. Never on the warning path -- errors are logged.
+        self._hazard_observer = hazard_observer
         self._config = config
         self._grab = grab
         self._sender = sender
@@ -414,9 +420,15 @@ class BridgePipeline:
         events = events_from_response(
             response, CROPSET_YAWS_DEG, self._config.delta_deg, source
         )
+        built = events
         allowed = self._config.hazard_classes
         if allowed is not None:
             events = tuple(e for e in events if e.cls.value in allowed)
+        if self._hazard_observer is not None:
+            try:
+                self._hazard_observer(response, built, events)
+            except Exception:  # noqa: BLE001 - a debug view must never cost a warning
+                logger.exception("hazard observer failed")
         if self._event_sink is None:
             self._events_undelivered += len(events)
         else:

@@ -88,8 +88,22 @@ check_sleep() {
   fi
 }
 
+# The address the phone should type. On an IPv6-only hotspot (T-Mobile) the
+# only IPv4 is 464XLAT's private 192.0.0.x, which the phone cannot reach:
+# print the laptop's stable IPv6 address instead (the server listens on both).
 laptop_ip() {
-  ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "unknown (not on Wi-Fi?)"
+  local v4 v6
+  v4="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
+  if [[ -n "$v4" && "$v4" != 192.0.0.* ]]; then
+    echo "$v4"
+    return
+  fi
+  v6="$(ifconfig en0 2>/dev/null | awk '/inet6 / && /autoconf/ && /secured/ && !/temporary/ && !/clat46/ && $2 !~ /^fe80/ {print $2; exit}')"
+  if [[ -n "$v6" ]]; then
+    echo "$v6   (IPv6-only hotspot: type it exactly, colons included)"
+  else
+    echo "unknown (not on Wi-Fi?)"
+  fi
 }
 
 serve() {
@@ -158,7 +172,18 @@ full() {
   local delta="${CANE_DELTA_DEG:-0}"
   local venv=".venv-vision"
   local source="${CANE_SOURCE:-x4}"   # synthetic | file:PATH | x4 -- rehearse at a desk with synthetic
-  check_depth_assets
+  # Depth feeds only steering and floor drops. With both off (the car-alarm
+  # default) the depth model is not loaded at all: measured 2026-09-27 on the
+  # synthetic source, it is most of each inference call.
+  local depth=off
+  if [[ "${CANE_STEER:-off}" == on || "${CANE_GROUND:-off}" == on ]]; then depth=on; fi
+  [[ "$depth" == on ]] && check_depth_assets
+  # Frames per second to the detector. Measured 2026-09-27 (M2 Pro, synthetic
+  # source): depth on tops out at ~4.8 fps (142 ms per call); depth off holds
+  # 6 fps at 70-100 ms per call for minutes, while asking for 10 slides from
+  # 65 ms to ~170 ms as the GPU heats. More frames = a car's approach speed is
+  # confirmed sooner. With depth on, the rung's own 3 fps stands.
+  local send_fps="${CANE_SEND_FPS:-$([[ "$depth" == on ]] && echo 3 || echo 6)}"
 
   say "syncing Python deps (torch + ultralytics + depth: the first run is slow)"
   UV_PROJECT_ENVIRONMENT="$venv" uv sync --quiet \
@@ -172,6 +197,7 @@ full() {
 
   say "starting the inference service on :$infer_port"
   UV_PROJECT_ENVIRONMENT="$venv" CANE_DETECTOR=ultralytics CANE_DEVICE=mps CANE_DEPTH_DEVICE=mps \
+    CANE_DEPTH_ENABLED="$([[ "$depth" == on ]] && echo true || echo false)" \
     PYTHONPATH=src uv run --extra yolo --extra depth --extra vision --extra mac \
     uvicorn cane.cloud.app:app --port "$infer_port" \
     >> "logs/inference-$(date +%Y%m%d).log" 2>&1 &
@@ -197,13 +223,15 @@ full() {
   local warm
   warm="$(curl -fsS -m 300 "http://127.0.0.1:$infer_port/warmup" || true)"
   case "$warm" in
-    *'"ready":true'*) say "depth is ready" ;;
     "")               die "warmup failed -- see backend/logs/inference-$(date +%Y%m%d).log" ;;
-    *)                die "warmup returned no ready depth model, so there would be NO steering: $warm" ;;
+    *'"ready":true'*) say "depth is ready" ;;
+    *)                [[ "$depth" == off ]] && say "detector is ready (depth off: steering and floor drops are off)" \
+                        || die "warmup returned no ready depth model, so there would be NO steering: $warm" ;;
   esac
 
   say "phone app settings -> Address: $(laptop_ip)   Port: $PORT"
   say "source $source, rung $rung, delta_deg $delta   (CANE_SOURCE / CANE_RUNG / CANE_DELTA_DEG)"
+  say "detector: $send_fps frames/s, depth $depth   (CANE_SEND_FPS)"
   say "alerts: cars and buses coming at you only (CANE_HAZARDS=all for every class);"
   say "        steering ${CANE_STEER:-off}, floor drops ${CANE_GROUND:-off} (CANE_STEER=on / CANE_GROUND=on)"
   say "logs -> backend/logs/{laptop,inference}-$(date +%Y%m%d).log"
@@ -216,6 +244,7 @@ full() {
       --inference-url "http://127.0.0.1:$infer_port/infer" \
       --ws-port "$PORT" --scene \
       --hazards "${CANE_HAZARDS:-vehicles}" \
+      --send-fps "$send_fps" \
       $([[ "${CANE_STEER:-off}" == on ]] || echo --no-steer) \
       $([[ "${CANE_GROUND:-off}" == on ]] || echo --no-ground) \
       --local-detector ultralytics "$@" || status=$?
@@ -223,26 +252,52 @@ full() {
   return "$status"
 }
 
+# Every paired iPhone: cabled ("connected") first, then paired over Wi-Fi
+# ("available (paired)"), which can install wirelessly when unlocked and on
+# the same network. Prints what it sees, so "no phone" is never a mystery.
 phone() {
   need xcodegen "brew install xcodegen"
   [[ -f "$APP/Config/Local.xcconfig" ]] \
     || die "no ios/CaneApp/Config/Local.xcconfig -- copy Local.xcconfig.example and set your team"
-  local devices
-  devices="$(xcrun devicectl list devices 2>/dev/null | grep -E ' connected ' | grep -oE '[0-9A-F]{8}-[0-9A-F]{16}' || true)"
-  [[ -n "$devices" ]] || die "no iPhone connected -- plug it in, unlock it, and trust this Mac"
+  local table cabled wireless
+  table="$(xcrun devicectl list devices 2>/dev/null | grep -E '[0-9A-F]{8}-[0-9A-F]{16}' || true)"
+  cabled="$(grep -E ' connected ' <<<"$table" | grep -oE '[0-9A-F]{8}-[0-9A-F]{16}' || true)"
+  wireless="$(grep -E 'available \(paired\)' <<<"$table" | grep -oE '[0-9A-F]{8}-[0-9A-F]{16}' || true)"
+  if [[ -z "$cabled$wireless" ]]; then
+    [[ -n "$table" ]] && printf '%s\n' "$table" | sed 's/^/    /'
+    die "no reachable iPhone. Plug it in with a data cable (not charge-only), unlock it, tap Trust;
+    or keep it unlocked on the same Wi-Fi as this Mac (it must have been cabled once before)."
+  fi
   cd "$APP"
   say "generating the Xcode project"
   xcodegen --quiet
   say "building CaneApp"
   xcodebuild -project CaneApp.xcodeproj -scheme CaneApp -destination 'generic/platform=iOS' \
     -derivedDataPath build -allowProvisioningUpdates -quiet build
-  local udid
-  for udid in $devices; do
-    say "installing on $udid"
-    xcrun devicectl device install app --device "$udid" build/Build/Products/Debug-iphoneos/CaneApp.app \
-      | grep -E "App installed" || die "install failed on $udid (is it unlocked?)"
+  local udid name installed=0 failed=0
+  for udid in $cabled $wireless; do
+    name="$(grep "$udid" <<<"$table" | awk '{$NF=""; print}' | sed -E 's/ +[0-9A-F]{8}-.*//' | xargs)"
+    if grep -q "$udid" <<<"$cabled"; then
+      say "installing on $name ($udid, cable)"
+    else
+      say "installing on $name ($udid, Wi-Fi -- keep it unlocked)"
+    fi
+    # Capture, then match: `| grep -q` stops reading at the first match, the
+    # installer dies of SIGPIPE, and under pipefail a good install read as a
+    # failure (2026-09-27).
+    local out
+    out="$(xcrun devicectl device install app --device "$udid" \
+      build/Build/Products/Debug-iphoneos/CaneApp.app 2>&1 || true)"
+    if grep -qE "App installed" <<<"$out"; then
+      installed=$((installed + 1))
+    else
+      failed=$((failed + 1))
+      printf '\033[33m    could not install on %s: unlock it and retry, or plug it in\033[0m\n' "$name"
+      grep -iE "error|reason|locked|trust|developer mode" <<<"$out" | head -3 | sed 's/^/      /'
+    fi
   done
-  say "done -- free signing expires 7 days after install; rerun ./startcane phone before then"
+  (( installed > 0 )) || die "no iPhone took the install"
+  say "done ($installed installed, $failed skipped) -- free signing expires 7 days after install"
 }
 
 tests() {

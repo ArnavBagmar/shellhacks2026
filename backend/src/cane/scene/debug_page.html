@@ -56,6 +56,20 @@
   .feed .k.link_alert, .feed .k.distance { color: var(--warn); }
   .empty { color: var(--dim); font-style: italic; }
   .follow { margin-left: auto; font-size: 12px; color: var(--dim); display: flex; gap: 6px; align-items: center; }
+  .hz-grid { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 14px; margin-top: 12px; }
+  @media (max-width: 900px) { .hz-grid { grid-template-columns: 1fr; } }
+  .hz-box { background: #0b0d10; border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+  .hz-box h4 { margin: 0 0 6px; font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+  .rules { font-size: 12.5px; color: var(--dim); margin-bottom: 10px; }
+  .rules b { color: var(--text); }
+  .k-alarm, .k-alarm_low { color: var(--bad); font-weight: 650; }
+  .k-waiting, .k-not_coming, .k-too_far { color: var(--warn); }
+  .k-ignored { color: var(--dim); }
+  .hz-mini { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; margin-bottom: 10px; }
+  .hz-mini span b { font-size: 16px; }
+  #hz-view { width: 100%; border-radius: 8px; display: block; background: #000; margin-top: 4px; }
+  .legend { display: flex; gap: 14px; font-size: 11.5px; color: var(--dim); margin-top: 4px; flex-wrap: wrap; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
   dialog { border: 0; padding: 0; background: transparent; max-width: 96vw; }
   dialog img { max-width: 96vw; max-height: 92vh; display: block; border-radius: 8px; }
   dialog::backdrop { background: #000c; }
@@ -74,6 +88,29 @@
     <h2>360 camera, live <span class="dim" id="live-note" style="text-transform:none;letter-spacing:0"></span></h2>
     <img id="live" alt="The six 60-degree views from the 360 camera">
     <div class="order"><span>Each view is labelled with where it points from the wearer (L = left, R = right).</span></div>
+  </section>
+
+  <section id="hazards" style="display:none">
+    <h2>Hazards: cars coming at you</h2>
+    <div class="rules" id="hz-rules"></div>
+    <div class="hz-mini" id="hz-mini"></div>
+    <div class="hz-box"><h4>What the detector sees (its own crops, latest boxes)</h4>
+      <img id="hz-view" alt="The detector's crops with the latest detections boxed">
+      <div class="legend"><span><span class="dot" style="background:var(--bad)"></span>alarm: vehicle coming</span>
+        <span><span class="dot" style="background:var(--warn)"></span>vehicle, not coming / no speed yet</span>
+        <span><span class="dot" style="background:#aaa"></span>ignored (not a vehicle)</span>
+        <span>number = closing speed m/s (+ = coming closer)</span></div></div>
+    <div class="hz-grid">
+      <div class="hz-box"><h4>Radar (you in the middle, ahead is up)</h4><svg id="hz-radar" viewBox="-130 -130 260 260" width="100%"></svg></div>
+      <div class="hz-box"><h4>Approach speed of each vehicle, last 30 s</h4><svg id="hz-chart" viewBox="0 0 600 240" width="100%" preserveAspectRatio="none"></svg>
+        <div class="legend" id="hz-chart-legend"></div></div>
+    </div>
+    <div class="hz-grid" style="grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr)">
+      <div class="hz-box"><h4>Latest detections and why</h4>
+        <table><thead><tr><th>Track</th><th>Class</th><th>Conf</th><th>Bearing</th><th>Band</th><th>Closing</th><th>Verdict</th><th>Sent</th></tr></thead>
+        <tbody id="hz-rows"></tbody></table></div>
+      <div class="hz-box"><h4>Alarms (laptop verdict, then what the phone said)</h4><div class="feed" id="hz-alarms"></div></div>
+    </div>
   </section>
 
   <div class="cols">
@@ -203,6 +240,7 @@ function feedText(e) {
     case "distance": return `distance: ${esc(d.outcome)}${d.metres != null ? " " + num(d.metres, 2) + " m" : ""}`;
     case "link": return d.connected ? "link up" : "link down";
     case "link_alert": return `link alert: ${esc(d.problem)}`;
+    case "hazard": return `hazard alert, urgency ${esc(d.urgency)}${d.urgency >= 3 ? " (top: Stop)" : ""}`;
     default: return esc(JSON.stringify(d));
   }
 }
@@ -213,6 +251,108 @@ function renderFeed(s) {
   const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
   box.innerHTML = s.feed.map((e) => `<div><span class="t">${clock(e.t_ms)}</span><span class="k ${e.kind}">${e.kind}</span><span>${feedText(e)}</span></div>`).join("");
   if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+const BAND_R = { near: 38, mid: 76, far: 112 };
+const KIND_COLOUR = { alarm: "#f25555", alarm_low: "#f25555", waiting: "#f2b33d", not_coming: "#f2b33d", too_far: "#f2b33d", ignored: "#8b95a3" };
+const TRACK_COLOURS = ["#5aa9ff", "#3ecf6e", "#f2b33d", "#c77dff", "#ff7aa2", "#4dd4c6"];
+
+function renderHazards(s) {
+  const h = s.hazards;
+  const section = $("hazards");
+  section.style.display = "";
+  if (!h || !h.active) {
+    $("hz-rules").innerHTML = "No detector running. Hazard detection runs in <b>./startcane full</b>.";
+    $("hz-mini").innerHTML = ""; return;
+  }
+  const r = h.rules;
+  $("hz-rules").innerHTML = `Alarm when: <b>${r.vehicles.join(" or ")}</b> within ~15 m (<b>near</b> or <b>mid</b>) is closing at <b>&ge; ${r.approach_mps} m/s</b>; ` +
+    `never when far &rarr; "Stop! Car coming&hellip;". ` +
+    `Box confidence under ${r.stop_confidence} &rarr; one level lower. Everything else stays silent.`;
+  const lm = h.last_minute;
+  const classes = Object.entries(lm.detections).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${n} ${c}`).join(", ") || "none";
+  const stale = (h.latest_age_ms ?? 1e9) > 3000;
+  $("hz-mini").innerHTML = `<span>Detector <b class="${stale ? "bad" : "ok"}">${h.responses_per_s}/s</b> ${stale ? "(stalled " + Math.round(h.latest_age_ms / 1000) + " s)" : ""}</span>
+    <span>Alarms last min <b class="${lm.alarms ? "bad" : ""}">${lm.alarms}</b></span>
+    <span>Sent to phone last min <b>${lm.sent}</b></span>
+    <span class="dim">Seen last min: ${esc(classes)}</span>`;
+  if (!$("hz-view").dataset.streaming) { $("hz-view").dataset.streaming = "1"; $("hz-view").src = `/hazards.mjpg?t=${Date.now()}`; }
+  renderRadar(h.latest ? h.latest.rows : []);
+  renderChart(h.tracks, s.now_ms, r.approach_mps);
+  renderHazardRows(h.latest ? h.latest.rows : []);
+  renderAlarms(h.alarms);
+}
+
+function renderRadar(rows) {
+  let out = "";
+  for (const [band, rad] of Object.entries(BAND_R)) {
+    out += `<circle r="${rad}" fill="none" stroke="#262c34"/><text x="3" y="${-rad + 11}" fill="#56606d" font-size="8">${band}</text>`;
+  }
+  out += `<line x1="0" y1="-122" x2="0" y2="122" stroke="#1d2229"/><line x1="-122" y1="0" x2="122" y2="0" stroke="#1d2229"/>`;
+  out += `<text x="0" y="-118" fill="#56606d" font-size="8" text-anchor="middle">ahead</text><text x="118" y="3" fill="#56606d" font-size="8" text-anchor="end">R</text><text x="-118" y="3" fill="#56606d" font-size="8">L</text>`;
+  out += `<circle r="5" fill="#e6e9ee"/>`;
+  for (const row of rows) {
+    if (row.bearing_deg == null) continue;
+    const rad = BAND_R[row.range_band] ?? 122;
+    const a = row.bearing_deg * Math.PI / 180;
+    const x = Math.sin(a) * rad, y = -Math.cos(a) * rad;
+    const c = KIND_COLOUR[row.kind] || "#8b95a3";
+    const size = row.kind.startsWith("alarm") ? 8 : 5;
+    out += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${size}" fill="${c}" fill-opacity="${row.kind === "ignored" ? .45 : .9}"/>`;
+    if (row.closing_mps != null && row.closing_mps > 0 && row.cls !== "person") {
+      const len = Math.min(40, row.closing_mps * 6);
+      out += `<line x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${(x - Math.sin(a) * len).toFixed(1)}" y2="${(y + Math.cos(a) * len).toFixed(1)}" stroke="${c}" stroke-width="2" marker-end="url(#arr)"/>`;
+    }
+    out += `<text x="${(x + 8).toFixed(1)}" y="${(y + 3).toFixed(1)}" fill="${c}" font-size="8.5">${esc(row.cls)}${row.closing_mps != null ? " " + row.closing_mps.toFixed(1) : ""}</text>`;
+  }
+  $("hz-radar").innerHTML = `<defs><marker id="arr" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#f25555"/></marker></defs>` + out;
+}
+
+function renderChart(tracks, now, threshold) {
+  const W = 600, H = 240, yMin = -4, yMax = 10, span = 30000;
+  const X = (t) => W - (now - t) / span * W;
+  const Y = (v) => H - (v - yMin) / (yMax - yMin) * H;
+  let out = "";
+  for (let v = yMin; v <= yMax; v += 2) out += `<line x1="0" x2="${W}" y1="${Y(v)}" y2="${Y(v)}" stroke="#1d2229"/><text x="4" y="${Y(v) - 2}" fill="#56606d" font-size="10">${v}</text>`;
+  out += `<line x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}" stroke="#39414c"/>`;
+  out += `<line x1="0" x2="${W}" y1="${Y(threshold)}" y2="${Y(threshold)}" stroke="#f25555" stroke-dasharray="6 4"/><text x="${W - 4}" y="${Y(threshold) - 4}" fill="#f25555" font-size="10" text-anchor="end">alarm ${threshold} m/s (near or mid)</text>`;
+  const legend = [];
+  Object.entries(tracks).forEach(([track, info], i) => {
+    const colour = TRACK_COLOURS[i % TRACK_COLOURS.length];
+    const pts = info.points.filter((p) => p[1] != null).map((p) => `${X(p[0]).toFixed(1)},${Y(Math.max(yMin, Math.min(yMax, p[1]))).toFixed(1)}`);
+    if (pts.length) out += `<polyline points="${pts.join(" ")}" fill="none" stroke="${colour}" stroke-width="2"/>`;
+    const last = info.points[info.points.length - 1];
+    legend.push(`<span><span class="dot" style="background:${colour}"></span>${esc(info.cls)} ${esc(track)}${last && last[1] != null ? ": " + last[1].toFixed(1) + " m/s" : ": no speed yet"}</span>`);
+  });
+  $("hz-chart").innerHTML = out + (legend.length ? "" : `<text x="${W / 2}" y="${H / 2}" fill="#56606d" font-size="13" text-anchor="middle">no cars or buses in the last 30 s</text>`);
+  $("hz-chart-legend").innerHTML = legend.join("") || "";
+}
+
+function renderHazardRows(rows) {
+  const order = { alarm: 0, alarm_low: 1, too_far: 2, not_coming: 3, waiting: 4, ignored: 5 };
+  const sorted = [...rows].sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9));
+  $("hz-rows").innerHTML = sorted.map((r) => `<tr>
+    <td>${esc(r.track_id ?? "-")}</td><td>${esc(r.cls)}</td><td>${r.confidence}</td>
+    <td>${r.bearing_deg ?? "-"}</td><td>${esc(r.range_band ?? "-")}</td>
+    <td>${r.closing_mps == null ? "-" : (r.closing_mps > 0 ? "+" : "") + r.closing_mps.toFixed(1)}</td>
+    <td class="k-${r.kind}">${esc(r.why)}</td><td>${r.sent ? "yes" : "-"}</td></tr>`).join("")
+    || '<tr><td colspan="8" class="empty">Nothing detected in the latest frame.</td></tr>';
+}
+
+function renderAlarms(alarms) {
+  $("hz-alarms").innerHTML = [...alarms].reverse().map((a) => {
+    const secs = Math.max(0, Math.round((a.t_last_ms - a.t_ms) / 1000));
+    const counts = {};
+    for (const text of a.phone_said) counts[text] = (counts[text] || 0) + 1;
+    const said = a.phone_said.length
+      ? Object.entries(counts).map(([text, n]) => `${esc(text)}${n > 1 ? ` <span class="dim">(&times;${n})</span>` : ""}`).join(" &middot; ")
+      : '<span class="empty">nothing (old app installed, phone muted, or not connected)</span>';
+    return `<div><span class="t">${clock(a.t_ms)}</span>
+    <span class="k k-${a.kind}">${a.kind === "alarm" ? "ALARM" : "LOWER"}</span>
+    <span><b>${esc(a.cls)} ${esc(a.track_id ?? "")}</b> at ${a.bearing_deg ?? "?"}&deg; (${esc(a.range_band ?? "?")}), up to ${a.max_closing_mps.toFixed(1)} m/s,
+    ${a.frames} frame${a.frames === 1 ? "" : "s"} over ${secs} s${a.sent ? "" : " <span class='bad'>NOT SENT to phone</span>"}
+    <br><span class="dim">phone said:</span> ${said}</span></div>`;
+  }).join("") || '<p class="empty">No alarms yet. Have a car drive toward the camera.</p>';
 }
 
 async function poll() {
@@ -232,6 +372,7 @@ async function poll() {
     lastState = s;
     renderTiles(s);
     renderFeed(s);
+    try { renderHazards(s); } catch (e) { console.error(e); }
     const newest = s.queries[s.queries.length - 1];
     if ($("follow").checked && newest) selected = newest.query_id;
     const q = s.queries.find((x) => x.query_id === selected);
@@ -268,6 +409,9 @@ $("question").addEventListener("click", (e) => {
   $("zoom").showModal();
 });
 $("zoom").addEventListener("click", () => $("zoom").close());
+$("hz-view").addEventListener("error", () => {
+  setTimeout(() => { delete $("hz-view").dataset.streaming; }, 2000);
+});
 $("live").addEventListener("error", () => {
   setTimeout(() => { delete $("live").dataset.streaming; }, 2000);
 });

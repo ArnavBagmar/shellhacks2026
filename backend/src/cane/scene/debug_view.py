@@ -48,7 +48,7 @@ PAGE = Path(__file__).with_name("debug_page.html")
 #: Phone diagnostics shown in the feed (the rest only feed the stats).
 FEED_KINDS = {
     "transcript", "gate", "intent", "say", "answer", "distance", "link", "link_alert", "note",
-    "typed", "assist", "start",
+    "typed", "assist", "start", "hazard",
 }
 #: No phone diagnostic for this long -> shown as disconnected (it sends mic
 #: levels every 2 s and depth every 1 s while walking).
@@ -108,7 +108,12 @@ class DebugHub:
         frame_counter: Callable[[], int] | None = None,
         frame_arrival_ms: Callable[[], int | None] | None = None,
         source_name: str = "none",
+        delta_deg: float = 0.0,
     ) -> None:
+        from cane.scene.hazard_view import HazardBoard
+
+        #: The hazard section: filled by the bridge (``startcane full``).
+        self.hazards = HazardBoard(delta_deg=delta_deg)
         self._lock = threading.Lock()
         self._live_frame = live_frame
         self._frame_counter = frame_counter
@@ -167,9 +172,18 @@ class DebugHub:
         except Exception:  # noqa: BLE001 - debug view must never break answers
             logger.exception("debug view: could not record query")
 
+    def record_hazards(self, response: Any, built: tuple[Any, ...], sent: tuple[Any, ...]) -> None:
+        """The bridge's ``hazard_observer``: one inference response."""
+        self.hazards.record(response, built, sent)
+
+    def hazard_jpeg(self, max_age_s: float = LIVE_REFRESH_S) -> bytes | None:
+        return self.hazards.view_jpeg(self._live_frame, max_age_s)
+
     def on_phone_diag(self, record: dict[str, Any]) -> None:
         kind = record.get("kind")
         data = record.get("data") or {}
+        if kind in ("hazard", "say"):
+            self.hazards.on_phone(str(kind), data)
         received = now_ms()
         with self._lock:
             self._phone_last_ms = received
@@ -240,6 +254,7 @@ class DebugHub:
                 },
                 "queries": queries,
                 "feed": list(self._feed),
+                "hazards": self.hazards.state(),
             }
 
     def query_image(self, query_id: str, index: int) -> bytes | None:
@@ -411,7 +426,12 @@ def serve_debug(hub: DebugHub, port: int = DEFAULT_PORT, host: str = "127.0.0.1"
                 elif path == "/state.json":
                     self._send(200, "application/json", json.dumps(hub.state()).encode())
                 elif path == "/live.mjpg":
-                    self._stream()
+                    self._stream(hub.live_jpeg)
+                elif path == "/hazards.mjpg":
+                    self._stream(hub.hazard_jpeg)
+                elif path == "/hazards.jpg":
+                    jpeg = hub.hazard_jpeg()
+                    self._send(200 if jpeg else 404, "image/jpeg", jpeg or b"")
                 elif path == "/live.jpg":
                     jpeg = hub.live_jpeg()
                     self._send(200 if jpeg else 404, "image/jpeg", jpeg or b"")
@@ -424,7 +444,7 @@ def serve_debug(hub: DebugHub, port: int = DEFAULT_PORT, host: str = "127.0.0.1"
             except (ValueError, BrokenPipeError, ConnectionResetError):
                 pass
 
-        def _stream(self) -> None:
+        def _stream(self, frames: Callable[..., bytes | None]) -> None:
             """Motion JPEG: the browser shows each part as it arrives."""
             if not hub.has_live:
                 self._send(404, "text/plain", b"no live camera")
@@ -437,7 +457,7 @@ def serve_debug(hub: DebugHub, port: int = DEFAULT_PORT, host: str = "127.0.0.1"
             last: bytes | None = None
             while True:
                 started = time.monotonic()
-                jpeg = hub.live_jpeg(max_age_s=period * 0.9)
+                jpeg = frames(max_age_s=period * 0.9)
                 if jpeg and jpeg is not last:
                     self.wfile.write(
                         f"--{BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: {len(jpeg)}\r\n\r\n".encode()
@@ -470,7 +490,8 @@ PORT_ENV = "CANE_DEBUG_PORT"
 
 
 def start_debug_view(
-    *, grab: Any | None = None, still: np.ndarray | None = None, port: int | None = None
+    *, grab: Any | None = None, still: np.ndarray | None = None, port: int | None = None,
+    delta_deg: float = 0.0,
 ) -> DebugHub | None:
     """The page for one run: live frames from ``grab`` (a ``GrabThread``) or
     one ``still`` image, the phone's diagnostics from the ``cane.phone``
@@ -494,6 +515,7 @@ def start_debug_view(
             frame_counter=lambda: grab.frames_grabbed,
             frame_arrival_ms=lambda: (f.t_arrival_laptop_ms if (f := newest()) is not None else None),
             source_name=str(grab.source_name),
+            delta_deg=delta_deg,
         )
     elif still is not None:
         hub = DebugHub(live_frame=lambda: still, source_name="still test photo")

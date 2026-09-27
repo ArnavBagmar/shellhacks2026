@@ -11,16 +11,21 @@ import CaneContracts
 public enum HazardScope: Equatable, Sendable {
     /// Every class, scored by `UrgencyPolicy` (the step-9 behaviour).
     case everything
-    /// Only a car or bus whose range is closing at `approachMps` or faster.
+    /// Only a car or bus within ~15 m (`near` or `mid`) closing at
+    /// `approachMps` or faster.
     case approachingVehicles
 
-    /// "Starting to come at you". `closing_mps` is the *line-of-sight* rate,
-    /// so it includes the wearer's own walking (1-1.4 m/s): a parked car
-    /// walked towards closes at about that. The bar sits just above it, so a
-    /// car has to be moving itself -- at 1.5 m/s towards a wearer standing
-    /// still, less if the wearer is walking at it. The laptop has already
-    /// filtered jitter (0.5 m/s deadband, two agreeing samples).
+    /// "Coming at you". `closing_mps` is the *line-of-sight* rate, so it
+    /// includes the wearer's own walking (1-1.4 m/s): a parked car walked
+    /// towards closes at about that. The bar sits just above it, so a car has
+    /// to be moving itself (the wearer tried 3 m/s on 2026-09-27 and went
+    /// back to 1.5; "only if close" below is what keeps it quiet). The laptop
+    /// has already filtered jitter (0.5 m/s deadband, two agreeing samples).
     public static let approachMps = 1.5
+    // "Only alarm if close" (2026-09-27). The X4 path gives bands, not
+    // metres: `near` <= 5 m, `mid` 5-15 m, `far` beyond. Near-only (with mid
+    // needing 8 m/s) warned too late -- a car was already within 5 m -- so
+    // both near and mid alarm at `approachMps`; `far` never does.
 
     /// Exhaustive, no `default`: a new class must be placed on purpose.
     public static func isVehicle(_ cls: ObjectClass) -> Bool {
@@ -38,7 +43,17 @@ public enum HazardScope: Equatable, Sendable {
         case .everything:
             return true
         case .approachingVehicles:
-            return Self.isVehicleComing(cls: event.cls, closingMps: event.closingMps)
+            guard Self.isVehicleComing(cls: event.cls, closingMps: event.closingMps),
+                  let closing = event.closingMps else { return false }
+            return Self.isClose(band: UrgencyPolicy.effectiveBand(event), closingMps: closing)
+        }
+    }
+
+    /// Near or mid at `approachMps`, far never.
+    public static func isClose(band: RangeBand, closingMps: Double) -> Bool {
+        switch band {
+        case .near, .mid: return closingMps >= approachMps
+        case .far: return false
         }
     }
 

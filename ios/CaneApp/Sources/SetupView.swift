@@ -30,7 +30,9 @@ struct SetupView: View {
                 Section("Laptop link") {
                     LabeledContent("Address") {
                         TextField("172.20.10.2", text: $settings.laptopHost)
-                            .keyboardType(.numbersAndPunctuation)
+                            // Letters too: an IPv6 address (T-Mobile hotspots
+                            // are IPv6-only) has hex digits a-f.
+                            .keyboardType(.asciiCapable)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .multilineTextAlignment(.trailing)

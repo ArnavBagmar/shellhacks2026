@@ -37,9 +37,19 @@ final class AppSettings {
     }
 
     var laptopURL: URL? {
-        let host = laptopHost.trimmingCharacters(in: .whitespaces)
+        Self.url(host: laptopHost, port: laptopPort)
+    }
+
+    /// `ws://host:port`. An IPv6 address (T-Mobile phone hotspots give no
+    /// usable IPv4, 2026-09-26) must be bracketed in a URL; typed or pasted
+    /// with or without the brackets, it works.
+    static func url(host raw: String, port: Int) -> URL? {
+        var host = raw.trimmingCharacters(in: .whitespaces)
         guard !host.isEmpty else { return nil }
-        return URL(string: "ws://\(host):\(laptopPort)")
+        if host.contains(":"), !host.hasPrefix("[") {
+            host = "[\(host)]"
+        }
+        return URL(string: "ws://\(host):\(port)")
     }
 
     /// A value snapshot the non-UI runtime can read from any thread.
