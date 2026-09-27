@@ -71,8 +71,12 @@ final class NavigationController {
         lastCue = nil
         let arbiter = arbiter, gain = userGain
         let steerBias = self.steerBias
+        let recordCue = self.record
         cueTask = Task { [weak self] in
             for await cue in engine.cues {
+                let offset = await engine.headingOffsetDeg
+                recordCue("nav_cue", ["phrase": .text(cue.phrase),
+                                      "compass_offset": offset.map { .number($0.rounded()) } ?? .text("learning")])
                 self?.lastCue = cue.phrase
                 steerBias(Self.lateralBias(for: cue))
                 await Self.present(cue, arbiter: arbiter, gain: gain())

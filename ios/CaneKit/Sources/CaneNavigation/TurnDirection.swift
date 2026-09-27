@@ -22,9 +22,14 @@ public enum TurnDirection: String, Sendable, Hashable, CaseIterable, Codable {
     /// `heading - segmentBearing` normalised into `(-180, 180]`, so a
     /// **positive** error means the walker faces clockwise of (i.e. to
     /// the right of) the path and must turn **left** to line up.
+    /// How far to turn back onto the path: a bear under 70 degrees, a
+    /// turn under 135, else turn around. Positive error (facing right of
+    /// the path) means turn left.
     public static func correction(forHeadingErrorDeg error: Double) -> TurnDirection {
-        if error > 0 { return .left }
-        if error < 0 { return .right }
+        let size = abs(error)
+        if size >= 135 { return .uTurn }
+        if error > 0 { return size < 70 ? .slightLeft : .left }
+        if error < 0 { return size < 70 ? .slightRight : .right }
         return .straight
     }
 

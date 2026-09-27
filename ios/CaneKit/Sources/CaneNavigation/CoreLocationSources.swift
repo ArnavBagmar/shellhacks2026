@@ -142,7 +142,9 @@
                 ),
                 horizontalAccuracyM: location.horizontalAccuracy,
                 speedMps: location.speed >= 0 ? location.speed : nil,
-                timestampMs: milliseconds(location.timestamp)
+                timestampMs: milliseconds(location.timestamp),
+                courseDeg: location.course >= 0 ? location.course : nil,
+                courseAccuracyDeg: location.courseAccuracy >= 0 ? location.courseAccuracy : nil
             )
         }
 

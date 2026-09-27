@@ -21,7 +21,16 @@ public enum Phrasing {
         case .now:
             return "\(directionWord(direction)) now"
         case .correctHeading:
-            return "\(directionWord(direction)) to rejoin route"
+            // What to do, not what went wrong: "Bear left", "Turn left",
+            // "Turn around" (was "Left to rejoin route", 2026-09-27).
+            switch direction {
+            case .slightLeft: return "Bear left"
+            case .slightRight: return "Bear right"
+            case .left, .sharpLeft: return "Turn left"
+            case .right, .sharpRight: return "Turn right"
+            case .uTurn: return "Turn around"
+            case .straight, .arrive: return "Straight on"
+            }
         case .continueStraight:
             return "Straight on"
         case .offRoute:

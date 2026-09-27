@@ -21,7 +21,11 @@ public enum TurnCuePolicy {
     public static let offRouteHoldS: Double = 5
     public static let headingCorrectDeg: Double = 45
     public static let headingOkDeg: Double = 20
-    public static let correctCooldownS: Double = 6
+    /// Eight, not six: every six seconds felt like nagging (2026-09-27).
+    public static let correctCooldownS: Double = 8
+    /// A heading error must last this long before it is corrected: a
+    /// glance to the side is not walking the wrong way.
+    public static let correctAfterS: Double = 2
     public static let straightReminderS: Double = 20
     public static let minWalkSpeedMps: Double = 0.5
     public static let gpsLostAfterS: Double = 10
@@ -181,7 +185,14 @@ public enum TurnCuePolicy {
         _ next: inout State, follower: FollowerState, nowMs: Int64
     ) -> TurnCue? {
         guard let error = follower.headingErrorDeg, abs(error) > headingCorrectDeg,
-            let speed = follower.speedMps, speed >= minWalkSpeedMps,
+            let speed = follower.speedMps, speed >= minWalkSpeedMps
+        else {
+            next.headingOffSinceMs = nil
+            return nil
+        }
+        let offSince = next.headingOffSinceMs ?? nowMs
+        next.headingOffSinceMs = offSince
+        guard elapsed(since: offSince, to: nowMs, atLeast: correctAfterS),
             elapsed(since: next.lastCorrectHeadingMs, to: nowMs, atLeast: correctCooldownS),
             elapsed(since: next.lastNowMs, to: nowMs, atLeast: postManeuverGraceS)
         else { return nil }

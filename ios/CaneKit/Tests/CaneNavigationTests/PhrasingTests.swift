@@ -37,6 +37,12 @@ final class PhrasingTests: XCTestCase {
         }
     }
 
+    func testCorrectionsSayWhatToDo() {
+        XCTAssertEqual(Phrasing.phrase(kind: .correctHeading, direction: .slightLeft, distanceM: nil), "Bear left")
+        XCTAssertEqual(Phrasing.phrase(kind: .correctHeading, direction: .right, distanceM: nil), "Turn right")
+        XCTAssertEqual(Phrasing.phrase(kind: .correctHeading, direction: .uTurn, distanceM: nil), "Turn around")
+    }
+
     /// The exact strings the brief (F4) writes down.
     func testDocumentedPhrases() {
         XCTAssertEqual(Phrasing.phrase(kind: .prepare, direction: .left, distanceM: 30), "Left in 30 metres")
@@ -102,7 +108,7 @@ final class PhrasingTests: XCTestCase {
 
     func testOnlyPrepareNowAndCorrectHeadingUseADirectionWord() {
         XCTAssertEqual(
-            CueKind.allCases.filter(\.usesDirectionWord), [.prepare, .now, .correctHeading]
+            CueKind.allCases.filter(\.usesDirectionWord), [.prepare, .now]
         )
     }
 }

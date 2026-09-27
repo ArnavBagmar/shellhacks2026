@@ -118,13 +118,15 @@ final class TurnCuePolicyTests: XCTestCase {
         let emitted = play(route: route, samples: stretch, headingOffsetDeg: 60)
 
         let corrections = emitted.filter { $0.cue.kind == .correctHeading }
-        XCTAssertEqual(corrections.first?.timestampMs, 5_000)
-        // Positive error (facing right of the path) means turn left.
-        XCTAssertEqual(corrections.first?.cue.direction, .left)
-        XCTAssertEqual(corrections.first?.cue.phrase, "Left to rejoin route")
-        let withinCooldown = corrections.filter { $0.timestampMs < 5_000 + 6_000 }
+        // The error has to last 2 s first: a glance aside is not a wrong way.
+        XCTAssertEqual(corrections.first?.timestampMs, 7_000)
+        // Positive error (facing right of the path) means turn left; 60
+        // degrees is a bear, not a full turn.
+        XCTAssertEqual(corrections.first?.cue.direction, .slightLeft)
+        XCTAssertEqual(corrections.first?.cue.phrase, "Bear left")
+        let withinCooldown = corrections.filter { $0.timestampMs < 7_000 + 8_000 }
         XCTAssertEqual(withinCooldown.count, 1, "one correction per \(TurnCuePolicy.correctCooldownS) s")
-        XCTAssertEqual(corrections.map(\.timestampMs), [5_000, 11_000, 17_000])
+        XCTAssertEqual(corrections.map(\.timestampMs), [7_000, 15_000])
     }
 
     func testAHeadingErrorToTheOtherSideAsksForARightTurn() throws {
@@ -133,7 +135,7 @@ final class TurnCuePolicyTests: XCTestCase {
         let emitted = play(route: route, samples: Array(samples[5...7]), headingOffsetDeg: -60)
 
         XCTAssertEqual(emitted.first?.cue.kind, .correctHeading)
-        XCTAssertEqual(emitted.first?.cue.direction, .right)
+        XCTAssertEqual(emitted.first?.cue.direction, .slightRight)
     }
 
     /// Brief F3: standing at a curb, heading is advisory -- never nag.
@@ -174,7 +176,7 @@ final class TurnCuePolicyTests: XCTestCase {
         var kinds: [CueKind] = []
 
         for (index, sample) in samples[5...12].enumerated() {
-            let skewed = index < 2 ? 60.0 : 0.0
+            let skewed = index < 3 ? 60.0 : 0.0
             let heading = HeadingSample(
                 trueHeadingDeg: sample.heading.trueHeadingDeg + skewed,
                 accuracyDeg: 5,
@@ -224,7 +226,7 @@ final class TurnCuePolicyTests: XCTestCase {
         XCTAssertFalse(corrections.contains { $0 < nowMs + graceMs }, "no correction inside the grace")
         let first = try XCTUnwrap(corrections.first, "a persistent error is still corrected after the grace")
         XCTAssertGreaterThanOrEqual(first, nowMs + graceMs)
-        XCTAssertLessThanOrEqual(first, nowMs + graceMs + 3_000)
+        XCTAssertLessThanOrEqual(first, nowMs + graceMs + 5_000)
     }
 
     func testNoStraightReminderOnACleanWalk() throws {
@@ -396,7 +398,8 @@ final class TurnCuePolicyTests: XCTestCase {
         XCTAssertEqual(TurnCuePolicy.offRouteHoldS, 5)
         XCTAssertEqual(TurnCuePolicy.headingCorrectDeg, 45)
         XCTAssertEqual(TurnCuePolicy.headingOkDeg, 20)
-        XCTAssertEqual(TurnCuePolicy.correctCooldownS, 6)
+        XCTAssertEqual(TurnCuePolicy.correctCooldownS, 8)
+        XCTAssertEqual(TurnCuePolicy.correctAfterS, 2)
         XCTAssertEqual(TurnCuePolicy.straightReminderS, 20)
         XCTAssertEqual(TurnCuePolicy.minWalkSpeedMps, 0.5)
         XCTAssertEqual(TurnCuePolicy.gpsLostAfterS, 10)

@@ -23,9 +23,10 @@ public enum CueKind: String, Sendable, Hashable, CaseIterable {
     /// the same thing whatever `TurnCue.direction` holds.
     public var usesDirectionWord: Bool {
         switch self {
-        case .prepare, .now, .correctHeading:
+        case .prepare, .now:
             return true
-        case .continueStraight, .offRoute, .rerouting, .arrived, .gpsLost, .gpsRestored:
+        // A correction leads with what to do ("Bear left", "Turn around").
+        case .correctHeading, .continueStraight, .offRoute, .rerouting, .arrived, .gpsLost, .gpsRestored:
             return false
         }
     }

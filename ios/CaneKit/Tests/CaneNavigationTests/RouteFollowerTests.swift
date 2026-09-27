@@ -185,7 +185,10 @@ final class RouteFollowerTests: XCTestCase {
         let state = follower.advance(from: follower.initialState, fix: sample.fix, heading: skewed)
 
         XCTAssertEqual(try XCTUnwrap(state.headingErrorDeg), 60, accuracy: 0.5)
-        XCTAssertEqual(TurnDirection.correction(forHeadingErrorDeg: 60), .left)
+        XCTAssertEqual(TurnDirection.correction(forHeadingErrorDeg: 60), .slightLeft)
+        XCTAssertEqual(TurnDirection.correction(forHeadingErrorDeg: 100), .left)
+        XCTAssertEqual(TurnDirection.correction(forHeadingErrorDeg: -100), .right)
+        XCTAssertEqual(TurnDirection.correction(forHeadingErrorDeg: 170), .uTurn)
     }
 
     func testHeadingSampleNormalisesIntoZeroToThreeSixty() {

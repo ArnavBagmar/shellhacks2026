@@ -34,8 +34,10 @@ extension NavigationEngine {
 
     func handle(_ fix: LocationFix) async {
         guard let follower else { return }
+        calibrator.observe(fix, compass: latestHeading)
         let state = follower.advance(
-            from: followerState ?? follower.initialState, fix: fix, heading: latestHeading
+            from: followerState ?? follower.initialState, fix: fix,
+            heading: calibrator.heading(for: fix, compass: latestHeading)
         )
         followerState = state
         let (next, cue) = TurnCuePolicy.evaluate(

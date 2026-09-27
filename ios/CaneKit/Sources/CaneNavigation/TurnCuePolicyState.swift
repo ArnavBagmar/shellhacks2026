@@ -18,6 +18,8 @@ extension TurnCuePolicy {
         var gpsLostAnnounced = false
         /// First fix after a "GPS lost": "GPS back" waits for a steady run.
         var gpsBackSinceMs: Int64?
+        /// When the current heading error began: a correction needs it to last.
+        var headingOffSinceMs: Int64?
 
         public init() {}
     }

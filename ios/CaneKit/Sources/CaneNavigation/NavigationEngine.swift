@@ -49,6 +49,10 @@ public actor NavigationEngine {
     var destination: LatLng?
     var latestFix: LocationFix?
     var latestHeading: HeadingSample?
+    /// Learns how the phone is worn (see `HeadingCalibrator`).
+    var calibrator = HeadingCalibrator()
+    /// The learned compass offset (about 180 on a chest), nil until learned.
+    public var headingOffsetDeg: Double? { calibrator.offsetDeg }
     var lastRerouteMs: Int64?
     var pendingFixes: [LocationFix] = []
     var isNavigating = false

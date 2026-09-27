@@ -8,12 +8,18 @@ public struct LocationFix: Sendable, Equatable {
     public let horizontalAccuracyM: Double
     public let speedMps: Double?
     public let timestampMs: Int64
+    /// Direction of travel from GPS, degrees true; nil when unknown.
+    public let courseDeg: Double?
+    public let courseAccuracyDeg: Double?
 
-    public init(latLng: LatLng, horizontalAccuracyM: Double, speedMps: Double?, timestampMs: Int64) {
+    public init(latLng: LatLng, horizontalAccuracyM: Double, speedMps: Double?, timestampMs: Int64,
+                courseDeg: Double? = nil, courseAccuracyDeg: Double? = nil) {
         self.latLng = latLng
         self.horizontalAccuracyM = horizontalAccuracyM
         self.speedMps = speedMps
         self.timestampMs = timestampMs
+        self.courseDeg = courseDeg
+        self.courseAccuracyDeg = courseAccuracyDeg
     }
 }
 
