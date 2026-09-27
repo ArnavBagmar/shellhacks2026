@@ -21,7 +21,7 @@ public struct ResolvedPlace: Sendable, Equatable {
     }
 }
 
-/// Free text ("take me to the library") to a point on the map. A
+/// Free text ("navigate me to the library") to a point on the map. A
 /// protocol so the engine's tests inject a fake and never reach the
 /// network, and so Places can be swapped for Geocoding on a key that
 /// lacks Places (brief F2).

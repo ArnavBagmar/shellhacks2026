@@ -16,7 +16,7 @@ public enum AnswerPhrasing {
     public static let cancelled = "Okay."
     public static let notUnderstood = "Sorry, I didn't catch that."
     public static let help = "Say Hey Cane, then ask me anything, like: is there a bathroom around, "
-        + "how far is that chair, guide my hand to the cup, what's in front of me, or take me to a place. "
+        + "how far is that chair, guide my hand to the cup, what's in front of me, or navigate me to a place. "
         + "While navigating: repeat that, where am I going, or stop navigation."
     public static let listening = "Yes?"
 

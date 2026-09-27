@@ -18,7 +18,7 @@ public enum VoiceIntent: Equatable, Sendable {
     case describeFront
     /// "Read that sign."
     case readSign
-    /// "Take me to the library."
+    /// "Navigate me to the library."
     case navigate(String)
     /// "Never mind" / "stop" / "cancel": stops whatever is going on,
     /// navigation included.
@@ -167,8 +167,10 @@ public enum IntentParser {
     ]
 
     /// Matched as whole words anywhere; the target (if any) follows.
+    /// "Guide me to it" is the hand, never a walk: map routes need the word
+    /// "navigate" (2026-09-27).
     static let guidePrefixes = [
-        "guide my hand", "lead my hand", "take my hand", "move my hand", "help me grab", "help me reach",
+        "guide my hand", "lead my hand", "guide me", "lead me to", "take my hand", "move my hand", "help me grab", "help me reach",
         "help me pick up", "help me touch", "help me get hold of",
     ]
     static let guideLinks = ["to ", "towards ", "toward ", "over to "]
@@ -186,9 +188,9 @@ public enum IntentParser {
         return target
     }
 
-    static let navigatePrefixes = [
-        "take me to ", "navigate to ", "directions to ", "guide me to ", "walk me to ", "get me to ",
-    ]
+    /// Only "navigate": "take me to" / "guide me to" were starting map routes
+    /// when the wearer meant their hand.
+    static let navigatePrefixes = ["navigate me to ", "navigate to "]
 
     /// Longest first where one prefix extends another.
     static let findPrefixes = [

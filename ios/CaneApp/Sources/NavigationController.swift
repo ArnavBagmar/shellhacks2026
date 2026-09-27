@@ -3,7 +3,7 @@ import CaneOutput
 import Foundation
 import os
 
-/// "Hey Cane, take me to the library": step 12's engine, its cues spoken on
+/// "Hey Cane, navigate me to the library": step 12's engine, its cues spoken on
 /// the navigation channel (below every hazard and answer). A late turn cue
 /// is a wrong cue, so ordinary cues are dropped when they cannot play; the
 /// state cues (arrived, off route, GPS lost/back) are retried briefly
@@ -108,7 +108,7 @@ final class NavigationController {
     /// "Where am I going?"
     func status() async {
         guard isActive, let destination else {
-            return await say("You're not navigating right now. Say: take me to, and a place.")
+            return await say("You're not navigating right now. Say: navigate me to, and a place.")
         }
         let last = lastCue.map { " Last direction: \($0)." } ?? ""
         await say("Heading to \(destination).\(last) Say stop navigation to end it.")

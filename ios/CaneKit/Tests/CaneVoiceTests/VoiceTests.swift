@@ -30,7 +30,7 @@ final class IntentParserTests: XCTestCase {
         XCTAssertEqual(IntentParser.parse("what is ahead of me"), .describeFront)
         XCTAssertEqual(IntentParser.parse("read that sign"), .readSign)
         XCTAssertEqual(IntentParser.parse("what does that sign say"), .readSign)
-        XCTAssertEqual(IntentParser.parse("take me to the library"), .navigate("library"))
+        XCTAssertEqual(IntentParser.parse("navigate me to the library"), .navigate("library"))
         XCTAssertEqual(IntentParser.parse("Never mind."), .cancel)
         XCTAssertEqual(IntentParser.parse("stop"), .cancel)
     }
@@ -50,8 +50,13 @@ final class IntentParserTests: XCTestCase {
         for (utterance, target) in cases {
             XCTAssertEqual(IntentParser.parse(utterance), .guideHand(target), utterance)
         }
-        // Not a route: "take my hand" is the hand, "take me to" is a walk.
-        XCTAssertEqual(IntentParser.parse("take me to the cafe"), .navigate("cafe"))
+        // "Guide me to" is always the hand; a map route needs "navigate".
+        XCTAssertEqual(IntentParser.parse("can you guide me to it"), .guideHand(nil))
+        XCTAssertEqual(IntentParser.parse("guide me to the rubik's cube"), .guideHand("rubik's cube"))
+        XCTAssertEqual(IntentParser.parse("can you navigate me to the cafe"), .navigate("cafe"))
+        XCTAssertEqual(IntentParser.parse("navigate to the cafe"), .navigate("cafe"))
+        XCTAssertNotEqual(IntentParser.parse("take me to the cafe"), .navigate("cafe"))
+        XCTAssertNotEqual(IntentParser.parse("walk me to the cafe"), .navigate("cafe"))
     }
 
     /// Step 26 gave the voice layer the gap ring, so "which way is clear" is now a
@@ -88,7 +93,7 @@ final class IntentParserTests: XCTestCase {
             ("is there anything around", .describeAround),
             ("tell me what's around me", .describeAround),
             ("can you read that sign", .readSign),
-            ("please take me to the library", .navigate("library")),
+            ("please navigate me to the library", .navigate("library")),
         ]
         for (utterance, intent) in cases {
             XCTAssertEqual(IntentParser.parse(utterance), intent, utterance)
@@ -334,7 +339,7 @@ final class NavigationCommandTests: XCTestCase {
     }
 
     func testStartingARouteStillWorks() {
-        XCTAssertEqual(IntentParser.parse("take me to the library"), .navigate("library"))
+        XCTAssertEqual(IntentParser.parse("navigate me to the library"), .navigate("library"))
         // A question that merely starts like a repeat goes to Gemini.
         XCTAssertNil(IntentParser.parse("what was that sign about"))
     }

@@ -12,7 +12,10 @@ taps faster as the hand gets closer, and "You've got it." ends the guide.
    prefers the phone image whenever it shows the thing. The laptop side is unchanged.
    - If only a 360 view shows the thing, Cane says where it is and adds
      "Turn to face it, then ask me again to guide your hand."
-   - "Help me grab it" / "guide my hand" with no name means the last thing found.
+   - "Help me grab it", "guide my hand" or "guide me to it" with no name means
+     the last thing found.
+   - "Guide me to ..." is always the hand. Map routes need the word
+     "navigate": "navigate me to the library".
 2. **Track** (`CaneAssist/HandGuide.swift`, iOS). This uses no detection model,
    only what is built into iOS:
    - Apple Vision's object tracker, seeded with Gemini's box, follows the thing.
