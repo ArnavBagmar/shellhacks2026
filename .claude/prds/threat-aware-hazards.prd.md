@@ -151,7 +151,7 @@ rig, inside the hackathon window:
 | # | Milestone | Outcome | Status | Plan |
 |---|---|---|---|---|
 | 1 | Trust baseline measured | The traffic walk and parked-car block are recorded and counted, so every later claim has a before | in-progress | `.claude/plans/threat-aware-hazards.plan.md` |
-| 2 | Path-conflict gate | Passing traffic no longer triggers Stops; a real collision course still does | pending | — |
+| 2 | Path-conflict gate | Passing traffic no longer triggers Stops; a real collision course still does | complete (field validation in 4) | `.claude/plans/threat-aware-hazards-m2.plan.md` |
 | 3 | Ground-discontinuity channel | The user is told about a drop-off or pothole ahead before the cane tip finds it | pending | — |
 | 4 | Trust baseline re-measured | Both claims are backed by a measured before/after on the same route | pending | — |
 | 5 | *(post-hackathon)* Semantic roadway suppression | Hazards standing on the roadway are demoted by scene understanding, not geometry alone | pending | — |

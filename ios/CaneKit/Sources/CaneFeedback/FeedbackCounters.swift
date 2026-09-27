@@ -22,6 +22,11 @@ public struct FeedbackCounters: Equatable, Sendable {
     public var refractorySuppressed = 0
     public var spatialSuppressed = 0
     public var hysteresisHeld = 0
+    /// Gate 5b: Stops lowered to act-soon because the object's bearing was
+    /// sweeping past rather than holding. A walk beside traffic where this
+    /// stays at zero means the gate is not firing; a walk where it equals the
+    /// urgency-3 count means it is capping everything.
+    public var pathConflictCapped = 0
     /// Neither `range_m` nor `range_band`: scored as `far`.
     public var bandUnknown = 0
     public var ambientLogged = 0

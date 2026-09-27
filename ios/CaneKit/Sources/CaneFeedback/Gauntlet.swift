@@ -156,7 +156,12 @@ public enum Gauntlet {
         var working = state
         let key = FeedbackKey(event)
         let raw = UrgencyPolicy.decide(event)
-        let smoothed = Hysteresis.apply(raw, record: working.tracks[key], now: now)
+        // Gate 5b, before hysteresis so the smoothing sees the final level:
+        // `recentAccepted` already holds this event (stage 3 appended it), so
+        // the sweep is measured against the track's previous sighting.
+        let gated = PathConflict.capped(raw, event: event, records: working.recentAccepted)
+        if gated.capped { working.counters.pathConflictCapped += 1 }
+        let smoothed = Hysteresis.apply(gated.decision, record: working.tracks[key], now: now)
         if smoothed.held { working.counters.hysteresisHeld += 1 }
         let urgency = smoothed.decision.urgency
 
