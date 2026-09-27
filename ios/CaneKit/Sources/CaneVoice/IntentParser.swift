@@ -71,6 +71,9 @@ public enum IntentParser {
         // Before "take me to" and the finds: "help me reach the cup" is a
         // hand guide, not a question about the cup.
         if let rest = after(guidePrefixes, in: text) { return .guideHand(guideTarget(rest)) }
+        // Any "... my hand/finger(s) to the X": the recognizer wrote "go out
+        // my fingers to the rubik's cube" for "guide my fingers" (2026-09-27).
+        if let target = handTarget(text) { return .guideHand(target) }
         if let place = after(navigatePrefixes, in: text).flatMap(clean) { return .navigate(place) }
         if let target = after(howFarPrefixes, in: text).flatMap(clean) { return .howFar(target) }
         if let target = after(findPrefixes, in: text).flatMap(clean) {
@@ -170,16 +173,39 @@ public enum IntentParser {
     /// "Guide me to it" is the hand, never a walk: map routes need the word
     /// "navigate" (2026-09-27).
     static let guidePrefixes = [
-        "guide my hand", "lead my hand", "guide me", "lead me to", "take my hand", "move my hand", "help me grab", "help me reach",
+        "guide my hand", "lead my hand", "guide my hands", "lead my hands",
+        "guide my finger", "lead my finger", "take my finger", "move my finger",
+        "guide my fingers", "lead my fingers", "take my fingers", "move my fingers",
+        "guide me", "lead me to", "take my hand", "move my hand", "help me grab", "help me reach",
         "help me pick up", "help me touch", "help me get hold of",
     ]
     static let guideLinks = ["to ", "towards ", "toward ", "over to "]
+    static let bodyParts = ["my hand", "my hands", "my finger", "my fingers"]
+    /// Words after the thing that are the wearer talking on, not the thing.
+    static let targetStops = [" remember ", " and then ", " because ", " so that ", " please "]
+
+    /// "go out my fingers to the rubik's cube" -> "rubik's cube".
+    static func handTarget(_ text: String) -> String? {
+        let padded = " " + text + " "
+        guard let part = bodyParts.compactMap({ padded.range(of: " " + $0 + " ") }).first else { return nil }
+        let rest = String(padded[part.upperBound...])
+        for link in [" to ", " towards ", " toward "] {
+            guard let range = (" " + rest).range(of: link) else { continue }
+            return guideTarget(String((" " + rest)[range.upperBound...]).trimmingCharacters(in: .whitespaces))
+        }
+        return nil
+    }
     static let pronouns: Set<String> = ["it", "that", "this", "them", "that thing", "this thing", "that one", "this one"]
 
     /// "to the rubik's cube" -> "rubik's cube"; "it" / "" -> nil (the last
     /// thing found).
     static func guideTarget(_ rest: String) -> String? {
         var text = rest
+        for stop in targetStops {
+            if let cut = (" " + text + " ").range(of: stop) {
+                text = String((" " + text + " ")[..<cut.lowerBound]).trimmingCharacters(in: .whitespaces)
+            }
+        }
         for link in guideLinks where text.hasPrefix(link) {
             text = String(text.dropFirst(link.count))
             break

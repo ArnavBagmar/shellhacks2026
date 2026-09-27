@@ -52,8 +52,9 @@ RETRY_AFTER_S = 0.3
 #: (and the TLS connection is warm). ~600 characters of credit the first
 #: time; later starts read them from the disk cache for free.
 COMMON_PHRASES = (
-    # = PromptPhrases.all in ios/CaneKit/Sources/CaneAssist/PromptPhrases.swift
-    # (a Swift test checks every line is here).
+    # = VoicePrefetch.phrases in ios/CaneKit/Sources/CaneAssist/VoicePrefetch.swift
+    # (a Swift test checks every line is here): the phone fetches them all on
+    # connect, so each plays at once in this voice.
     "Hold still, looking around.", "Hmm, let me look around.", "One sec, looking around.",
     "Okay, let me take a look.", "Hmm, give me a second.", "Let me see what's around.",
     "Hold still, looking ahead.", "Hmm, let me look ahead.", "One sec, checking in front of you.",
@@ -62,6 +63,15 @@ COMMON_PHRASES = (
     "Let me check.", "Hmm, one sec.", "Okay, let me see.", "Hmm, let me think.", "Good question, one sec.",
     "Still looking.", "Hang on, almost there.", "Hmm, still checking.", "Just a moment more.",
     "Yes?", "Mm-hm?", "I'm listening.", "Go ahead.",
+    # "Guide my hand".
+    "Reach out slowly. The beeps and your watch speed up as you get closer.",
+    "Reach out slowly. The beeps speed up as you get closer.",
+    "Reach out in front of you.", "You've got it.", "Finding it again.",
+    "Let's stop there. Ask me again when you're ready.",
+    "Left.", "Right.", "Up.", "Down.", "Forward.", "Back toward you.",
+    # Fixed replies.
+    "I can't reach the laptop right now.", "Sorry, that took too long.", "Okay.",
+    "Turn to face it, then ask me again to guide your hand.", "What should I guide your hand to?",
 )
 
 

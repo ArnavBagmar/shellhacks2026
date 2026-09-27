@@ -46,6 +46,12 @@ final class IntentParserTests: XCTestCase {
             ("guide my hand", nil),
             ("help me grab it", nil),
             ("guide my hand to that", nil),
+            ("guide my finger to the rubik's cube", "rubik's cube"),
+            ("can you guide my fingers to the cube", "cube"),
+            // What the recognizer really wrote, 2026-09-27.
+            ("go out my fingers to the rubik's cube", "rubik's cube"),
+            ("can you guide my finger to the rubik's cube remember we forgot about the angle", "rubik's cube"),
+            ("move my hand towards the cup", "cup"),
         ]
         for (utterance, target) in cases {
             XCTAssertEqual(IntentParser.parse(utterance), .guideHand(target), utterance)

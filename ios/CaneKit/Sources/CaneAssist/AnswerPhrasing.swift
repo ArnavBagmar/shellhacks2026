@@ -72,6 +72,10 @@ public enum AnswerPhrasing {
     /// Found in a 360 view only: the phone camera must see it to track it.
     public static let faceItToGuide = "Turn to face it, then ask me again to guide your hand."
     public static let guideWhat = "What should I guide your hand to?"
+    /// After a find in front and within reach, once a walk: the next step.
+    public static let offerGuide = "Say guide my hand, and I'll lead you to it."
+    /// Farther than this and "guide my hand" is not the next step.
+    public static let reachM = 1.5
     public static let faceItToMeasure = "Face it and ask again to measure how far."
     public static let noDepthSensor = "This phone can't measure distance."
     public static let noCleanReading = "I can't get a clean distance reading right now."

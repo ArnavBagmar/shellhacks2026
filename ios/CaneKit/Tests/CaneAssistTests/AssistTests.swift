@@ -262,6 +262,20 @@ final class QueryCoordinatorTests: XCTestCase {
         XCTAssertTrue(guides.requests.isEmpty)
     }
 
+    func testAFindWithinReachOffersTheHandGuideOnce() async throws {
+        let link = FakeLink(), speaker = FakeSpeaker(), guides = GuideBox()
+        let c = guideCoordinator(link, speaker, guides)
+        let box = try PhoneBox(xMin: 0.4, yMin: 0.5, xMax: 0.5, yMax: 0.6)
+        for _ in 0..<2 {
+            await c.handle(.find("rubik's cube"))
+            await c.receive(try SceneAnswer(queryId: "q-1", status: .found, subject: "Rubik's cube", bearingDeg: 2,
+                                            detail: "on the table", confidence: .high, latencyMs: 900, phoneBox: box))
+        }
+        let answers = speaker.said.filter { $0.1 == .answer }.map(\.0)
+        XCTAssertEqual(answers.first, "Straight ahead, Rubik's cube, on the table. " + AnswerPhrasing.offerGuide)
+        XCTAssertEqual(answers.last, "Straight ahead, Rubik's cube, on the table.", "offered once, not every time")
+    }
+
     func testHelpMeGrabItMeansTheLastThingFound() async throws {
         let link = FakeLink(), speaker = FakeSpeaker(), guides = GuideBox()
         let c = guideCoordinator(link, speaker, guides)

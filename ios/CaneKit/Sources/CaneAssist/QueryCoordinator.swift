@@ -96,6 +96,8 @@ public actor QueryCoordinator {
     private var guideAsked = false
     /// The last thing found, for "help me grab it".
     private var lastFound: String?
+    /// "Say guide my hand..." is offered once a walk, not after every find.
+    private var offeredGuide = false
     private var timeoutTask: Task<Void, Never>?
     /// The hand guide's silent re-find in flight, if any.
     private var refindId: String?
@@ -201,6 +203,14 @@ public actor QueryCoordinator {
                                          locale: locale)
         if guideAsked, answer.status == .found, guide == nil {
             text += " " + AnswerPhrasing.faceItToGuide
+        }
+        // Found in front of the wearer and within reach: say what to do next.
+        if !guideAsked, !distanceAsked, !offeredGuide, answer.status == .found, answer.phoneBox != nil,
+           (distance?.sample.map { $0.metres <= AnswerPhrasing.reachM } ?? true) {
+            if case .tooFar = distance {} else {
+                offeredGuide = true
+                text += " " + AnswerPhrasing.offerGuide
+            }
         }
         // Tracking starts now, before the answer is spoken: the photo the
         // box belongs to is already seconds old.

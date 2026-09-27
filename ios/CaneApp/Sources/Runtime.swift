@@ -363,6 +363,11 @@ final class Runtime {
                 let connected = await client.hasConnection
                 if connected != last {
                     callbacks.onConnected(connected)
+                    // Every fixed line in the natural voice, fetched now so
+                    // each plays at once and never in the other voice.
+                    if connected, settings.current.naturalVoice {
+                        Task { await laptopVoice.prefetch(VoicePrefetch.phrases) }
+                    }
                     // Step 24's failsafe: a known-dead link decays the steering
                     // cue to neutral without waiting out the 400 ms TTL. The
                     // TTL still covers the case where frames simply stop.

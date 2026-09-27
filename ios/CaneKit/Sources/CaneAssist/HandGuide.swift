@@ -388,16 +388,17 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
             case .say(let text):
                 let speaker = speaker
                 let final = outputs.contains { if case .end = $0 { true } else { false } }
-                // The phone's own voice (the navigation channel), never the
-                // laptop's: a hint that waits a second for a network voice
-                // points where the hand was, not where it is.
+                // The natural voice like every answer: every guide line is
+                // prefetched (`VoicePrefetch`), so it plays at once from the cache.
                 Task {
                     if final {
                         // "You've got it." must be heard at once: cut whatever talks.
                         speaker.cancel(upTo: .answer)
+                        _ = await speaker.say(SpokenPhrase(text: text), on: .answer, haptic: nil, pan: 0, maxWaitMs: 3_000)
+                    } else {
+                        // A late hint is a wrong hint: dropped if anything else talks.
+                        _ = await speaker.say(SpokenPhrase(text: text), on: .prompt, haptic: nil, pan: 0, maxWaitMs: 0)
                     }
-                    // Dropped, never queued, if anything else is talking.
-                    _ = await speaker.say(SpokenPhrase(text: text), on: .navigation, haptic: nil, pan: 0, maxWaitMs: 0)
                 }
             case .refind:
                 guard let refinder = lock.withLock({ refinder }) else {

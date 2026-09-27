@@ -38,7 +38,7 @@ final class PromptPhrasesTests: XCTestCase {
             .deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("backend/src/cane/scene/voice.py")
         let source = try String(contentsOf: url, encoding: .utf8)
-        for line in PromptPhrases.all {
+        for line in VoicePrefetch.phrases {
             XCTAssertTrue(source.contains("\"\(line)\""), "voice.py COMMON_PHRASES is missing \(line)")
         }
     }

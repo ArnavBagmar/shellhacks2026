@@ -20,7 +20,8 @@ public actor LaptopVoice {
     /// no key, or ElevenLabs is failing, and every ask would only add a
     /// round trip before the fallback voice.
     public static let unavailableBackoffMs: Int64 = 30_000
-    public static let cacheEntries = 40
+    /// Room for every prefetched line (`VoicePrefetch`) plus recent answers.
+    public static let cacheEntries = 100
 
     private let link: VoiceLink
     private let clock: @Sendable () -> Int64
@@ -67,6 +68,20 @@ public actor LaptopVoice {
                 self.resolve(id, with: nil)
             }
         }
+    }
+
+    /// Fetches `texts` now, a few at a time, so they play instantly later.
+    public func prefetch(_ texts: [String]) async {
+        let pending = texts.filter { cache[String($0.prefix(SpeakRequest.maxTextChars))] == nil }
+        var index = 0
+        while index < pending.count {
+            let batch = pending[index..<min(index + 6, pending.count)]
+            await withTaskGroup(of: Void.self) { group in
+                for text in batch { group.addTask { _ = await self.audio(for: text) } }
+            }
+            index += 6
+        }
+        logger.info("natural voice: \(self.cache.count) lines ready")
     }
 
     /// Feed every `voice` frame from the link here.

@@ -26,7 +26,10 @@ public enum NaturalVoiceOutcome: Sendable, Equatable {
 public final class NaturalSpeechRenderer: SpeechRenderer, @unchecked Sendable {
     /// Turbo v2.5 answered in 0.26 s from the laptop (2026-09-26); the rest
     /// of the budget is the Wi-Fi hop both ways, with room for a slow one.
-    public static let defaultFetchBudgetMs = 2_500
+    /// 3.5 s (was 2.5): live answers on venue Wi-Fi often took ~3 s, and each
+    /// miss switched to the phone's voice mid-conversation (2026-09-27).
+    /// Fixed lines are prefetched, so this only ever delays a new answer.
+    public static let defaultFetchBudgetMs = 3_500
 
     private let fallback: SpeechRenderer
     private let player: ClipPlayer
