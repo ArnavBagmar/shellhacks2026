@@ -140,7 +140,7 @@ final class Runtime {
             }
         )
         self.guide = guide
-        coordinator = QueryCoordinator(
+        let coordinator = QueryCoordinator(
             link: client,
             speaker: arbiter,
             snapshot: {
@@ -169,6 +169,9 @@ final class Runtime {
                 return guide.start(request)
             }
         )
+        self.coordinator = coordinator
+        // A lost thing is found again by asking Gemini once more, quietly.
+        guide.setRefinder { target in await coordinator.refind(target) }
         let navigation = NavigationController(
             arbiter: arbiter,
             userGain: { settings.current.hapticGain },

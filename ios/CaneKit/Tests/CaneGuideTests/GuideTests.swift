@@ -165,18 +165,59 @@ final class GuideSessionTests: XCTestCase {
         XCTAssertFalse(out.contains(.end(.reached)))
     }
 
-    func testLosingTheThingForTooLongEndsTheGuide() {
+    func testLosingTheThingAsksGeminiToFindItAgain() {
         var s = GuideSession(target: "cube", startMs: 0)
         _ = s.update(frame(100, object: cube))
-        XCTAssertTrue(s.update(frame(2_000, object: nil)).isEmpty)
-        let out = s.update(frame(2_700, object: nil))
+        XCTAssertTrue(s.update(frame(1_000, object: nil)).isEmpty, "a moment's miss is nothing")
+        let out = s.update(frame(1_700, object: nil))
+        XCTAssertTrue(out.contains(.refind))
+        XCTAssertEqual(says(out), [GuideSession.refindPhrase])
+        XCTAssertEqual(s.state, .looking)
+        XCTAssertTrue(s.update(frame(5_000, object: nil)).isEmpty, "waiting for Gemini, not re-asking")
+
+        s.reacquired(nowMs: 5_200)
+        XCTAssertEqual(s.state, .findHand)
+        XCTAssertFalse(s.update(frame(5_300, object: cube)).contains(.end(.lost)))
+    }
+
+    func testTheTrackerRecoveringByItselfCancelsTheRefind() {
+        var s = GuideSession(target: "cube", startMs: 0)
+        _ = s.update(frame(1_600, object: nil))
+        XCTAssertTrue(s.isRefinding)
+        _ = s.update(frame(2_000, object: cube))
+        XCTAssertFalse(s.isRefinding)
+        XCTAssertTrue(s.refindFailed(nowMs: 2_100).isEmpty, "a late failure no longer matters")
+    }
+
+    func testARefindThatFindsNothingEndsTheGuide() {
+        var s = GuideSession(target: "cube", startMs: 0)
+        _ = s.update(frame(1_600, object: nil))
+        let out = s.refindFailed(nowMs: 4_000)
         XCTAssertTrue(out.contains(.end(.lost)))
         XCTAssertEqual(says(out), [GuideSession.lostPhrase("cube")])
     }
 
-    func testItGivesUpAfterAMinute() {
+    func testARefindThatNeverComesBackEndsTheGuide() {
         var s = GuideSession(target: "cube", startMs: 0)
-        XCTAssertTrue(s.update(frame(60_000, object: cube)).contains(.end(.timedOut)))
+        _ = s.update(frame(1_600, object: nil))
+        XCTAssertTrue(s.update(frame(1_600 + GuideSession.refindTimeoutMs, object: nil)).contains(.end(.lost)))
+    }
+
+    func testAfterThreeRefindsItGivesUp() {
+        var s = GuideSession(target: "cube", startMs: 0)
+        var t: Int64 = 0
+        for _ in 0..<GuideSession.maxRefinds {
+            t += 1_600
+            XCTAssertTrue(s.update(frame(t, object: nil)).contains(.refind))
+            t += 500
+            s.reacquired(nowMs: t)
+        }
+        XCTAssertTrue(s.update(frame(t + 1_600, object: nil)).contains(.end(.lost)))
+    }
+
+    func testItGivesUpAfterAMinuteAndAHalf() {
+        var s = GuideSession(target: "cube", startMs: 0)
+        XCTAssertTrue(s.update(frame(90_000, object: cube)).contains(.end(.timedOut)))
     }
 
     func testWithoutADepthReadingNothingIsShownAsANumber() {

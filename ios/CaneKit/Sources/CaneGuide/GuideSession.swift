@@ -34,6 +34,9 @@ public enum GuideOutput: Sendable, Equatable {
     case watch(GuideMessage)
     case say(String)
     case end(GuideEnd)
+    /// The tracker lost the thing: ask Gemini again for its box in a fresh
+    /// photo, then `reacquired` (or `refindFailed`).
+    case refind
 }
 
 /// The hand guide's rules, free of Vision and the watch so they run in
@@ -45,12 +48,18 @@ public enum GuideOutput: Sendable, Equatable {
 ///   alone say "warmer" but never "which way";
 /// - a fingertip within `reachM` of the thing's surface for `reachHoldMs`
 ///   ends it with "You've got it.";
-/// - the thing out of sight for `lostAfterMs`, or `timeoutMs` overall, ends it.
+/// - the thing out of sight for `lostAfterMs` asks Gemini to find it again
+///   (up to `maxRefinds` times); `timeoutMs` overall ends it.
 public struct GuideSession: Sendable {
     public static let reachM = 0.04
     public static let reachHoldMs: Int64 = 300
-    public static let lostAfterMs: Int64 = 2_500
-    public static let timeoutMs: Int64 = 60_000
+    public static let lostAfterMs: Int64 = 1_500
+    public static let timeoutMs: Int64 = 90_000
+    /// Gemini re-finds per guide before giving up.
+    public static let maxRefinds = 3
+    /// A re-find that has not come back by now has failed.
+    public static let refindTimeoutMs: Int64 = 12_000
+    public static let refindPhrase = "Finding it again."
     public static let watchEveryMs: Int64 = 100
     /// Between direction words, the same word included: the hand is still
     /// moving and needs to hear it is still the right way (2026-09-27: five
@@ -97,6 +106,8 @@ public struct GuideSession: Sendable {
     private var lastSentState: GuideState?
     private var lastHintMs: Int64
     private var lastNoHandPromptMs: Int64
+    private var refinds = 0
+    private var refindingSinceMs: Int64?
 
     /// `startMs` is when the start phrase was said: the first "reach out"
     /// reminder waits a full interval after it.
@@ -116,11 +127,21 @@ public struct GuideSession: Sendable {
             return finish(.timedOut, now: now, say: Self.timedOutPhrase)
         }
         guard let object = frame.object else {
-            if now - lastObjectMs >= Self.lostAfterMs {
-                return finish(.lost, now: now, say: Self.lostPhrase(target))
+            if let since = refindingSinceMs {
+                return now - since >= Self.refindTimeoutMs ? finish(.lost, now: now, say: Self.lostPhrase(target)) : []
             }
-            return []
+            guard now - lastObjectMs >= Self.lostAfterMs else { return [] }
+            guard refinds < Self.maxRefinds else { return finish(.lost, now: now, say: Self.lostPhrase(target)) }
+            refinds += 1
+            refindingSinceMs = now
+            state = .looking
+            nearSinceMs = nil
+            gapM = nil
+            towards = nil
+            return watch(now: now, gap: nil, metric: false) + [.say(Self.refindPhrase), .refind]
         }
+        // The tracker found it again by itself: any re-find answer is moot.
+        refindingSinceMs = nil
         lastObjectMs = now
         if let depth = frame.objectDepthM { objectDepthM = depth }
 
@@ -172,6 +193,24 @@ public struct GuideSession: Sendable {
         out += watch(now: now, gap: gap, metric: metric)
         return out
     }
+
+    /// Gemini found it again: tracking restarts from its new box.
+    public mutating func reacquired(nowMs: Int64) {
+        guard !finished else { return }
+        refindingSinceMs = nil
+        lastObjectMs = nowMs
+        state = .findHand
+        lastHintMs = nowMs
+        lastNoHandPromptMs = nowMs
+    }
+
+    /// Gemini did not find it in the fresh photo either.
+    public mutating func refindFailed(nowMs: Int64) -> [GuideOutput] {
+        guard !finished, refindingSinceMs != nil else { return [] }
+        return finish(.lost, now: nowMs, say: Self.lostPhrase(target))
+    }
+
+    public var isRefinding: Bool { refindingSinceMs != nil }
 
     /// The wearer said "stop" (or a new question replaced this one).
     public mutating func stop(nowMs: Int64) -> [GuideOutput] {

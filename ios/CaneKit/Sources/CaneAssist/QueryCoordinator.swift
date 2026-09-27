@@ -97,6 +97,9 @@ public actor QueryCoordinator {
     /// The last thing found, for "help me grab it".
     private var lastFound: String?
     private var timeoutTask: Task<Void, Never>?
+    /// The hand guide's silent re-find in flight, if any.
+    private var refindId: String?
+    private var refindWaiter: CheckedContinuation<PhoneBox?, Never>?
     private var stateObserver: (@Sendable (State) -> Void)?
 
     public init(
@@ -169,6 +172,10 @@ public actor QueryCoordinator {
     }
 
     public func receive(_ answer: SceneAnswer) async {
+        if answer.queryId == refindId {
+            resolveRefind(answer.queryId, answer.status == .found ? answer.phoneBox : nil)
+            return
+        }
         guard state == .looking(queryId: answer.queryId) else {
             logger.info("dropping answer \(answer.queryId, privacy: .public): not the current question")
             return
@@ -205,6 +212,47 @@ public actor QueryCoordinator {
         speaker.cancel(upTo: .prompt)
         _ = await speaker.say(SpokenPhrase(text: text), on: .answer, haptic: haptic, pan: 0, maxWaitMs: Self.answerMaxWaitMs)
         if state == .answering { setState(.idle) }
+    }
+
+    /// The hand guide lost the thing: the same `find`, with a fresh photo,
+    /// but silent -- no "Hold still", no spoken answer, just the new box (nil
+    /// if Gemini did not see it in the phone photo, or no answer in time). A
+    /// real question in flight wins: then this returns nil at once.
+    public func refind(_ target: String) async -> PhoneBox? {
+        guard state == .idle, refindId == nil else { return nil }
+        let id = makeId()
+        let capture = snapshot()
+        guard let frame = capture.frame,
+              let query = try? SceneQuery(queryId: id, kind: .find, target: target, utterance: "find the \(target) again",
+                                          tPhoneMs: clock(), phoneFrame: frame)
+        else { return nil }
+        return await withCheckedContinuation { waiter in
+            Task { await self.beginRefind(id, query, waiter) }
+        }
+    }
+
+    public static let refindTimeoutMs = 10_000
+
+    private func beginRefind(_ id: String, _ query: SceneQuery, _ waiter: CheckedContinuation<PhoneBox?, Never>) async {
+        refindId = id
+        refindWaiter = waiter
+        let timeout = Self.refindTimeoutMs
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(timeout))
+            await self?.resolveRefind(id, nil)
+        }
+        do {
+            try await link.send(query)
+        } catch {
+            resolveRefind(id, nil)
+        }
+    }
+
+    private func resolveRefind(_ id: String, _ box: PhoneBox?) {
+        guard refindId == id, let waiter = refindWaiter else { return }
+        refindId = nil
+        refindWaiter = nil
+        waiter.resume(returning: box)
     }
 
     // MARK: - Internals
@@ -281,6 +329,7 @@ public actor QueryCoordinator {
     }
 
     private func finish() {
+        if let refindId { resolveRefind(refindId, nil) }
         timeoutTask?.cancel()
         timeoutTask = nil
         target = nil

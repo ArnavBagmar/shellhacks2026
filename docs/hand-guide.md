@@ -26,6 +26,12 @@ guide. The laptop page shows it all live.
    - TrueDepth measures both the thing and a small patch around the fingertip.
    - While the hand covers the thing, its box is held still. Otherwise the
      tracker would follow the hand.
+   - The tracker runs on every camera frame (hand pose on every other one),
+     and follows the thing's box with a 15% margin of table around it: a
+     small cube alone has too little texture to hold on to.
+   - If it still loses the thing for 1.5 s, Cane says "Finding it again."
+     and quietly asks Gemini with a fresh photo, then carries on from the new
+     box. It does this up to 3 times before "I lost sight of ...".
 3. **Decide** (`CaneGuide/GuideSession.swift`, pure and tested on macOS):
    - The gap is measured from the fingertip to the thing's surface, in metres.
    - The gap goes to the ticker (and the watch) about 10 times a second.
@@ -35,8 +41,8 @@ guide. The laptop page shows it all live.
      navigation channel), never the laptop's: a hint that waits a second
      for a network voice points where the hand was.
    - A fingertip within 4 cm of the thing for 0.3 s means it was reached.
-   - The guide ends if the thing is out of sight for 2.5 s, after 60 s, or
-     when the wearer says anything.
+   - The guide ends if a re-find fails, after 90 s, or when the wearer says
+     anything.
 4. **Tick and beep on the phone** (`CaneAssist/GuideTicker.swift`), like a
    parking sensor:
    - A buzz on the chest and a short beep, once a second at 60 cm or more,

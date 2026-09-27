@@ -277,6 +277,43 @@ final class QueryCoordinatorTests: XCTestCase {
         XCTAssertEqual(link.sent.last?.target, "rubik's cube")
     }
 
+    func testARefindIsSilentAndReturnsTheNewBox() async throws {
+        let link = FakeLink(), speaker = FakeSpeaker()
+        let c = coordinator(link, speaker)
+        let box = try PhoneBox(xMin: 0.5, yMin: 0.5, xMax: 0.6, yMax: 0.6)
+        async let found = c.refind("rubik's cube")
+        for _ in 0..<200 where link.sent.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertEqual(link.sent.first?.target, "rubik's cube")
+        XCTAssertNotNil(link.sent.first?.phoneFrame, "a fresh photo, or the box would be old again")
+        await c.receive(try SceneAnswer(queryId: "q-1", status: .found, subject: "Rubik's cube", bearingDeg: 5,
+                                        detail: nil, confidence: .high, latencyMs: 900, phoneBox: box))
+        let result = await found
+        XCTAssertEqual(result, box)
+        XCTAssertTrue(speaker.said.isEmpty, "no Hold still, no spoken answer")
+        let state = await c.state
+        XCTAssertEqual(state, .idle)
+    }
+
+    func testARefindThatOnlyThe360SeesIsNil() async throws {
+        let link = FakeLink(), speaker = FakeSpeaker()
+        let c = coordinator(link, speaker)
+        async let found = c.refind("cup")
+        for _ in 0..<200 where link.sent.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        await c.receive(try SceneAnswer(queryId: "q-1", status: .found, subject: "cup", bearingDeg: 90, detail: nil,
+                                        confidence: .high, latencyMs: 900))
+        let result = await found
+        XCTAssertNil(result)
+    }
+
+    func testARealQuestionInFlightWinsOverARefind() async {
+        let link = FakeLink(), speaker = FakeSpeaker()
+        let c = coordinator(link, speaker)
+        await c.handle(.find("exit"))
+        let result = await c.refind("cup")
+        XCTAssertNil(result)
+        XCTAssertEqual(link.sent.count, 1)
+    }
+
     func testNavigationAndSignReadingAreNotItsJob() async {
         let c = coordinator(FakeLink(), FakeSpeaker())
         let nav = await c.handle(.navigate("library"))

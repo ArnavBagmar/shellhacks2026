@@ -38,10 +38,22 @@ extension EventLinkClient: GuideLink {}
 /// at a time, to `work`; everything below `// MARK: - Work queue` runs
 /// there only.
 public final class HandGuide: FrameConsumer, @unchecked Sendable {
-    /// Half of the camera's 30 fps: plenty for a reaching hand.
-    static let everyNthFrame = 2
-    /// Below this the tracker has lost the thing for this frame.
-    static let minTrackConfidence: Float = 0.3
+    /// The tracker runs on every frame: the less the picture moves between
+    /// two frames, the less it loses the thing (2026-09-27: at 15 fps a
+    /// chest camera's sway lost it within seconds).
+    static let everyNthFrame = 1
+    /// Hand pose is the heavy request; a fingertip at 15 Hz is plenty.
+    static let handEveryNthFrame = 2
+    /// A fingertip older than this is gone.
+    static let handHoldMs: Int64 = 200
+    /// Below this the tracker has lost the thing for this frame. Low on
+    /// purpose: a short dip is common and `GuideSession` waits 1.5 s anyway.
+    static let minTrackConfidence: Float = 0.15
+    /// The tracker follows the box grown by this much per side (and never
+    /// smaller than `minTrackSide`): a small cube alone has too little
+    /// texture to follow; with a margin of table around it, it holds.
+    static let trackPad = 0.15
+    static let minTrackSide = 0.1
     static let minJointConfidence: Float = 0.3
     /// A fingertip inside the thing's box grown by this much covers it, and
     /// the tracker would follow the hand: the box is held still instead.
@@ -69,6 +81,7 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
     private var active = false
     private var busy = false
     private var frameCount = 0
+    private var refinder: (@Sendable (String) async -> PhoneBox?)?
     private let logger = Logger(subsystem: "cane", category: "guide")
 
     // Work queue only.
@@ -77,6 +90,8 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
     private var sequence = VNSequenceRequestHandler()
     private var track: VNTrackObjectRequest?
     private var held = false
+    private var workFrames = 0
+    private var lastHand: (point: NormPoint, atMs: Int64)?
     private var objectDepthM: Double?
     private var depth: (map: DepthMap, atMs: Int64)?
     private var lastLaptopMs: Int64?
@@ -103,6 +118,12 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
     }
 
     public var isActive: Bool { lock.withLock { active } }
+
+    /// How to ask Gemini again when the tracker loses the thing
+    /// (`QueryCoordinator.refind`); set once, after both exist.
+    public func setRefinder(_ refind: @escaping @Sendable (String) async -> PhoneBox?) {
+        lock.withLock { refinder = refind }
+    }
 
     /// Starts following at once (the photo is already a few seconds old) and
     /// returns what to say after the answer: "Reach out slowly ...".
@@ -165,7 +186,8 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
         self.box = box
         held = false
         sequence = VNSequenceRequestHandler()
-        let request = VNTrackObjectRequest(detectedObjectObservation: VNDetectedObjectObservation(boundingBox: Self.visionRect(box)))
+        let request = VNTrackObjectRequest(detectedObjectObservation: VNDetectedObjectObservation(
+            boundingBox: Self.visionRect(Self.padded(box))))
         request.trackingLevel = .accurate
         track = request
     }
@@ -175,7 +197,11 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
         let now = clock()
         let aspect = Double(CVPixelBufferGetWidth(buffer)) / Double(max(CVPixelBufferGetHeight(buffer), 1))
 
-        let hand = fingertip(in: buffer, nearestTo: box.centre)
+        workFrames += 1
+        if workFrames % Self.handEveryNthFrame == 0 {
+            lastHand = fingertip(in: buffer, nearestTo: box.centre).map { ($0, now) }
+        }
+        let hand = lastHand.flatMap { now - $0.atMs <= Self.handHoldMs ? $0.point : nil }
         let covering = hand.map { box.expanded(by: Self.coverMargin).contains($0) } ?? false
         var seen: NormBox?
         if covering {
@@ -218,6 +244,26 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
                        buffer: buffer, hfovDeg: hfovDeg)
         }
         deliver(outputs, target: current.target)
+    }
+
+    /// Gemini's answer to a re-find: start tracking again from its box, or
+    /// give up ("I lost sight of ...").
+    private func refindResult(_ found: PhoneBox?) {
+        guard var current = session, current.isRefinding else { return }
+        let now = clock()
+        if let found {
+            seed(NormBox(xMin: found.xMin, yMin: found.yMin, xMax: found.xMax, yMax: found.yMax))
+            objectDepthM = nil
+            lastHand = nil
+            current.reacquired(nowMs: now)
+            session = current
+            logger.info("guide: found \(current.target, privacy: .public) again")
+            sendLaptop(state: current.state, target: current.target, now: now, force: true, object: box)
+        } else {
+            let outputs = current.refindFailed(nowMs: now)
+            session = current.finished ? nil : current
+            deliver(outputs, target: current.target)
+        }
     }
 
     /// Best effort, never blocking the tracker: the page is for watching,
@@ -272,7 +318,7 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
         guard let result = track.results?.first as? VNDetectedObjectObservation else { return nil }
         track.inputObservation = result
         guard result.confidence >= Self.minTrackConfidence else { return nil }
-        return Self.normBox(result.boundingBox)
+        return Self.unpadded(Self.normBox(result.boundingBox))
     }
 
     /// The fingertip (any finger, any hand) nearest the thing.
@@ -317,6 +363,16 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
                     // Dropped, never queued, if anything else is talking.
                     _ = await speaker.say(SpokenPhrase(text: text), on: .navigation, haptic: nil, pan: 0, maxWaitMs: 0)
                 }
+            case .refind:
+                guard let refinder = lock.withLock({ refinder }) else {
+                    work.async { [self] in refindResult(nil) }
+                    continue
+                }
+                logger.info("guide: lost \(target, privacy: .public), asking Gemini again")
+                Task { [self] in
+                    let found = await refinder(target)
+                    work.async { [self] in refindResult(found) }
+                }
             case .end(let end):
                 lock.withLock { active = false }
                 ticker?.stop(reached: end == .reached)
@@ -330,6 +386,21 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
                 onEnd(target, end)
             }
         }
+    }
+
+    /// The box the tracker follows: the thing plus a margin, kept inside the frame.
+    static func padded(_ box: NormBox) -> NormBox {
+        let w = max(box.width * (1 + 2 * trackPad), minTrackSide), h = max(box.height * (1 + 2 * trackPad), minTrackSide)
+        let c = box.centre
+        let x0 = min(max(c.x - w / 2, 0), 1 - min(w, 1)), y0 = min(max(c.y - h / 2, 0), 1 - min(h, 1))
+        return NormBox(xMin: x0, yMin: y0, xMax: min(x0 + w, 1), yMax: min(y0 + h, 1))
+    }
+
+    /// Back from the tracker's box to the thing's own size, around its centre.
+    static func unpadded(_ box: NormBox) -> NormBox {
+        let w = box.width / (1 + 2 * trackPad), h = box.height / (1 + 2 * trackPad)
+        let c = box.centre
+        return NormBox(xMin: max(c.x - w / 2, 0), yMin: max(c.y - h / 2, 0), xMax: min(c.x + w / 2, 1), yMax: min(c.y + h / 2, 1))
     }
 
     static func visionRect(_ box: NormBox) -> CGRect {
