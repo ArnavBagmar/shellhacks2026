@@ -1,21 +1,22 @@
-"""Arrange the pipeline's six crops the way a wearer would read them.
+"""Arrange the pipeline's seven crops the way a wearer would read them.
 
 ``cane.bridge.dewarp`` emits crops in signal order -- C0 straight ahead, then
-around the wearer -- which is right for the wire and wrong for a human looking
-at a screen. This module owns only the display concern: which crop belongs in
-which cell, and what to call it.
+around the wearer, then C6 looking straight down -- which is right for the
+wire and wrong for a human looking at a screen. This module owns only the
+display concern: which crop belongs in which cell, and what to call it.
 
 The yaws are imported, never restated, so this file can never disagree with
 the geometry the cloud actually receives.
 
-    +---------+---------+---------+
-    | Front-L |  Front  | Front-R |
-    +---------+---------+---------+
-    | Rear-L  |  Rear   | Rear-R  |
-    +---------+---------+---------+
+    +---------+---------+---------+---------+
+    | Front-L |  Front  | Front-R |  Down   |
+    +---------+---------+---------+---------+
+    | Rear-L  |  Rear   | Rear-R  |         |
+    +---------+---------+---------+---------+
 
-The centre column is the wearer's own axis, so "what is in front of me" and
-"what is behind me" sit one above the other.
+The ring's centre column is the wearer's own axis, so "what is in front of
+me" and "what is behind me" sit one above the other; the nadir crop ends the
+front row and the rear row's last cell stays empty.
 """
 
 from __future__ import annotations
@@ -23,19 +24,20 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from cane.bridge.dewarp import CROP_COUNT, CROP_YAWS_DEG
+from cane.bridge.dewarp import CROP_COUNT, CROP_YAWS_DEG, NADIR_CROP_INDEX
 
 GRID_ROWS = 2
-GRID_COLS = 3
+GRID_COLS = 4
+#: The ring occupies the first three columns of each row.
+RING_GRID_COLS = 3
+NADIR_LABEL = "Down"
 
-# Reading order of the grid, by yaw. Every entry must exist in CROP_YAWS_DEG.
-GRID_YAW_ORDER: tuple[float, ...] = (
-    -60.0,
-    0.0,
-    60.0,
-    -120.0,
-    180.0,
-    120.0,
+#: What each grid cell shows, in reading order: a crop index, or None for an
+#: empty (black) cell. Keyed by index, not yaw, because C6's wire yaw is 0 and
+#: would collide with Front.
+GRID_CELLS: tuple[int | None, ...] = (
+    5, 0, 1, NADIR_CROP_INDEX,  # Front-L, Front, Front-R, Down
+    4, 3, 2, None,  # Rear-L, Rear, Rear-R, empty
 )
 
 YAW_LABELS: dict[float, str] = {
@@ -58,7 +60,7 @@ def normalise_yaw(yaw_deg: float) -> float:
 
 
 def label_for_yaw(yaw_deg: float) -> str:
-    """Direction name for a production crop yaw.
+    """Direction name for a production ring-crop yaw.
 
     Raises rather than inventing a name: an unrecognised yaw means the
     geometry changed and this table needs updating with it.
@@ -72,33 +74,37 @@ def label_for_yaw(yaw_deg: float) -> str:
     )
 
 
+def label_for_crop(index: int) -> str:
+    """Direction name for a production crop index; ``Down`` for the nadir crop."""
+    if index == NADIR_CROP_INDEX:
+        return NADIR_LABEL
+    return label_for_yaw(CROP_YAWS_DEG[index])
+
+
 def grid_order() -> tuple[int, ...]:
-    """Indices into ``CROP_YAWS_DEG``, in grid reading order."""
-    order: list[int] = []
-    for wanted in GRID_YAW_ORDER:
-        target = normalise_yaw(wanted)
-        matches = [
-            index
-            for index, yaw in enumerate(CROP_YAWS_DEG)
-            if abs(normalise_yaw(yaw) - target) <= _YAW_TOLERANCE_DEG
-        ]
-        if not matches:
-            raise ValueError(
-                f"grid wants yaw {wanted} but the pipeline emits {CROP_YAWS_DEG}"
-            )
-        order.append(matches[0])
-    return tuple(order)
+    """Crop indices in grid reading order, empty cells skipped.
+
+    Raises if ``GRID_CELLS`` does not name every crop exactly once: a crop
+    count change must be reflected here, never silently dropped from the grid.
+    """
+    order = tuple(index for index in GRID_CELLS if index is not None)
+    if sorted(order) != list(range(CROP_COUNT)):
+        raise ValueError(
+            f"grid cells {GRID_CELLS} do not name every one of {CROP_COUNT} crops once"
+        )
+    return order
 
 
 def labels_in_grid_order() -> list[str]:
     """Direction names, in the same order as :func:`grid_order`."""
-    return [label_for_yaw(CROP_YAWS_DEG[index]) for index in grid_order()]
+    return [label_for_crop(index) for index in grid_order()]
 
 
 def tile_grid(images: Sequence[Any], np: Any) -> Any:
     """Compose the crops into one ``GRID_ROWS`` x ``GRID_COLS`` canvas.
 
-    Returns a new array; the inputs are never written through.
+    Returns a new array; the inputs are never written through. Empty cells
+    are black.
     """
     if len(images) != CROP_COUNT:
         raise ValueError(f"expected {CROP_COUNT} crops to tile, got {len(images)}")
@@ -109,9 +115,10 @@ def tile_grid(images: Sequence[Any], np: Any) -> Any:
                 f"all crops must have the same shape to tile; "
                 f"crop 0 is {first} but crop {index} is {image.shape}"
             )
-    order = grid_order()
+    grid_order()  # validates GRID_CELLS before any pixel is touched
+    blank = np.zeros_like(images[0])
+    cells = [blank if index is None else images[index] for index in GRID_CELLS]
     rows = [
-        np.hstack([images[order[row * GRID_COLS + col]] for col in range(GRID_COLS)])
-        for row in range(GRID_ROWS)
+        np.hstack(cells[row * GRID_COLS : (row + 1) * GRID_COLS]) for row in range(GRID_ROWS)
     ]
     return np.vstack(rows)

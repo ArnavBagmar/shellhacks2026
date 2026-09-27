@@ -204,7 +204,7 @@ def decode_crops(jpegs: Sequence[bytes], crop_px: int) -> list[NDArray[np.uint8]
 
 
 def warm_up_detector(detector: FrameDetector, crop_px: int) -> float:
-    """One batch of six blank crops straight at the detector, before the
+    """One batch of ``CROP_COUNT`` blank crops straight at the detector, before the
     pipeline starts. Returns the elapsed milliseconds.
 
     A cold CoreML/MPS graph compiles on its first forward pass -- about
@@ -292,7 +292,7 @@ class LocalBackend:
     async def infer(
         self, meta: InferenceMeta, jpegs: tuple[bytes, ...]
     ) -> InferenceResponse:
-        """Decode + detect off the event loop: six JPEG decodes and a model
+        """Decode + detect off the event loop: seven JPEG decodes and a model
         forward pass would otherwise stall the grab/tick loop outright.
 
         Bounded like the cloud call is. `asyncio.to_thread` cannot cancel

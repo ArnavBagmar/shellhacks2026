@@ -150,7 +150,7 @@ def _decode_and_infer(
     state: AppState, meta: InferenceMeta, raws: Sequence[bytes]
 ) -> InferenceResponse:
     """Runs in the threadpool: `cv2.imdecode` releases the GIL, and keeping
-    it off the event loop stops six decodes from stalling `/healthz`.
+    it off the event loop stops seven decodes from stalling `/healthz`.
     """
     started = time.perf_counter()
     images = [_decode(index, raw, meta.crop_px) for index, raw in enumerate(raws)]
@@ -211,12 +211,16 @@ async def infer(
     crop_3: Annotated[UploadFile, File()],
     crop_4: Annotated[UploadFile, File()],
     crop_5: Annotated[UploadFile, File()],
+    crop_6: Annotated[UploadFile, File()],
     state: State,
     api_key: ApiKey = None,
 ) -> InferenceResponse:
     _require_key(state, api_key)
     parsed = _parse_meta(meta)
-    uploads = (crop_0, crop_1, crop_2, crop_3, crop_4, crop_5)
+    # FastAPI needs one named parameter per multipart file, so the crop count
+    # is spelled out here; the assertion keeps it honest against the contract.
+    uploads = (crop_0, crop_1, crop_2, crop_3, crop_4, crop_5, crop_6)
+    assert len(uploads) == CROP_COUNT, "the upload fields must track CROP_COUNT"
     raws = [
         await _read_crop(index, upload, state.settings.max_crop_bytes)
         for index, upload in enumerate(uploads)

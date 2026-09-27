@@ -1,8 +1,9 @@
-"""Save one live six-crop contact sheet -- the visual proof of the geometry.
+"""Save one live seven-crop contact sheet -- the visual proof of the geometry.
 
     PYTHONPATH=src uv run python -m cane.bridge.snapshot --source x4 --out DIR
 
-Writes ``step-06-live-crops.jpg`` (six crops tiled 3x2 with the crop index and
+Writes ``step-06-live-crops.jpg`` (seven crops tiled 4x2, C6 the nadir crop, last
+cell blank, with the crop index and
 yaw burned in) and ``step-06-live-equirect.jpg`` (a 1440x720 copy of the
 source frame). Both are documentation artefacts, not a runtime path.
 """
@@ -20,13 +21,13 @@ import cv2
 import numpy as np
 
 from cane.bridge.capture.grab_thread import GrabThread
-from cane.bridge.dewarp import CropSet, dewarp_equirect
+from cane.bridge.dewarp import NADIR_CROP_INDEX, NADIR_FOV_DEG, CropSet, dewarp_equirect
 
 logger = logging.getLogger("cane.bridge.snapshot")
 
 CROPS_FILENAME = "step-06-live-crops.jpg"
 EQUIRECT_FILENAME = "step-06-live-equirect.jpg"
-CONTACT_SHEET_COLS = 3
+CONTACT_SHEET_COLS = 4
 CONTACT_SHEET_ROWS = 2
 EQUIRECT_PREVIEW_SIZE = (1440, 720)
 DEFAULT_CROP_PX = 640
@@ -42,14 +43,22 @@ _LABEL_SHADOW = (0, 0, 0)
 _LABEL_COLOUR = (0, 255, 255)
 
 
+def _caption(index: int, cropset: CropSet) -> str:
+    if index == NADIR_CROP_INDEX:
+        return f"C{index} nadir fov {NADIR_FOV_DEG:.0f}"
+    return f"C{index} yaw {cropset.yaws_deg[index]:+.0f}"
+
+
 def build_contact_sheet(cropset: CropSet) -> np.ndarray:
-    """Six crops tiled 3x2, each labelled ``C<i> yaw <deg>``."""
-    labelled = [
-        _label(crop.copy(), f"C{i} yaw {cropset.yaws_deg[i]:+.0f}")
-        for i, crop in enumerate(cropset.images)
-    ]
+    """The crops tiled 4x2 in index order (ring first, C6 last), each labelled
+    ``C<i> yaw <deg>`` or ``C6 nadir fov 120``; cells past the last crop are black."""
+    cells = CONTACT_SHEET_COLS * CONTACT_SHEET_ROWS
+    if len(cropset.images) > cells:
+        raise ValueError(f"{len(cropset.images)} crops do not fit a {cells}-cell contact sheet")
+    labelled = [_label(crop.copy(), _caption(i, cropset)) for i, crop in enumerate(cropset.images)]
+    padded = labelled + [np.zeros_like(labelled[0])] * (cells - len(labelled))
     rows = [
-        np.concatenate(labelled[row * CONTACT_SHEET_COLS : (row + 1) * CONTACT_SHEET_COLS], axis=1)
+        np.concatenate(padded[row * CONTACT_SHEET_COLS : (row + 1) * CONTACT_SHEET_COLS], axis=1)
         for row in range(CONTACT_SHEET_ROWS)
     ]
     return np.concatenate(rows, axis=0)

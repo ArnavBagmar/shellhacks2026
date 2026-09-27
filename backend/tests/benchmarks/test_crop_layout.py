@@ -1,4 +1,4 @@
-"""Layout of the six pipeline crops into a spatial grid.
+"""Layout of the seven pipeline crops into a spatial grid.
 
 Pure geometry and composition: no camera, no models, no OpenCV window. The
 crop yaws themselves are owned by ``cane.bridge.dewarp`` and must never be
@@ -12,14 +12,17 @@ import numpy as np
 import pytest
 
 from cane.benchmarks.crop_layout import (
+    GRID_CELLS,
     GRID_COLS,
     GRID_ROWS,
+    RING_GRID_COLS,
     grid_order,
+    label_for_crop,
     label_for_yaw,
     labels_in_grid_order,
     tile_grid,
 )
-from cane.bridge.dewarp import CROP_COUNT, CROP_YAWS_DEG
+from cane.bridge.dewarp import CROP_COUNT, CROP_YAWS_DEG, NADIR_CROP_INDEX
 
 
 class TestLabels:
@@ -43,26 +46,31 @@ class TestLabels:
         # -180 and +180 are the same bearing; the grid must not depend on sign.
         assert label_for_yaw(-180.0) == "Rear"
 
+    def test_the_nadir_crop_is_labelled_down_not_by_its_placeholder_yaw(self) -> None:
+        assert label_for_crop(NADIR_CROP_INDEX) == "Down"
+        assert label_for_crop(0) == "Front"
+
 
 class TestGridOrder:
     def test_covers_every_crop_exactly_once(self) -> None:
         order = grid_order()
         assert sorted(order) == list(range(CROP_COUNT))
 
-    def test_grid_is_two_rows_of_three(self) -> None:
-        assert GRID_ROWS * GRID_COLS == CROP_COUNT
-        assert (GRID_ROWS, GRID_COLS) == (2, 3)
+    def test_grid_is_two_rows_of_four_with_one_empty_cell(self) -> None:
+        assert GRID_ROWS * GRID_COLS == CROP_COUNT + 1
+        assert (GRID_ROWS, GRID_COLS) == (2, 4)
+        assert GRID_CELLS.count(None) == 1 and GRID_CELLS[-1] is None
 
-    def test_front_row_on_top_left_to_right(self) -> None:
-        assert labels_in_grid_order()[:GRID_COLS] == ["Front-L", "Front", "Front-R"]
+    def test_front_row_on_top_left_to_right_then_down(self) -> None:
+        assert labels_in_grid_order()[:GRID_COLS] == ["Front-L", "Front", "Front-R", "Down"]
 
     def test_rear_row_beneath_it_left_to_right(self) -> None:
         assert labels_in_grid_order()[GRID_COLS:] == ["Rear-L", "Rear", "Rear-R"]
 
     def test_front_sits_directly_above_rear(self) -> None:
-        """The centre column is the wearer's axis: Front over Rear."""
+        """The ring's centre column is the wearer's axis: Front over Rear."""
         labels = labels_in_grid_order()
-        centre = GRID_COLS // 2
+        centre = RING_GRID_COLS // 2
         assert labels[centre] == "Front"
         assert labels[GRID_COLS + centre] == "Rear"
 
@@ -87,8 +95,15 @@ class TestTileGrid:
             patch = canvas[row * size : (row + 1) * size, col * size : (col + 1) * size]
             assert int(patch[0, 0, 0]) == crop_index * 10
 
+    def test_the_empty_cell_is_black(self) -> None:
+        size = 8
+        canvas = tile_grid(self._crops(size), np)
+        row, col = divmod(GRID_CELLS.index(None), GRID_COLS)
+        patch = canvas[row * size : (row + 1) * size, col * size : (col + 1) * size]
+        assert int(patch.max()) == 0
+
     def test_wrong_crop_count_is_rejected(self) -> None:
-        with pytest.raises(ValueError, match="6"):
+        with pytest.raises(ValueError, match="7"):
             tile_grid(self._crops()[:4], np)
 
     def test_mismatched_crop_sizes_are_rejected(self) -> None:

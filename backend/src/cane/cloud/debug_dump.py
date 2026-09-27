@@ -23,7 +23,8 @@ from cane.cloud.api_models import InferenceResponse
 logger = logging.getLogger(__name__)
 
 TILE_PX: Final = 400
-COLUMNS: Final = 3
+#: 4 x 2 holds the six ring crops plus the nadir crop C6; the last cell stays black.
+COLUMNS: Final = 4
 BOX_COLOUR: Final = (0, 255, 0)
 TEXT_COLOUR: Final = (0, 0, 0)
 BOX_THICKNESS: Final = 2
@@ -56,13 +57,16 @@ def _annotate(tile: NDArray[np.uint8], response: InferenceResponse, crop_index: 
 def build_sheet(
     images: Sequence[NDArray[np.uint8]], response: InferenceResponse
 ) -> NDArray[np.uint8]:
-    """Six crops, boxes drawn, laid out 3 x 2 in crop order."""
+    """The crops, boxes drawn, laid out ``COLUMNS`` wide in crop order; cells
+    past the last crop are black."""
     tiles = []
     for crop_index, image in enumerate(images):
         tile = cv2.resize(image, (TILE_PX, TILE_PX), interpolation=cv2.INTER_AREA).copy()
         _annotate(tile, response, crop_index)
         cv2.putText(tile, f"crop {crop_index}", (6, 18), FONT, 0.5, BOX_COLOUR, 1)
         tiles.append(tile)
+    if len(tiles) % COLUMNS:
+        tiles.extend([np.zeros_like(tiles[0])] * (COLUMNS - len(tiles) % COLUMNS))
     rows = [
         np.hstack(tiles[start : start + COLUMNS]) for start in range(0, len(tiles), COLUMNS)
     ]

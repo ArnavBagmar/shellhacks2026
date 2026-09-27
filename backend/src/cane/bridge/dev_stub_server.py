@@ -83,10 +83,12 @@ def build_app(delay_ms: int = DEFAULT_DELAY_MS) -> FastAPI:
         crop_3: Annotated[UploadFile, File()],
         crop_4: Annotated[UploadFile, File()],
         crop_5: Annotated[UploadFile, File()],
+        crop_6: Annotated[UploadFile, File()],
     ) -> Response:
         started = time.perf_counter()
         parsed = _parse_meta(meta)
-        crops = (crop_0, crop_1, crop_2, crop_3, crop_4, crop_5)
+        crops = (crop_0, crop_1, crop_2, crop_3, crop_4, crop_5, crop_6)
+        assert len(crops) == CROP_COUNT, "the stub's upload fields must track CROP_COUNT"
         sizes = [len(await crop.read()) for crop in crops]
         if any(size == 0 for size in sizes):
             raise HTTPException(status_code=UNPROCESSABLE, detail=f"empty crop: {sizes}")

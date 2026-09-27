@@ -24,7 +24,7 @@ from cane.contracts.awareness_event import ObjectClass, RangeBand
 
 T0 = 1_790_000_000_000
 CROP_PX = 640
-YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0)
+YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0, 0.0)  # C6 last
 
 
 def meta(t_capture_ms: int = T0, crop_px: int = CROP_PX, rung: int = 1) -> InferenceMeta:

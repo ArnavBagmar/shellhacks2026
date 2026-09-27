@@ -2,10 +2,14 @@
 
 | rung | crops | size | q | fps | uplink |
 |---|---|---|---|---|---|
-| 1 | 6 | 640x640 | 70 | 3 | ~6.5 Mbps |
-| 2 | 6 | 640x640 | 70 | 2 | ~4.3 Mbps |
-| 3 | 6 | 512x512 | 60 | 3 | ~2.3 Mbps |
-| 4 | 6 | 512x512 | 60 | 2 | ~1.5 Mbps |
+| 1 | 7 | 640x640 | 70 | 3 | ~7.6 Mbps |
+| 2 | 7 | 640x640 | 70 | 2 | ~5.1 Mbps |
+| 3 | 7 | 512x512 | 60 | 3 | ~2.7 Mbps |
+| 4 | 7 | 512x512 | 60 | 2 | ~1.8 Mbps |
+
+Sec 3.2 was written for six crops; the nadir crop C6 (x4-sphere-coverage)
+adds a seventh and scales every uplink figure by 7/6. Its black body disc
+compresses to almost nothing, so the real cost is below that.
 
 Stepping between rungs is the health monitor's job (step 8); this module only
 states what each rung *is*.
@@ -15,7 +19,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CROPS_PER_FRAME = 6
+from cane.cloud.api_models import CROP_COUNT
+
+CROPS_PER_FRAME = CROP_COUNT
 
 # Bytes per JPEG pixel, back-solved from the Mbps column of the table above so
 # that `bitrate_estimate_mbps` reproduces the published numbers exactly. The

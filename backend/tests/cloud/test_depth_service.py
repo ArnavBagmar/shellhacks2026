@@ -33,7 +33,7 @@ from .conftest import Harness, cloud_harness, post_infer
 from .depth_synthetic import CROP_PX, ideal_ground, wall_on_the_left
 
 T0 = 1_790_000_000_000
-YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0)
+YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0, 0.0)  # C6 last
 GAP_PROFILE_FIELDS = {
     "crop_index",
     "columns",

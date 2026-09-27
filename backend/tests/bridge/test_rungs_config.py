@@ -9,13 +9,15 @@ import pytest
 
 from cane.bridge.config import DELTA_DEG_MAX, DELTA_DEG_WARN, BridgeConfig
 from cane.bridge.rungs import RUNG_1, RUNG_2, RUNG_3, RUNG_4, RUNGS, CROPS_PER_FRAME, rung_by_index
+from cane.cloud.api_models import CROP_COUNT
 
-# (index, crop_px, jpeg_quality, fps, uplink Mbps) exactly as design Sec 3.2 prints it.
+# (index, crop_px, jpeg_quality, fps, uplink Mbps): design Sec 3.2's six-crop
+# figures scaled by 7/6 for the nadir crop C6 (x4-sphere-coverage).
 SPEC_TABLE = (
-    (1, 640, 70, 3.0, 6.5),
-    (2, 640, 70, 2.0, 4.3),
-    (3, 512, 60, 3.0, 2.3),
-    (4, 512, 60, 2.0, 1.5),
+    (1, 640, 70, 3.0, 7.6),
+    (2, 640, 70, 2.0, 5.1),
+    (3, 512, 60, 3.0, 2.7),
+    (4, 512, 60, 2.0, 1.8),
 )
 BITRATE_TOLERANCE_MBPS = 0.1
 
@@ -29,7 +31,7 @@ def test_rungs_match_the_design_table() -> None:
             quality,
             fps,
         )
-        assert rung.crops == CROPS_PER_FRAME == 6
+        assert rung.crops == CROPS_PER_FRAME == CROP_COUNT == 7
 
 
 def test_bitrate_estimate_reproduces_the_design_table() -> None:

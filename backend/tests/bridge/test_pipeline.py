@@ -168,7 +168,7 @@ async def test_phone_receives_an_x4_cloud_event_with_the_echoed_stamp() -> None:
     assert stats.sent >= 1
 
 
-async def test_six_crops_of_the_rung_size_reach_the_cloud() -> None:
+async def test_every_crop_of_the_rung_size_reaches_the_cloud() -> None:
     transport = EchoingFakeCloud()
     pipeline, grab = _pipeline(transport, _config(), clock_provider=LaptopClock, sink=None)
     grab.start()
@@ -184,7 +184,7 @@ async def test_six_crops_of_the_rung_size_reach_the_cloud() -> None:
     assert request.meta.crop_px == CROP_PX
     assert request.meta.rung == RUNG_1.index
     assert request.meta.session_id == "pipeline-test"
-    assert request.meta.yaws_deg == (0.0, 60.0, 120.0, 180.0, -120.0, -60.0)
+    assert request.meta.yaws_deg == (0.0, 60.0, 120.0, 180.0, -120.0, -60.0, 0.0)  # C6 last
 
 
 async def test_frame_age_at_send_stays_under_50ms_with_a_slow_cloud() -> None:

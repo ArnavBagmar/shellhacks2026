@@ -24,7 +24,7 @@ DEFAULT_INFERENCE_URL = "http://127.0.0.1:8000/infer"
 # and not two that happen to agree.
 DEFAULT_REQUEST_TIMEOUT_S = 1.0
 # The local detector's own budget. Larger than the cloud's on purpose: an
-# MPS forward pass on six 640 px crops is tens of milliseconds warm, but a
+# MPS forward pass on seven 640 px crops is tens of milliseconds warm, but a
 # laptop that is thermally throttled or swapping can take far longer -- and
 # an unbounded local call would hold the one-in-flight slot indefinitely,
 # which is the exact failure the fallback exists to prevent.

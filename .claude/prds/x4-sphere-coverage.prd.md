@@ -69,7 +69,7 @@ the remap test and the two live tests, with the latency and range metrics unchan
 
 | # | Milestone | Outcome | Status | Plan |
 |---|---|---|---|---|
-| 1 | Floor visible offline | The step-06 equirect's table contents and a floor object appear in what the detector receives, at every yaw; the remap coverage test is green | in-progress | `.claude/plans/x4-sphere-coverage.plan.md` |
+| 1 | Floor visible offline | The step-06 equirect's table contents and a floor object appear in what the detector receives, at every yaw; the remap coverage test is green | complete | `.claude/plans/x4-sphere-coverage.plan.md` |
 | 2 | Floor hazard warned live | A side or rear floor object at 1 m produces a hazard cue on the phone; latency and range metrics unchanged | pending | — |
 | 3 | Whole sphere seen | Nothing in the equirect is discarded; the wearer's own body is suppressed; scene description sees table tops | pending | — |
 

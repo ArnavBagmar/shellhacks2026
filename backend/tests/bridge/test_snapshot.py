@@ -1,4 +1,4 @@
-"""The live-snapshot helper: a labelled six-crop contact sheet under a size cap."""
+"""The live-snapshot helper: a labelled seven-crop contact sheet under a size cap."""
 
 from __future__ import annotations
 
@@ -34,18 +34,21 @@ def cropset():
     return dewarp_equirect(image, CROP_PX, T_MS)
 
 
-def test_contact_sheet_is_three_by_two_of_the_crops(cropset) -> None:
+def test_contact_sheet_is_four_by_two_with_the_nadir_crop_last(cropset) -> None:
     sheet = build_contact_sheet(cropset)
 
     assert sheet.shape == (CROP_PX * CONTACT_SHEET_ROWS, CROP_PX * CONTACT_SHEET_COLS, 3)
-    assert (CONTACT_SHEET_COLS, CONTACT_SHEET_ROWS) == (3, 2)
+    assert (CONTACT_SHEET_COLS, CONTACT_SHEET_ROWS) == (4, 2)
+    # the eighth cell holds no crop and is black
+    assert int(sheet[CROP_PX:, CROP_PX * 3 :].max()) == 0
 
 
 def test_the_sheet_burns_in_labels_so_the_geometry_is_auditable(cropset) -> None:
+    blank = np.zeros_like(cropset.images[0])
     plain = np.concatenate(
         [
-            np.concatenate(cropset.images[0:3], axis=1),
-            np.concatenate(cropset.images[3:6], axis=1),
+            np.concatenate(cropset.images[0:4], axis=1),
+            np.concatenate((*cropset.images[4:7], blank), axis=1),
         ],
         axis=0,
     )

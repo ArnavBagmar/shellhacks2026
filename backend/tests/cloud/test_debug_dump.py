@@ -37,9 +37,10 @@ def _response() -> InferenceResponse:
     )
 
 
-def test_the_sheet_is_three_by_two_tiles() -> None:
+def test_the_sheet_is_four_by_two_tiles_with_a_black_last_cell() -> None:
     sheet = build_sheet(_images(), _response())
-    assert sheet.shape == (TILE_PX * 2, TILE_PX * 3, 3)
+    assert sheet.shape == (TILE_PX * 2, TILE_PX * 4, 3)
+    assert int(sheet[TILE_PX:, TILE_PX * 3 :].max()) == 0  # no eighth crop
 
 
 def test_the_written_sheet_fits_the_size_budget(tmp_path: Path) -> None:
