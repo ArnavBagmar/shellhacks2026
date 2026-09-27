@@ -36,7 +36,7 @@ import cv2
 
 from cane.bridge.capture.grab_thread import GrabThread
 from cane.scene.frames import EquirectProvider, GrabProvider, StillProvider
-from cane.scene.service import DEFAULT_VLM_TIMEOUT_S, SceneQueryService
+from cane.scene.service import DEFAULT_VLM_TIMEOUT_S, HEAD_WORN_LAYOUT, LEVEL_LAYOUT, SceneQueryService
 from cane.scene.vlm import FakeVLM, GeminiVLM, VisionLanguageModel, VlmUnavailableError
 from cane.scene.voice import API_KEY_ENV as VOICE_KEY_ENV
 from cane.scene.voice import ElevenLabsVoice
@@ -180,9 +180,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         if grab is None:
             return 2
         frames = GrabProvider(grab)
+    debug = None
+    if args.serve:
+        from cane.scene.debug_view import start_debug_view
+
+        still = frames.image if isinstance(frames, StillProvider) else None
+        debug = start_debug_view(grab=grab, still=still)
     service = SceneQueryService(
         vlm, frames, settle_s=0.0 if not args.serve else 0.4, vlm_timeout_s=args.vlm_timeout_s,
-        dump_dir=args.save_views, weather=weather_from_env(),
+        dump_dir=args.save_views, weather=weather_from_env(), debug=debug,
+        # The X4 is worn on the head; one-shot runs keep the level crops.
+        layout=HEAD_WORN_LAYOUT if args.serve else LEVEL_LAYOUT,
     )
     try:
         return run(args, service, vlm)

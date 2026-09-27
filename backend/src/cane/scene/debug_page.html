@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cane Debug View</title>
+<style>
+  :root {
+    --bg: #0d0f12; --panel: #161a1f; --line: #262c34; --text: #e6e9ee; --dim: #8b95a3;
+    --ok: #3ecf6e; --warn: #f2b33d; --bad: #f25555; --accent: #5aa9ff; --pick: #3ecf6e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 17px; margin: 0; }
+  header .dim { color: var(--dim); font-size: 12px; }
+  main { padding: 16px 20px 40px; display: grid; gap: 16px; max-width: 1700px; margin: 0 auto; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .tile h3 { margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
+  .tile .big { font-size: 20px; font-weight: 650; }
+  .tile .small { color: var(--dim); font-size: 12px; margin-top: 2px; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+  section > h2 { font-size: 13px; margin: 0 0 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; }
+  .live img { width: 100%; border-radius: 8px; display: block; background: #000; }
+  .order { display: flex; justify-content: space-between; color: var(--dim); font-size: 11px; margin-top: 4px; }
+  .cols { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(320px, 1fr); gap: 16px; }
+  @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
+  .q-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; margin-bottom: 10px; }
+  .q-head .utt { font-size: 18px; font-weight: 650; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #222831; }
+  .pill.found { background: #173b25; color: var(--ok); } .pill.not_found { background: #3b3417; color: var(--warn); }
+  .pill.unavailable { background: #3b1717; color: var(--bad); } .pill.described { background: #172b3b; color: var(--accent); }
+  .facts { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; font-size: 13px; margin-bottom: 12px; }
+  .facts dt { color: var(--dim); } .facts dd { margin: 0; overflow-wrap: anywhere; }
+  .views { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+  .view { border: 2px solid transparent; border-radius: 9px; overflow: hidden; background: #000; }
+  .view.chosen { border-color: var(--pick); box-shadow: 0 0 0 3px #3ecf6e33; }
+  .view img { width: 100%; display: block; cursor: zoom-in; }
+  .view .cap { font-size: 11px; color: var(--dim); padding: 5px 7px; background: var(--panel); }
+  .view.chosen .cap { color: var(--ok); font-weight: 600; }
+  pre { margin: 0; background: #0b0d10; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+        font: 12px/1.45 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; }
+  details { margin-top: 10px; } summary { cursor: pointer; color: var(--dim); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--dim); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 4px 6px; }
+  td { padding: 6px; border-top: 1px solid var(--line); vertical-align: top; }
+  tr.row { cursor: pointer; } tr.row:hover { background: #1c2128; } tr.row.sel { background: #1d2a3a; }
+  .feed { max-height: 560px; overflow: auto; font-size: 12.5px; }
+  .feed div { padding: 4px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: 62px 70px 1fr; gap: 8px; }
+  .feed .t { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .feed .k { color: var(--dim); text-transform: uppercase; font-size: 10.5px; letter-spacing: .05em; padding-top: 2px; }
+  .feed .k.intent, .feed .k.gate { color: var(--accent); } .feed .k.say { color: var(--ok); }
+  .feed .k.link_alert, .feed .k.distance { color: var(--warn); }
+  .empty { color: var(--dim); font-style: italic; }
+  .follow { margin-left: auto; font-size: 12px; color: var(--dim); display: flex; gap: 6px; align-items: center; }
+  dialog { border: 0; padding: 0; background: transparent; max-width: 96vw; }
+  dialog img { max-width: 96vw; max-height: 92vh; display: block; border-radius: 8px; }
+  dialog::backdrop { background: #000c; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Cane debug view</h1>
+  <span class="dim" id="uptime"></span>
+  <label class="follow"><input type="checkbox" id="follow" checked> follow newest question</label>
+</header>
+<main>
+  <div class="tiles" id="tiles"></div>
+
+  <section class="live">
+    <h2>360 camera, live <span class="dim" id="live-note" style="text-transform:none;letter-spacing:0"></span></h2>
+    <img id="live" alt="The six 60-degree views from the 360 camera">
+    <div class="order"><span>Each view is labelled with where it points from the wearer (L = left, R = right).</span></div>
+  </section>
+
+  <div class="cols">
+    <section>
+      <h2>Question</h2>
+      <div id="question"><p class="empty">No questions yet. Say "Hey Cane, ..." or type one in the phone's debug panel.</p></div>
+    </section>
+    <section>
+      <h2>Phone: heard, decided, said</h2>
+      <div class="feed" id="feed"><p class="empty">Nothing from the phone yet.</p></div>
+    </section>
+  </div>
+
+  <section>
+    <h2>Recent questions</h2>
+    <table>
+      <thead><tr><th>Time</th><th>Question</th><th>Status</th><th>Picked</th><th>Bearing</th><th>Box</th><th>Distance</th><th>Gemini</th></tr></thead>
+      <tbody id="history"></tbody>
+    </table>
+  </section>
+</main>
+<dialog id="zoom"><img id="zoom-img" alt=""></dialog>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let selected = null;
+let lastState = null;
+
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const clock = (ms) => ms ? new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "-";
+const ago = (ms, now) => ms == null ? "never" : `${Math.max(0, Math.round((now - ms) / 1000))} s ago`;
+const num = (v, d = 0) => v == null ? "-" : Number(v).toFixed(d);
+
+function tile(title, big, small, cls = "") {
+  return `<div class="tile"><h3>${title}</h3><div class="big ${cls}">${big}</div><div class="small">${small}</div></div>`;
+}
+
+function renderTiles(s) {
+  const p = s.phone, x = s.x4, g = s.gemini, v = s.voice;
+  const d = p.depth;
+  const depthFresh = d && s.now_ms - d.at_ms < 3000;
+  const depthOk = depthFresh && d.trustworthy === "yes";
+  const liveOk = x.fps > 5 && (x.frame_age_ms ?? 9999) < 1000;
+  const srcNone = x.source === "none";
+  const voiceTotal = Object.values(v.by_source).reduce((a, b) => a + b, 0);
+  $("tiles").innerHTML = [
+    tile("Phone link", p.connected ? "connected" : "no phone", p.link_alert ? `phone says: ${esc(p.link_alert)}` : `last seen ${ago(p.last_seen_ms, s.now_ms)}`, p.connected ? "ok" : "bad"),
+    tile("360 camera", srcNone ? "off" : (x.problem ? "no frames" : (x.fps == null ? "still photo"
+           : ((x.frame_age_ms ?? 0) > 3000 ? `STALLED ${Math.round(x.frame_age_ms / 1000)} s` : `${num(x.fps, 1)} fps`))),
+         srcNone ? "phone camera only (./startcane x4 for the 360)" : (x.problem ? esc(x.problem) : `${esc(x.source)} · ${x.resolution ?? "?"}${x.fps == null ? " · not live" : ` · frame ${num(x.frame_age_ms)} ms old`}`),
+         srcNone ? "" : (x.fps == null ? "" : ((x.frame_age_ms ?? 0) > 3000 ? "bad" : (liveOk ? "ok" : "warn")))),
+    tile("Gemini", g.latency_last_ms != null ? `${(g.latency_last_ms / 1000).toFixed(1)} s` : "-",
+         `${g.questions} asked · median ${g.latency_median_ms != null ? (g.latency_median_ms / 1000).toFixed(1) + " s" : "-"} · max ${g.latency_max_ms != null ? (g.latency_max_ms / 1000).toFixed(1) + " s" : "-"}`),
+    tile("Answers", Object.entries(g.by_status).map(([k, n]) => `${n} ${k.replace("_", " ")}`).join(" · ") || "-",
+         `picked phone ${g.picked_phone} · picked 360 ${g.picked_360} · with box ${g.with_box}`),
+    tile("Front depth", depthFresh ? `${num(d.metres, 2)} m` : "-",
+         depthFresh ? `ahead · coverage ${num(d.coverage * 100)}% · ${esc(d.accuracy)}${depthOk ? "" : " · NOT TRUSTED"}` : "no TrueDepth readings", depthFresh ? (depthOk ? "ok" : "warn") : ""),
+    tile("Voice", voiceTotal ? `${v.by_source.elevenlabs ?? 0}/${voiceTotal} natural` : "-",
+         `median wait ${v.wait_median_ms ?? "-"} ms · phone voice ${v.by_source.phone ?? 0}`),
+    tile("Mic", p.mic_peak != null ? `${Math.round(p.mic_peak * 100)}%` : "-", "peak level (room noise shows here)", p.mic_peak > 0.85 ? "warn" : ""),
+  ].join("");
+  $("uptime").textContent = `laptop up ${Math.floor(s.uptime_s / 60)} min · ${clock(s.now_ms)}`;
+}
+
+function distanceText(q) {
+  const d = q.phone?.distance;
+  if (!d) return q.answer.phone_box ? "(waiting for phone)" : "-";
+  if (d.outcome === "measured") return `${num(d.metres, 2)} m (${num(d.coverage * 100)}% coverage)`;
+  return d.outcome.replace("_", " ") + (d.metres != null ? ` · ${num(d.metres, 2)} m` : "");
+}
+
+function pickedText(q) {
+  if (q.chosen == null) return "-";
+  return q.phone_views.includes(q.chosen) ? "phone" : `360 #${q.chosen}`;
+}
+
+function renderQuestion(q) {
+  if (!q) return;
+  const a = q.answer;
+  const views = q.labels.map((label, i) => {
+    const isPhone = q.phone_views.includes(i);
+    const chosen = i === q.chosen;
+    const short = isPhone ? "phone camera" : label.replace(/^Image \d+: 360 camera on the wearer's shoulder, a 60-degree view centred /, "360: ").replace(/\.$/, "");
+    return `<div class="view ${chosen ? "chosen" : ""}"><img src="/query/${q.query_id}/${i}.jpg" data-full="/query/${q.query_id}/${i}.jpg" alt="${esc(label)}">
+      <div class="cap">${i} · ${esc(short)}${chosen ? " · GEMINI PICKED THIS" : ""}</div></div>`;
+  }).join("");
+  const said = q.phone?.said?.text;
+  $("question").innerHTML = `
+    <div class="q-head"><span class="utt">"${esc(q.utterance)}"</span>
+      <span class="pill ${a.status}">${a.status.replace("_", " ")}</span>
+      <span class="dim">${esc(q.kind)}${q.target ? " · target: " + esc(q.target) : ""} · ${clock(q.t_ms)} · ${q.query_id}</span></div>
+    <dl class="facts">
+      <dt>Phone said</dt><dd>${said ? esc(said) : '<span class="empty">(not yet / not reported)</span>'}</dd>
+      <dt>Subject</dt><dd>${esc(a.subject) || "-"}</dd>
+      <dt>Detail</dt><dd>${esc(a.detail) || "-"}</dd>
+      <dt>Bearing</dt><dd>${a.bearing_deg != null ? `${a.bearing_deg}° (${a.bearing_deg < 0 ? "left" : a.bearing_deg > 0 ? "right" : "ahead"})` : "-"}</dd>
+      <dt>Picked image</dt><dd>${pickedText(q)}</dd>
+      <dt>Phone box</dt><dd>${a.phone_box ? `x ${a.phone_box.x_min}–${a.phone_box.x_max}, y ${a.phone_box.y_min}–${a.phone_box.y_max}` : "-"}</dd>
+      <dt>Distance</dt><dd>${distanceText(q)}</dd>
+      <dt>Gemini time</dt><dd>${a.latency_ms} ms${q.error ? ` · <span class="bad">${esc(q.error)}</span>` : ""}</dd>
+      ${q.facts ? `<dt>Looked up</dt><dd>${esc(q.facts)}</dd>` : ""}
+    </dl>
+    <div class="views">${views || '<p class="empty">No images were sent.</p>'}</div>
+    <details><summary>Raw Gemini reply</summary><pre>${esc(JSON.stringify(q.reply, null, 2))}</pre></details>
+    <details><summary>Answer sent to the phone</summary><pre>${esc(JSON.stringify(a, null, 2))}</pre></details>`;
+}
+
+function renderHistory(s) {
+  const rows = [...s.queries].reverse().map((q) => `
+    <tr class="row ${q.query_id === selected ? "sel" : ""}" data-id="${q.query_id}">
+      <td>${clock(q.t_ms)}</td><td>${esc(q.utterance)}</td>
+      <td><span class="pill ${q.answer.status}">${q.answer.status.replace("_", " ")}</span></td>
+      <td>${pickedText(q)}</td><td>${q.answer.bearing_deg ?? "-"}</td>
+      <td>${q.answer.phone_box ? "yes" : "-"}</td><td>${distanceText(q)}</td>
+      <td>${(q.answer.latency_ms / 1000).toFixed(1)} s</td></tr>`).join("");
+  $("history").innerHTML = rows || '<tr><td colspan="8" class="empty">None yet.</td></tr>';
+}
+
+function feedText(e) {
+  const d = e.data;
+  switch (e.kind) {
+    case "transcript": return esc(d.text);
+    case "intent": return `<b>${esc(d.intent)}</b> ← "${esc(d.command)}"`;
+    case "gate": return `wake word: ${esc(d.result)}`;
+    case "say": return esc(d.text);
+    case "answer": return `answer ${esc(d.status)} ${esc(d.subject)} bearing ${esc(d.bearing)} (${d.latency_ms} ms)`;
+    case "distance": return `distance: ${esc(d.outcome)}${d.metres != null ? " " + num(d.metres, 2) + " m" : ""}`;
+    case "link": return d.connected ? "link up" : "link down";
+    case "link_alert": return `link alert: ${esc(d.problem)}`;
+    default: return esc(JSON.stringify(d));
+  }
+}
+
+function renderFeed(s) {
+  if (!s.feed.length) return;
+  const box = $("feed");
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
+  box.innerHTML = s.feed.map((e) => `<div><span class="t">${clock(e.t_ms)}</span><span class="k ${e.kind}">${e.kind}</span><span>${feedText(e)}</span></div>`).join("");
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+async function poll() {
+  if (location.protocol === "file:") {
+    $("tiles").innerHTML = tile("Wrong address", "open http://localhost:8780",
+      "this is the page file itself; the live page is served by ./startcane", "bad");
+    return;
+  }
+  let s;
+  try {
+    s = await (await fetch("/state.json")).json();
+  } catch (e) {
+    $("tiles").innerHTML = tile("Laptop", "not reachable", "is ./startcane still running? (the page retries every second)", "bad");
+    return;
+  }
+  try {
+    lastState = s;
+    renderTiles(s);
+    renderFeed(s);
+    const newest = s.queries[s.queries.length - 1];
+    if ($("follow").checked && newest) selected = newest.query_id;
+    const q = s.queries.find((x) => x.query_id === selected);
+    const key = q ? JSON.stringify([q.query_id, q.phone, q.answer]) : "";
+    if (key !== poll.lastKey) { renderQuestion(q); poll.lastKey = key; }
+    renderHistory(s);
+    const off = s.x4.source === "none";
+    $("live").closest("section").style.display = off ? "none" : "";
+    // One long-lived video stream; reopened only if it drops (laptop restart).
+    if (!off && !$("live").dataset.streaming) {
+      $("live").dataset.streaming = "1";
+      $("live").src = `/live.mjpg?t=${Date.now()}`;
+    }
+    $("live-note").textContent = off ? "" : (s.x4.problem ? `· ${s.x4.problem}` : `· ${s.x4.source}`);
+  } catch (e) {
+    // A drawing bug must not look like a dead laptop.
+    console.error(e);
+    $("uptime").textContent = `page error: ${e.message}`;
+  }
+}
+
+$("history").addEventListener("click", (e) => {
+  const row = e.target.closest("tr.row");
+  if (!row) return;
+  selected = row.dataset.id;
+  $("follow").checked = false;
+  poll.lastKey = null;
+  poll();
+});
+$("question").addEventListener("click", (e) => {
+  const img = e.target.closest("img[data-full]");
+  if (!img) return;
+  $("zoom-img").src = img.dataset.full;
+  $("zoom").showModal();
+});
+$("zoom").addEventListener("click", () => $("zoom").close());
+$("live").addEventListener("error", () => {
+  setTimeout(() => { delete $("live").dataset.streaming; }, 2000);
+});
+
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>

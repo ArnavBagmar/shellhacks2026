@@ -67,6 +67,7 @@ public actor QueryCoordinator {
     private let userGain: @Sendable () -> Float
     private let timeoutMs: Int
     private let locale: Locale
+    private var phrases: PromptPicker
     private let onDistance: @Sendable (DistanceOutcome) -> Void
     private let logger = Logger(subsystem: "cane", category: "assist")
 
@@ -88,8 +89,10 @@ public actor QueryCoordinator {
         userGain: @escaping @Sendable () -> Float = { 1.0 },
         timeoutMs: Int = QueryCoordinator.answerTimeoutMs,
         locale: Locale = .current,
-        onDistance: @escaping @Sendable (DistanceOutcome) -> Void = { _ in }
+        onDistance: @escaping @Sendable (DistanceOutcome) -> Void = { _ in },
+        choosePhrase: @escaping @Sendable (Int) -> Int = { Int.random(in: 0..<$0) }
     ) {
+        self.phrases = PromptPicker(choose: choosePhrase)
         self.link = link
         self.speaker = speaker
         self.snapshot = snapshot
@@ -188,11 +191,13 @@ public actor QueryCoordinator {
         }
         guard state == .looking(queryId: id) else { return }
         startTimeout(for: id)
-        let prompt = switch kind {
-        case .describeFront: AnswerPhrasing.lookingAhead
-        case .ask: AnswerPhrasing.checking
-        case .find, .describeAround: AnswerPhrasing.holdStill
+        let moment: PromptMoment = switch kind {
+        case .describeFront: .lookAhead
+        case .ask: .check
+        case .find where distanceAsked: .measure
+        case .find, .describeAround: .lookAround
         }
+        let prompt = phrases.next(moment)
         _ = await speaker.say(SpokenPhrase(text: prompt), on: .prompt, haptic: nil, pan: 0, maxWaitMs: Self.promptMaxWaitMs)
     }
 
@@ -211,7 +216,7 @@ public actor QueryCoordinator {
 
     private func stillLooking(_ id: String) async {
         guard state == .looking(queryId: id), timeoutMs > Self.stillLookingMs else { return }
-        _ = await speaker.say(SpokenPhrase(text: Self.stillLooking), on: .prompt, haptic: nil, pan: 0, maxWaitMs: 0)
+        _ = await speaker.say(SpokenPhrase(text: phrases.next(.stillLooking)), on: .prompt, haptic: nil, pan: 0, maxWaitMs: 0)
     }
 
     private func timedOut(_ id: String) async {

@@ -64,5 +64,9 @@ class StillProvider:
             raise FileNotFoundError(f"could not read an image from {path}")
         return cls(image)
 
+    @property
+    def image(self) -> np.ndarray:
+        return self._image
+
     async def fresh_equirect(self) -> np.ndarray | None:
         return self._image

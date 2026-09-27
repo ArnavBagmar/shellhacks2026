@@ -9,6 +9,7 @@ import os
 /// gate's stability timer ticks on another.
 actor VoiceRouter {
     private var gate = WakeWordGate()
+    private var phrases = PromptPicker()
     private let arbiter: OutputArbiter
     private let coordinator: QueryCoordinator
     private let navigate: @Sendable (String) async -> Void
@@ -52,7 +53,7 @@ actor VoiceRouter {
         case .wakeOnly:
             diagnostics.record("gate", ["result": .text("wake-only")])
             onHeard("Hey Cane")
-            say(AnswerPhrasing.listening)
+            say(phrases.next(.listening))
         case .command(let text):
             onHeard(text)
             logger.info("heard: \(text, privacy: .public)")
@@ -68,7 +69,7 @@ actor VoiceRouter {
                     // Show exactly what was heard (the screen is the only
                     // way to debug this), and let the wearer just repeat it.
                     onHeard("\(text)  (not understood)")
-                    await self.rearm()
+                    self.rearm()
                 }
             }
         }

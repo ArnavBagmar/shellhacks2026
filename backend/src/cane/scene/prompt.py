@@ -40,7 +40,12 @@ def side_words(yaw_deg: float) -> str:
     return f"{abs(yaw_deg):g} degrees to the {side}"
 
 
-def crop_label(index: int, yaw_deg: float) -> str:
+def crop_label(index: int, yaw_deg: float, *, tall: bool = False) -> str:
+    if tall:
+        return (
+            f"Image {index}: 360 camera on the wearer's head, a 60-degree-wide view "
+            f"centred {side_words(yaw_deg)}, tall: from above eye level down to the floor."
+        )
     return (
         f"Image {index}: 360 camera on the wearer's shoulder, a 60-degree view "
         f"centred {side_words(yaw_deg)}."
