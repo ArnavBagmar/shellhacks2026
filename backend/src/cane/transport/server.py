@@ -22,6 +22,7 @@ from cane.contracts.awareness_event import AwarenessEvent
 from cane.transport.clock_sync import PING_INTERVAL_S, NtpSample, OffsetEstimator, PhoneClock
 from cane.transport.log_throttle import LogThrottle
 from cane.transport.messages import (
+    Ground,
     EventMessage,
     MalformedMessageError,
     PhoneDiagnostic,
@@ -190,6 +191,18 @@ class EventLinkServer:
         if connection is None:
             return False
         return await self._send_on(connection, encode(steer), "send_steer")
+
+    async def send_ground(self, ground: Ground) -> bool:
+        """Send one ``ground`` frame to the connected phone (step 29).
+
+        The same route and the same never-raises contract as
+        :meth:`send_steer`. Rarer than steering by design -- a frame only
+        exists when there is actually a hole -- so it is not throttled.
+        """
+        connection = self._connection
+        if connection is None:
+            return False
+        return await self._send_on(connection, encode(ground), "send_ground")
 
     async def _send_on(self, connection: ServerConnection, text: str, what: str) -> bool:
         try:

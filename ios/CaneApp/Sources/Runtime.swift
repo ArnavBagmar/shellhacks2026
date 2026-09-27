@@ -43,6 +43,9 @@ final class Runtime {
     static let gateTickMs = 100
 
     let arbiter: OutputArbiter
+    /// Held rather than only captured in `init`: step 29's ground loop runs
+    /// in `startLoops` and needs the live haptic gain too.
+    let settings: SettingsBox
     let client: EventLinkClient
     let camera: FrontCamera
     private let laptopVoice: LaptopVoice
@@ -62,6 +65,7 @@ final class Runtime {
     static let now: @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1_000) }
 
     init(url: URL, settings: SettingsBox, callbacks ui: Callbacks) {
+        self.settings = settings
         laptopURL = url
         let client = EventLinkClient(url: url)
         self.client = client
@@ -237,7 +241,7 @@ final class Runtime {
     private func startLoops() {
         let client = client, feedback = feedback, coordinator = coordinator, voice = voice, callbacks = callbacks
         let diagnostics = diagnostics, laptopVoice = laptopVoice
-        let network = network, arbiter = arbiter
+        let network = network, arbiter = arbiter, settings = self.settings
         let host = laptopURL.host ?? "", address = "\(laptopURL.host ?? "?"):\(laptopURL.port ?? 0)"
         tasks.append(Task {
             for await clip in client.voices {
@@ -254,6 +258,37 @@ final class Runtime {
         tasks.append(Task {
             for await command in client.steerCommands {
                 await feedback.ingest(command, now: Self.now())
+            }
+        })
+        // Step 29: ground discontinuities. Gated here rather than inside the
+        // feedback manager because a `ground` cue has no `track_id` to key a
+        // refractory on and no urgency ladder that could score it -- the ladder
+        // needs metric range or a closing rate, and a hole has neither. That is
+        // the same reason it arrives on its own frame instead of as an event.
+        tasks.append(Task {
+            var gate = GroundGate.State()
+            for await cue in client.groundCues {
+                let now = Self.now()
+                let (decision, next) = GroundGate.decide(cue, state: gate, now: now)
+                gate = next
+                guard decision == .announce else { continue }
+                let route = AudioSessionConfig.panRoute()
+                let plan = GroundPhrase.plan(
+                    for: cue,
+                    hapticsAvailable: arbiter.haptics.isAvailable,
+                    userGain: settings.current.hapticGain,
+                    route: route.route,
+                    channels: route.channels
+                )
+                diagnostics.record("ground", [
+                    "bearing": .number(cue.bearingDeg),
+                    "span_deg": .number(cue.spanDeg),
+                    "drop_ratio": .number(cue.dropRatio),
+                    "confidence": .number(cue.confidence),
+                ])
+                await arbiter.presentHazard(
+                    haptic: plan.haptic, phrase: plan.phrase, pan: plan.pan
+                )
             }
         })
         tasks.append(Task {

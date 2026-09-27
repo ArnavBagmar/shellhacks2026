@@ -292,6 +292,58 @@ class Steer(BaseModel):
     proximity_anchored: bool
     source: SteerSource
 
+
+GROUND_TYPE = "ground"
+#: A hole does not move, but the wearer does: 1 s of walking is ~1.4 m, which
+#: is most of the distance at which a ground cue is still actionable. Longer
+#: than `steer` (400 ms, because a car ages fast) and shorter than a static
+#: obstacle's, because the thing that expires here is the wearer's position.
+GROUND_TTL_MS = 1000
+GroundSource = Literal["x4_cloud"]
+
+
+class Ground(BaseModel):
+    """``ground`` frame, laptop -> phone (step 29): a descending discontinuity
+    in the floor ahead -- a pothole, a missing slab, the lip of a kerb.
+
+    `camera-sync-design.md` Sec 2.3 gave drop-off detection up because YOLO
+    cannot box a hole. It is back not as an object but as a deviation from the
+    ground plane step 27 already fits, which is exactly the door Sec 2.3 left
+    open.
+
+    **`drop_ratio` is a ratio and never a depth.** Depth Anything V2 is
+    affine-invariant in disparity, measured, so no part of this system can know
+    a hole is 15 cm deep. 2.4 means the floor there reads 2.4x farther than a
+    flat floor would at that row. The phone says "step down" and never a number.
+
+    There is no "all clear" frame, for the same reason `steer` has no neutral:
+    silence is what a clear floor sounds like, and a frame saying so would be a
+    claim to have looked that the local fallback cannot back up.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    t_capture_ms: Annotated[int, Field(ge=T_CAPTURE_MS_MIN, le=T_CAPTURE_MS_MAX)]
+    ttl_ms: Annotated[int, Field(ge=TTL_MS_MIN, le=TTL_MS_MAX)]
+    bearing_deg: Annotated[
+        float,
+        BeforeValidator(_wire_number),
+        Field(gt=BEARING_MIN_EXCLUSIVE, le=BEARING_MAX, allow_inf_nan=False),
+    ]
+    #: How wide the discontinuity is, in degrees of the forward arc. One column
+    #: is a pothole; several is a trench or the edge of the pavement.
+    span_deg: Annotated[
+        float, BeforeValidator(_wire_number), Field(gt=0.0, le=360.0, allow_inf_nan=False)
+    ]
+    drop_ratio: Annotated[
+        float, BeforeValidator(_wire_number), Field(gt=1.0, allow_inf_nan=False)
+    ]
+    confidence: Annotated[
+        float, BeforeValidator(_wire_number), Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    ]
+    source: GroundSource
+
+
 SPEAK_TEXT_MAX_CHARS = 400
 VOICE_B64_MAX_CHARS = 2_800_000
 VoiceStatus = Literal["ok", "unavailable"]
@@ -363,6 +415,7 @@ InboundMessage = (
     | SceneAnswer
     | PhoneDiagnostic
     | Steer
+    | Ground
     | SpeakRequest
     | VoiceClip
     | Unknown
@@ -392,6 +445,8 @@ def encode(msg: OutboundMessage) -> str:
             del payload["phone_box"]
     elif isinstance(msg, Steer):
         payload = {"type": STEER_TYPE, **msg.model_dump()}
+    elif isinstance(msg, Ground):
+        payload = {"type": GROUND_TYPE, **msg.model_dump()}
     elif isinstance(msg, VoiceClip):
         payload = {"type": VOICE_TYPE, **msg.model_dump()}
     else:

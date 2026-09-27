@@ -194,6 +194,9 @@ def test_the_schemas_frame_count_matches_its_oneof() -> None:
     words = {
         1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
         6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten",
+        # Step 29 added `ground`, the third shape to be added and the second
+        # time this guard has earned its keep.
+        11: "eleven", 12: "twelve",
     }
 
     assert f"{words[len(schema['oneOf'])]} WebSocket frame shapes" in schema["description"]

@@ -31,6 +31,7 @@ from cane.bridge.config import BridgeConfig
 from cane.bridge.deadline import FRAME_DEADLINE_MS, past_deadline
 from cane.bridge.dewarp import CROP_YAWS_DEG, CropSet, encode_cropset, dewarp_equirect
 from cane.bridge.events import events_from_response
+from cane.bridge.ground_frame import ground_from_response
 from cane.bridge.health import HealthMonitor
 from cane.bridge.steer_frame import steer_from_response
 from cane.transport.log_throttle import LogThrottle
@@ -47,7 +48,7 @@ from cane.cloud.api_models import (
 )
 from cane.contracts.awareness_event import AwarenessEvent, Source
 from cane.transport.clock_sync import ClockNotSyncedError
-from cane.transport.messages import Steer
+from cane.transport.messages import Ground, Steer
 from cane.transport.wall_clock import now_ms
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,15 @@ class SteerSink(Protocol):
     async def send_steer(self, steer: Steer) -> bool: ...
 
 
+class GroundSink(Protocol):
+    """Step 29's third stream. A separate protocol for the same reason
+    :class:`SteerSink` is one: a pre-step-29 caller's sink has no
+    ``send_ground``, and the detection path must keep working against it.
+    """
+
+    async def send_ground(self, ground: Ground) -> bool: ...
+
+
 @dataclass(frozen=True)
 class LaptopClock:
     """``--allow-unsynced``: stamp with the laptop clock, offset 0.
@@ -150,6 +160,7 @@ class BridgePipeline:
         clock_provider: Callable[[], CaptureClock],
         event_sink: EventSink | None = None,
         steer_sink: SteerSink | None = None,
+        ground_sink: GroundSink | None = None,
         crop_px: int | None = None,
         stats_hook: Callable[[PipelineStats], None] | None = None,
         monitor: HealthMonitor | None = None,
@@ -163,6 +174,9 @@ class BridgePipeline:
         self._clock_provider = clock_provider
         self._event_sink = event_sink
         self._steer_sink = steer_sink
+        self._ground_sink = ground_sink
+        self._ground_sent = 0
+        self._ground_undelivered = 0
         self._monitor = monitor
         self._planner = RungPlanner(config, monitor, crop_px)
         # Which backend answered the response now being handled. Constant
@@ -411,6 +425,25 @@ class BridgePipeline:
         # After the events, always: a hazard warning is the older promise and
         # steering is the advisory layer on top of it.
         await self._send_steer(response, source)
+        await self._send_ground(response, source)
+
+    async def _send_ground(self, response: InferenceResponse, source: Source) -> None:
+        """One ``ground`` frame per answered tick that has a hole in it.
+
+        ``ground_from_response`` returns ``None`` for every case where there is
+        nothing honest to say -- local fallback, no depth head, a clear floor, a
+        hazard under the confidence floor, a hazard behind the wearer -- so this
+        method never has to decide what a missing measurement looks like.
+        """
+        ground = ground_from_response(
+            response, CROP_YAWS_DEG, self._config.delta_deg, source
+        )
+        if ground is None:
+            return
+        if self._ground_sink is None or not await self._ground_sink.send_ground(ground):
+            self._ground_undelivered += 1
+            return
+        self._ground_sent += 1
 
     async def _send_steer(self, response: InferenceResponse, source: Source) -> None:
         """One ``steer`` frame per answered tick -- or none at all.

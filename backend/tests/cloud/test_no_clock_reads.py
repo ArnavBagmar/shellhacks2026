@@ -37,6 +37,9 @@ REQUEST_PATH_MODULES = (
     "depth/factory",
     "depth/fake",
     "depth/geometry",
+    # Step 29: the ground-hazard detector rides the same fit and the same
+    # rule -- it is pure geometry over one frame and reads no clock.
+    "depth/ground_hazard",
     "depth/head",
     "depth/preprocess",
     "depth/profile",

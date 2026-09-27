@@ -315,6 +315,9 @@ async def run_bridge(
             # and step 23's `steer` frames ride the socket the events already
             # hold open.
             steer_sink=build_steer_sink(server, clear_ways),
+            # The same object a third time: step 29's ground frames ride the
+            # socket the events already hold open.
+            ground_sink=server,
             monitor=monitor, source_provider=lambda: uplink.last_source,
             local_detector=local.detector_name,
             frames_ignored=lambda: server.frames_ignored,
