@@ -66,7 +66,7 @@ from cane.bridge.transport_http import HttpInferenceTransport
 from cane.bridge.uplink import MonitoredUplink
 from cane.scene.frames import GrabProvider
 from cane.scene.gap import LatestClearWay, SteerTap
-from cane.scene.service import SceneQueryService
+from cane.scene.service import HEAD_WORN_LAYOUT, SceneQueryService
 from cane.scene.vlm import GeminiVLM, VlmUnavailableError
 from cane.scene.voice import ElevenLabsVoice
 from cane.scene.weather import weather_from_env
@@ -272,6 +272,8 @@ async def run_bridge(
     # None without --scene, which keeps the default run byte-identical.
     clear_ways: LatestClearWay | None = None
     if scene_vlm is not None:
+        from cane.scene.debug_view import start_debug_view
+
         clear_ways = LatestClearWay()
         scene_hook = SceneHook(
             SceneQueryService(
@@ -280,6 +282,10 @@ async def run_bridge(
                 clear_ways=clear_ways,
                 delta_deg=config.delta_deg,
                 weather=weather_from_env(),
+                # Local page at http://localhost:8780 (CANE_DEBUG_PORT=0: off).
+                debug=start_debug_view(grab=grab),
+                # Gemini's views only; the detector keeps its level crops.
+                layout=HEAD_WORN_LAYOUT,
             )
         )
     # The natural voice rides with --scene: it speaks the answers.

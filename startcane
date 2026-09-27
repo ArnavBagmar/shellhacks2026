@@ -14,7 +14,8 @@
 #   ./startcane test       run both test suites
 #   ./startcane logs       follow today's laptop log and phone log
 #
-# Every mode saves what Gemini saw per question under backend/logs/views/.
+# Every mode saves what Gemini saw per question under backend/logs/views/, and
+# serves a live debug page at http://localhost:8780 (CANE_DEBUG_PORT=0: off).
 # Extra arguments after `front`/`still`/`x4` go straight to `python -m cane.scene`.
 # A second phone needs its own port: CANE_PORT=8766 ./startcane
 # Backpack, lid closed: run `sudo pmset -a disablesleep 1` once first (undo: 0).
@@ -95,6 +96,7 @@ serve() {
   check_sleep
   say "phone app settings -> Address: $(laptop_ip)   Port: $PORT"
   say "logs -> backend/logs/laptop-$(date +%Y%m%d).log and backend/logs/phone-$(date +%Y%m%d).jsonl"
+  say "debug view -> http://localhost:${CANE_DEBUG_PORT:-8780}  (cameras, what Gemini picked, stats)"
   # caffeinate -i: no idle sleep while the serve runs (lid open or closed).
   PYTHONPATH=src exec caffeinate -i uv run --env-file .env python -m cane.scene --serve --ws-port "$PORT" "$@"
 }
@@ -176,6 +178,7 @@ full() {
   say "phone app settings -> Address: $(laptop_ip)   Port: $PORT"
   say "source $source, rung $rung, delta_deg $delta   (CANE_SOURCE / CANE_RUNG / CANE_DELTA_DEG)"
   say "logs -> backend/logs/{laptop,inference}-$(date +%Y%m%d).log"
+  say "debug view -> http://localhost:${CANE_DEBUG_PORT:-8780}  (cameras, what Gemini picked, stats)"
   local status=0
   PYTHONPATH=src caffeinate -i uv run --env-file .env \
     --extra yolo --extra depth --extra vision --extra mac --extra scene \

@@ -25,13 +25,19 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Sequence, get_args
 
+import cv2
+import numpy as np
+
 from cane.bridge.dewarp import CROP_FOV_DEG, dewarp_equirect, encode_jpeg
 from cane.bridge.events import normalize_bearing_deg
+from cane.scene.debug_view import DebugHub
+from cane.scene.tall_views import YAWS_DEG as TALL_YAWS_DEG
+from cane.scene.tall_views import HEAD_PITCH_DEG, HEAD_VFOV_DEG, bearing_offset, tall_views, x_for_offset
 from cane.scene.frames import EquirectProvider
 from cane.scene.gap import ClearWay, ClearWayProvider
 from cane.scene.gap_speech import clear_way_fragment, clear_way_sentence
@@ -68,9 +74,47 @@ _CONFIDENCES: tuple[str, ...] = get_args(Confidence)
 
 
 @dataclass(frozen=True)
+class ViewLayout:
+    """How the 360 frame is cut for the model, and where the phone photo goes."""
+
+    #: Negative tilts the views down. 0 with ``vfov_deg`` 60 is the bridge's
+    #: own square crops.
+    pitch_deg: float = 0.0
+    vfov_deg: float = CROP_FOV_DEG
+    #: Live 2026-09-26 the model found a Rubik's cube in the phone photo (sent
+    #: last, image 6) but answered image_index 0; the box it drew was the
+    #: cube's place in the photo. The phone photo is now image 0.
+    phone_first: bool = False
+    #: Print "IMAGE n" on each image. Replaying a live question (2026-09-26,
+    #: a pink Monster can in image 6): unstamped, Gemini answered image 5 in
+    #: 4 of 4 runs with the box drawn where the can is in image 6; stamped,
+    #: image 6 in 4 of 4. It reads the number off the picture it found the
+    #: thing in instead of counting images.
+    number_stamps: bool = False
+
+    @property
+    def level(self) -> bool:
+        return self.pitch_deg == 0.0 and self.vfov_deg == CROP_FOV_DEG
+
+
+#: The bridge's crops, phone photo last (what the tests pin down).
+LEVEL_LAYOUT = ViewLayout()
+#: The X4 worn on the head: tables and the floor ahead are 30-70 degrees
+#: below eye level, out of a level 60-degree crop.
+HEAD_WORN_LAYOUT = ViewLayout(
+    pitch_deg=HEAD_PITCH_DEG, vfov_deg=HEAD_VFOV_DEG, phone_first=True, number_stamps=True
+)
+STAMP_NOTE = (
+    " Each image has its number printed in its top-left corner (IMAGE n): image_index must be "
+    "the number printed on the image the thing is in."
+)
+
+
+@dataclass(frozen=True)
 class View:
     """One image sent to the model and how to turn a position in it into a
-    torso-relative bearing: ``centre_deg + (x - 0.5) * fov_deg``.
+    torso-relative bearing: ``centre_deg + (x - 0.5) * fov_deg`` for a level
+    view, exact pinhole geometry for a tilted one (``tall_views``).
     """
 
     image: LabeledImage
@@ -78,9 +122,21 @@ class View:
     fov_deg: float
     #: The phone photo: the only image with depth behind it.
     is_phone: bool = False
+    pitch_deg: float = 0.0
+    vfov_deg: float | None = None
 
-    def bearing_at(self, x_center: float) -> float:
+    @property
+    def tilted(self) -> bool:
+        return self.vfov_deg is not None and (self.pitch_deg != 0.0 or self.vfov_deg != self.fov_deg)
+
+    def bearing_at(self, x_center: float, y_center: float = 0.5) -> float:
         x = min(max(x_center, 0.0), 1.0)
+        if self.tilted:
+            offset = bearing_offset(
+                x, min(max(y_center, 0.0), 1.0),
+                hfov_deg=self.fov_deg, vfov_deg=self.vfov_deg or self.fov_deg, pitch_deg=self.pitch_deg,
+            )
+            return round(normalize_bearing_deg(self.centre_deg + offset), 1)
         # A tenth of a degree is far finer than a VLM's x estimate; rounding
         # just keeps the wire and the logs readable.
         return round(normalize_bearing_deg(self.centre_deg + (x - 0.5) * self.fov_deg), 1)
@@ -96,7 +152,13 @@ class View:
         of -170 is 10 degrees inside a view centred on 180).
         """
         offset = normalize_bearing_deg(bearing_deg - self.centre_deg)
-        x = 0.5 + offset / self.fov_deg
+        if self.tilted:
+            tilted_x = x_for_offset(offset, hfov_deg=self.fov_deg, pitch_deg=self.pitch_deg)
+            if tilted_x is None:
+                return None
+            x = tilted_x
+        else:
+            x = 0.5 + offset / self.fov_deg
         if -X_EDGE_TOLERANCE <= x <= 1.0 + X_EDGE_TOLERANCE:
             return min(1.0, max(0.0, x))
         return None
@@ -142,8 +204,12 @@ class SceneQueryService:
         location: str | None = None,
         now: Callable[[], datetime] = datetime.now,
         weather: WeatherSource | None = None,
+        debug: DebugHub | None = None,
+        layout: ViewLayout = LEVEL_LAYOUT,
     ) -> None:
+        self._layout = layout
         self._weather = weather
+        self._debug = debug
         self._dump_dir = dump_dir
         self._location = location if location is not None else (os.environ.get(LOCATION_ENV, "").strip() or None)
         self._now = now
@@ -192,7 +258,7 @@ class SceneQueryService:
                 facts_task.cancel()
         if not views:
             logger.warning("query %s: no X4 frame and no phone photo", query.query_id)
-            return self._unavailable(query, started)
+            return await self._debugged(query, views, None, self._unavailable(query, started), "no images")
         # Read once: the fact in the prompt and the fact the wearer is told
         # must be the same tick, or the two halves of this step could disagree
         # across a 1-3 s model call.
@@ -209,15 +275,16 @@ class SceneQueryService:
             )
         except TimeoutError:
             logger.warning("query %s: %s timed out after %.1fs", query.query_id, self._vlm.name, self._vlm_timeout_s)
-            return self._unavailable(query, started)
+            return await self._debugged(query, views, None, self._unavailable(query, started), "Gemini timed out")
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - a broken VLM is "unavailable", not a crash
             logger.warning("query %s: %s failed: %s", query.query_id, self._vlm.name, exc)
-            return self._unavailable(query, started)
+            return await self._debugged(query, views, None, self._unavailable(query, started), str(exc)[:200])
         answer = self._to_answer(query, reply, views, started, way)
         if self._dump_dir is not None:
             await asyncio.to_thread(self._dump, query, views, reply, answer, prompt)
+        await self._debugged(query, views, reply, answer, None, facts)
         index = reply.image_index
         where = "phone" if index is not None and 0 <= index < len(views) and views[index].is_phone else index
         logger.info(
@@ -227,12 +294,22 @@ class SceneQueryService:
         )
         return answer
 
+    async def _debugged(
+        self, query: SceneQuery, views: list[View], reply: VlmReply | None, answer: SceneAnswer,
+        error: str | None, facts: str | None = None,
+    ) -> SceneAnswer:
+        """Hand the question to the debug page (off the loop), then pass the answer on."""
+        if self._debug is not None:
+            await asyncio.to_thread(self._debug.record_query, query, views, reply, answer, error=error, facts=facts)
+        return answer
+
     def _prompt(
         self, query: SceneQuery, facts: str | None = None, gap: GapHint | None = None
     ) -> str:
-        return build_prompt(
+        prompt = build_prompt(
             query, gap, now=self._now(), location=self._location, facts=facts
         )
+        return prompt + STAMP_NOTE if self._layout.number_stamps else prompt
 
     # ------------------------------------------------------------------ views
 
@@ -245,27 +322,48 @@ class SceneQueryService:
                 views.extend(await asyncio.to_thread(self._crop_views, equirect, query))
             except ValueError as exc:
                 logger.warning("query %s: X4 frame unusable: %s", query.query_id, exc)
-        phone = self._phone_view(query, index=len(views))
-        if phone is not None:
-            views.append(phone)
+        if self._layout.phone_first:
+            phone = self._phone_view(query, index=0)
+            if phone is not None:
+                views = [phone, *(self._relabel(v, i + 1) for i, v in enumerate(views))]
+        else:
+            phone = self._phone_view(query, index=len(views))
+            if phone is not None:
+                views.append(phone)
+        if self._layout.number_stamps:
+            views = await asyncio.to_thread(lambda: [_stamped(v, i) for i, v in enumerate(views)])
         return views
 
+    def _relabel(self, view: View, index: int) -> View:
+        """The same crop, numbered ``index`` (the phone photo went first)."""
+        label = crop_label(index, view.centre_deg - self._delta_deg, tall=view.tilted)
+        return replace(view, image=LabeledImage(label, view.image.jpeg))
+
     def _crop_views(self, equirect: object, query: SceneQuery) -> list[View]:
-        cropset = dewarp_equirect(equirect, self._crop_px, t_arrival_laptop_ms=0)  # type: ignore[arg-type]
-        indices: Sequence[int] = range(len(cropset.images))
+        layout = self._layout
+        if layout.level:
+            cropset = dewarp_equirect(equirect, self._crop_px, t_arrival_laptop_ms=0)  # type: ignore[arg-type]
+            images, yaws = cropset.images, cropset.yaws_deg
+        else:
+            images = tuple(tall_views(equirect, self._crop_px, vfov_deg=layout.vfov_deg,  # type: ignore[arg-type]
+                                      pitch_deg=layout.pitch_deg))
+            yaws = TALL_YAWS_DEG
+        indices: Sequence[int] = range(len(images))
         if query.kind == "describe_front" and query.phone_frame is not None:
             indices = ()
         elif query.kind == "describe_front":
             indices = FRONT_CROP_INDICES
         views = []
         for position, crop_index in enumerate(indices):
-            yaw = cropset.yaws_deg[crop_index]
-            jpeg = encode_jpeg(cropset.images[crop_index], self._jpeg_quality)
+            yaw = yaws[crop_index]
+            jpeg = encode_jpeg(images[crop_index], self._jpeg_quality)
             views.append(
                 View(
-                    image=LabeledImage(crop_label(position, yaw), jpeg),
+                    image=LabeledImage(crop_label(position, yaw, tall=not layout.level), jpeg),
                     centre_deg=yaw + self._delta_deg,
                     fov_deg=CROP_FOV_DEG,
+                    pitch_deg=layout.pitch_deg,
+                    vfov_deg=None if layout.level else layout.vfov_deg,
                 )
             )
         return views
@@ -372,8 +470,9 @@ class SceneQueryService:
             # 0-1000 scale (221 for 0.221) and clamped to the right edge --
             # "everything is to the right" (2026-09-26).
             x_center = (box.x_min + box.x_max) / 2 if box is not None else _fraction(reply.x_center)
+            y_center = (box.y_min + box.y_max) / 2 if box is not None else 0.5
             if x_center is not None:
-                bearing = views[index].bearing_at(x_center)
+                bearing = views[index].bearing_at(x_center, y_center)
             if views[index].is_phone:
                 phone_box = box
         confidence = (reply.confidence or "").strip().lower()
@@ -432,6 +531,23 @@ def _found_detail(way: ClearWay | None, detail: str | None) -> str | None:
     fragment = clear_way_fragment(way)
     joined = fragment if detail is None else fragment + FOUND_DETAIL_JOIN + detail
     return joined[:MAX_DETAIL_CHARS]
+
+def _stamped(view: View, index: int) -> View:
+    """``view`` with "IMAGE n" printed on a thin bar across its top. The bar
+    covers pixels but keeps the size, so box coordinates are unchanged.
+    """
+    image = cv2.imdecode(np.frombuffer(view.image.jpeg, np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        return view
+    w = image.shape[1]
+    scale = max(0.5, w / 420)
+    bar = int(30 * scale)
+    cv2.rectangle(image, (0, 0), (w, bar), (0, 0, 0), -1)
+    cv2.putText(image, f"IMAGE {index}", (int(8 * scale), int(22 * scale)), cv2.FONT_HERSHEY_SIMPLEX,
+                0.7 * scale, (255, 255, 255), max(1, int(2 * scale)), cv2.LINE_AA)
+    ok, buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return replace(view, image=LabeledImage(view.image.label, buf.tobytes())) if ok else view
+
 
 def _fraction(x: float | None) -> float | None:
     """x_center as 0-1, accepting the 0-1000 scale Gemini sometimes uses."""

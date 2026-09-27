@@ -89,3 +89,13 @@ def test_live_x4_delivers_2880x1440_frames() -> None:
         assert (frame.image.shape[1], frame.image.shape[0]) == X4_FRAME_SIZE
     finally:
         source.close()
+
+
+def test_the_insta360_virtual_camera_is_skipped_for_the_real_x4() -> None:
+    # Insta360's desktop software adds "Insta360 Virtual Camera", listed
+    # ahead of the X4 and without its 2880x1440 mode (2026-09-26).
+    from cane.bridge.capture.avfoundation_source import pick_real_camera
+
+    names = ["Insta360 Virtual Camera", "Insta360 X4"]
+    assert pick_real_camera(names, str) == "Insta360 X4"
+    assert pick_real_camera(["Insta360 Virtual Camera"], str) == "Insta360 Virtual Camera"

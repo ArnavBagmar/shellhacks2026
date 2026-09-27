@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -29,11 +30,21 @@ from cane.transport.wall_clock import now_ms
 logger = logging.getLogger(__name__)
 
 X4_NAME_SUBSTRING = "insta360"
+#: Insta360's desktop software adds an "Insta360 Virtual Camera" that also
+#: matches "insta360" and was picked ahead of the real X4 (2026-09-26); it
+#: has no 2880x1440 mode. Software cameras are skipped when a real one matches.
+VIRTUAL_CAMERA_WORDS = ("virtual",)
 X4_FRAME_SIZE = (2880, 1440)
 PIXEL_FORMAT_BGRA = 1111970369  # kCVPixelFormatType_32BGRA
 BGRA_CHANNELS = 4
 FIRST_FRAME_TIMEOUT_S = 10.0
+#: AVAuthorizationStatus values that mean "no frames will ever come".
+CAMERA_NOT_ALLOWED = {0: "never asked", 1: "restricted", 2: "denied"}
 READ_TIMEOUT_S = 5.0
+#: A stall (no frame for READ_TIMEOUT_S) closes and reopens the capture
+#: session, at most this many times in a row. Live 2026-09-26 the X4 stayed
+#: on USB but stopped delivering after ~4 min, and nothing restarted it.
+MAX_RESTARTS = 5
 LOCK_FLAG = 1  # kCVPixelBufferLock_ReadOnly
 INSTALL_HINT = "uv sync --extra mac"
 AVCONFERENCED_HINT = (
@@ -130,6 +141,7 @@ class AVFoundationSource:  # pragma: no cover - needs real hardware
         self._delegate: object | None = None
         self._locked = False
         self._seq = 0
+        self._restarts = 0
         self._start()
 
     @property
@@ -147,9 +159,27 @@ class AVFoundationSource:  # pragma: no cover - needs real hardware
         """
         frame = self._store.wait_for_new(self._seq, READ_TIMEOUT_S)
         if frame is None:
+            self._restart()
             return None
+        self._restarts = 0
         self._seq = frame.seq
         return frame
+
+    def _restart(self) -> None:
+        """Reopen the session after a stall; the next ``read`` sees its frames."""
+        if self._restarts >= MAX_RESTARTS:
+            return
+        self._restarts += 1
+        logger.warning(
+            "%s: no frame for %.0fs; restarting capture (%d/%d)",
+            self._name, READ_TIMEOUT_S, self._restarts, MAX_RESTARTS,
+        )
+        self.close()
+        try:
+            self._start(after_seq=self._seq)
+            logger.info("%s: capture restarted", self._name)
+        except Exception as exc:  # noqa: BLE001 - hardware: log it and let GrabThread count the stall
+            logger.warning("%s: restart failed: %s", self._name, exc)
 
     def close(self) -> None:
         if self._session is not None and self._session.isRunning():  # type: ignore[union-attr]
@@ -159,7 +189,7 @@ class AVFoundationSource:  # pragma: no cover - needs real hardware
             self._locked = False
         self._session = None
 
-    def _start(self) -> None:
+    def _start(self, after_seq: int = 0) -> None:
         self._device = self._find_device(self._name_substring)
         self._name = f"avf:{self._device.localizedName()}"  # type: ignore[union-attr]
         self._session, self._delegate = self._build_session()
@@ -167,23 +197,41 @@ class AVFoundationSource:  # pragma: no cover - needs real hardware
         # The lock stays held while running; releasing it lets the session
         # preset reset the format back to 1920x1080.
         self._session.startRunning()  # type: ignore[union-attr]
-        if self._store.wait_for_new(0, FIRST_FRAME_TIMEOUT_S) is None:
+        if self._store.wait_for_new(after_seq, FIRST_FRAME_TIMEOUT_S) is None:
             self.close()
-            raise SourceOpenError(
-                f"{self._name}: no frames within {FIRST_FRAME_TIMEOUT_S:.0f}s. "
-                "Is the camera in Webcam USB mode and is this terminal granted camera access "
-                "(System Settings > Privacy & Security > Camera)?"
+            raise SourceOpenError(f"{self._name}: no frames within {FIRST_FRAME_TIMEOUT_S:.0f}s. {self._why_no_frames()}")
+
+    def _why_no_frames(self) -> str:
+        """The likeliest cause, starting from the one macOS can tell us."""
+        avf = self._backend.avf
+        try:
+            status = int(avf.AVCaptureDevice.authorizationStatusForMediaType_(avf.AVMediaTypeVideo))
+        except Exception:  # noqa: BLE001 - diagnostics only
+            status = -1
+        if status in CAMERA_NOT_ALLOWED:
+            return (
+                f"This terminal is not allowed to use the camera ({CAMERA_NOT_ALLOWED[status]}): "
+                "System Settings > Privacy & Security > Camera, turn on your terminal app "
+                "(Terminal, iTerm, VS Code...), then quit and reopen it."
             )
+        return (
+            "Camera access is allowed, so something else has the X4 or it is not streaming: "
+            "quit Insta360 Link Controller / Insta360 apps and any video call app, run "
+            "`pkill -x avconferenced`, unplug the X4, plug it back in and choose Webcam on its screen."
+        )
 
     def _find_device(self, name_substring: str) -> object:
         avf = self._backend.avf
         needle = name_substring.lower()
         names: list[str] = []
+        matches: list[object] = []
         for device in avf.AVCaptureDevice.devicesWithMediaType_(avf.AVMediaTypeVideo):
             label = str(device.localizedName())
             names.append(label)
             if needle in label.lower():
-                return device
+                matches.append(device)
+        if matches:
+            return pick_real_camera(matches, lambda d: str(d.localizedName()))
         raise CameraNotFoundError(
             f"no camera matching {name_substring!r}; connected cameras: {names or ['none']}. "
             "Plug the X4 in over USB-C and choose Webcam on its screen."
@@ -234,6 +282,16 @@ class AVFoundationSource:  # pragma: no cover - needs real hardware
         self._device.setActiveFormat_(wanted)  # type: ignore[union-attr]
         logger.info("%s: active format set to %dx%d", self._name, *frame_size)
         return True
+
+
+def pick_real_camera(devices: list[object], name_of: Callable[[object], str]) -> object:
+    """The first match that is not a software ("virtual") camera, else the
+    first match.
+    """
+    for device in devices:
+        if not any(word in name_of(device).lower() for word in VIRTUAL_CAMERA_WORDS):
+            return device
+    return devices[0]
 
 
 def open_x4(
