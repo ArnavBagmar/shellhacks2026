@@ -105,7 +105,7 @@ AVCaptureSession frame
 
 - Does not see past ±37°. Anything outside that is the X4's job, full stop.
 - Does not detect drop-offs. **The white cane does that tactilely** — see sync doc §2.3.
-- Does not stream video anywhere. Only events leave the phone.
+- Does not stream video for detection. Pictures leave the phone only for the laptop: a photo with each spoken question, and small chest-camera frames (~4 a second) for the laptop's live view while the Setup switch "Show the phone camera on the laptop" is on (the default, for the demo). Off, only the question photos and a running hand guide send pictures. Nothing is stored on the laptop beyond the newest frame.
 - Does not compute urgency from someone else's opinion — it computes urgency for *all* events, including the X4's.
 
 ---

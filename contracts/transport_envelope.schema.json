@@ -793,7 +793,7 @@
     },
     "guide": {
       "type": "object",
-      "description": "Phone -> laptop, ~8 Hz while 'guide my hand' runs: where the phone's own tracker (Apple Vision, seeded with Gemini's phone_box) has the object and the fingertip nearest it, the gap between them, and a small front-camera frame a few times a second. Display-only: the laptop page draws it; nothing on the laptop acts on it, and a laptop without a page counts it as ignored.",
+      "description": "Phone -> laptop. The phone's chest camera for the laptop page: about 4 small frames a second with state 'idle' (no guide running, target null; sent only while the phone's 'Show the phone camera on the laptop' setting is on), and ~8 Hz while 'guide my hand' runs: where the phone's own tracker (Apple Vision, seeded with Gemini's phone_box) has the object and the fingertip nearest it, the gap between them, and a frame a few times a second. Display-only: the laptop page draws it; nothing on the laptop acts on it, and a laptop without a page counts it as ignored.",
       "additionalProperties": false,
       "required": [
         "type",
@@ -817,6 +817,7 @@
         },
         "state": {
           "enum": [
+            "idle",
             "looking",
             "find_hand",
             "guiding",
@@ -826,9 +827,17 @@
           ]
         },
         "target": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 60
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
+            }
+          ],
+          "description": "What is being guided to; null only with state 'idle'."
         },
         "box": {
           "oneOf": [
@@ -958,6 +967,18 @@
           "gap_m": 0.14,
           "metric": true,
           "hint": "Right.",
+          "frame": null
+        },
+        {
+          "type": "guide",
+          "t_phone_ms": 1790000000000,
+          "state": "idle",
+          "target": null,
+          "box": null,
+          "hand": null,
+          "gap_m": null,
+          "metric": false,
+          "hint": null,
           "frame": null
         }
       ]

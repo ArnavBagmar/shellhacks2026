@@ -385,7 +385,7 @@ class VoiceClip(BaseModel):
         return cls(speak_id=speak_id, status="unavailable", format=None, audio_b64=None, latency_ms=latency_ms)
 
 
-GuideState = Literal["looking", "find_hand", "guiding", "reached", "lost", "stopped"]
+GuideState = Literal["idle", "looking", "find_hand", "guiding", "reached", "lost", "stopped"]
 
 
 class GuideBox(BaseModel):
@@ -415,9 +415,10 @@ class GuidePoint(BaseModel):
 
 
 class GuideUpdate(BaseModel):
-    """``guide`` frame, phone -> laptop, ~8 Hz while "guide my hand" runs:
-    where the phone's tracker has the thing and the fingertip, the gap
-    between them, and a small front-camera frame a few times a second.
+    """``guide`` frame, phone -> laptop: the chest camera for the page. With
+    state ``idle`` (no guide, ``target`` null) it is just a small frame ~4
+    times a second; while "guide my hand" runs (~8 Hz) it adds where the
+    phone's tracker has the thing and the fingertip and the gap between them.
     Display-only: the laptop page draws it and nothing acts on it. Numbers
     are not strict (JSON cannot tell 0 from 0.0).
     """
@@ -426,13 +427,19 @@ class GuideUpdate(BaseModel):
 
     t_phone_ms: Annotated[int, Field(strict=True)]
     state: GuideState
-    target: Annotated[str, Field(min_length=1, max_length=60)]
+    target: Annotated[str | None, Field(min_length=1, max_length=60)]
     box: GuideBox | None
     hand: GuidePoint | None
     gap_m: Annotated[float | None, Field(ge=0, le=10, allow_inf_nan=False)]
     metric: Annotated[bool, Field(strict=True)]
     hint: Annotated[str | None, Field(min_length=1, max_length=40)]
     frame: PhoneFrame | None
+
+    @model_validator(mode="after")
+    def _target_unless_idle(self) -> GuideUpdate:
+        if (self.state == "idle") != (self.target is None):
+            raise ValueError("'target' is null exactly when 'state' is 'idle'")
+        return self
 
 
 @dataclass(frozen=True)

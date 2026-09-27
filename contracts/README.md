@@ -113,7 +113,10 @@ object with a `type` string:
   died cannot drive a switch. The frame is advisory: the health monitor
   also steps rungs and flips on its own RTT and timeout evidence, and a
   phone that never sends `health` changes nothing.
-- `guide` (phone → laptop, ~8 Hz) is "guide my hand" live: the tracked
+- `guide` (phone → laptop) is the chest camera for the laptop page. With
+  `state` `idle` and `target` null it is just a small `frame` ~4 times a
+  second (only while the phone's "Show the phone camera on the laptop"
+  setting is on). At ~8 Hz it is "guide my hand" live: the tracked
   object's `box` and the nearest fingertip (`hand`) as frame fractions, the
   fingertip-to-surface `gap_m`, whether TrueDepth measured it (`metric`), the
   last direction word (`hint`), and a small `frame` (the `phone_frame` shape)

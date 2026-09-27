@@ -134,6 +134,7 @@ final class Runtime {
             camera: camera, speaker: arbiter, watch: WatchLink.shared, laptop: client,
             ticker: GuideTicker(hazardActive: { arbiter.isPresentingHazard }, speaking: { arbiter.isSpeaking },
                                 clock: Self.now),
+            streamIdle: { settings.current.cameraOnLaptop },
             clock: Self.now,
             onEnd: { target, end in
                 diagnostics.record("guide_end", ["target": .text(target), "end": .text(end.rawValue)])

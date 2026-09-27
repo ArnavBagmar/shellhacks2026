@@ -68,8 +68,12 @@ guide. The laptop page shows it all live.
      the gap;
    - a sign with the direction, the gap in centimetres, a closeness bar and
      the beep rhythm.
-   It polls `/guide.json` 8 times a second only while a guide is on, and
-   disappears 45 s after the last update.
+   Between guides the same panel is **Phone camera · live**: the plain chest
+   camera, about 4 frames a second (state `idle`), while the phone's Setup
+   switch "Show the phone camera on the laptop" is on (the default). The
+   end of a guide ("Got it") stays up 4 s before the plain camera returns.
+   The page polls `/guide.json` 8 times a second while the panel is up; it
+   disappears 45 s after the phone's last frame.
 
 ## Running it
 

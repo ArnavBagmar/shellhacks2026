@@ -1,11 +1,12 @@
 import Foundation
 
-/// Phone -> laptop, ~8 times a second while "guide my hand" runs: where the
-/// phone has the thing and the fingertip, and the gap between them, plus a
-/// small camera frame a few times a second -- so the laptop page can show
-/// the live tracking. Advisory and display-only: the laptop never acts on it.
+/// Phone -> laptop: the chest camera for the laptop page. `idle` (no guide,
+/// no target) is just a small frame ~4 times a second; while "guide my
+/// hand" runs (~8 Hz) it adds where the phone has the thing and the
+/// fingertip and the gap between them. Display-only: the laptop never acts
+/// on it.
 public struct GuideUpdate: Sendable, Equatable {
-    public static let states: Set<String> = ["looking", "find_hand", "guiding", "reached", "lost", "stopped"]
+    public static let states: Set<String> = ["idle", "looking", "find_hand", "guiding", "reached", "lost", "stopped"]
 
     public struct Box: Sendable, Equatable {
         public let xMin, yMin, xMax, yMax: Double
@@ -16,7 +17,8 @@ public struct GuideUpdate: Sendable, Equatable {
 
     public let tPhoneMs: Int64
     public let state: String
-    public let target: String
+    /// Nil exactly when `state` is `idle`.
+    public let target: String?
     /// The thing, photo fractions from the top-left; nil when not tracked.
     public let box: Box?
     /// The fingertip nearest the thing, photo fractions; nil with no hand.
@@ -26,10 +28,11 @@ public struct GuideUpdate: Sendable, Equatable {
     public let hint: String?
     public let frame: PhoneFrame?
 
-    public init(tPhoneMs: Int64, state: String, target: String, box: Box?, hand: (x: Double, y: Double)?,
+    public init(tPhoneMs: Int64, state: String, target: String?, box: Box?, hand: (x: Double, y: Double)?,
                 gapM: Double?, metric: Bool, hint: String?, frame: PhoneFrame?) throws {
         guard Self.states.contains(state) else { throw TransportError.invalidFrame("state") }
-        guard (1...60).contains(target.count) else { throw TransportError.invalidFrame("target") }
+        guard (state == "idle") == (target == nil) else { throw TransportError.invalidFrame("target") }
+        if let target, !(1...60).contains(target.count) { throw TransportError.invalidFrame("target") }
         if let box {
             for v in [box.xMin, box.yMin, box.xMax, box.yMax] where !(v.isFinite && (0...1).contains(v)) {
                 throw TransportError.invalidFrame("box")
@@ -65,7 +68,7 @@ public struct GuideUpdate: Sendable, Equatable {
             "type": "guide",
             "t_phone_ms": tPhoneMs,
             "state": state,
-            "target": target,
+            "target": target ?? NSNull(),
             "box": box.map { ["x_min": $0.xMin, "y_min": $0.yMin, "x_max": $0.xMax, "y_max": $0.yMax] } ?? NSNull(),
             "hand": hand.map { ["x": $0.x, "y": $0.y] } ?? NSNull(),
             "gap_m": gapM ?? NSNull(),

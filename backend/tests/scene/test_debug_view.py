@@ -217,3 +217,22 @@ def test_the_page_serves_the_guide_fast_path() -> None:
         assert urllib.request.urlopen(f"{base}/guide.jpg").read() == PHOTO
     finally:
         server.shutdown()
+
+
+def test_the_plain_phone_camera_shows_between_guides_but_got_it_stays_a_moment(monkeypatch) -> None:
+    import cane.scene.debug_view as dv
+
+    clock = [1_000_000]
+    monkeypatch.setattr(dv, "now_ms", lambda: clock[0])
+    hub = DebugHub()
+    idle = {"state": "idle", "target": None, "box": None, "hand": None, "gap_m": None, "metric": False, "hint": None}
+    hub.on_phone_guide(_guide(**idle))
+    assert hub.state()["guide"]["state"] == "idle"
+
+    hub.on_phone_guide(_guide(state="reached", gap_m=0.0))
+    clock[0] += 1_000
+    hub.on_phone_guide(_guide(**idle))
+    assert hub.state()["guide"]["state"] == "reached", "Got it is not wiped by the next camera frame"
+    clock[0] += dv.GUIDE_FINAL_HOLD_MS
+    hub.on_phone_guide(_guide(**idle))
+    assert hub.state()["guide"]["state"] == "idle"

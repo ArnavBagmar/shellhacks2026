@@ -68,6 +68,8 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
     static let laptopEveryMs: Int64 = 125
     static let laptopFrameEveryMs: Int64 = 250
     static let laptopFramePx = 480.0
+    /// With no guide running: the plain chest camera for the page, this often.
+    static let idleFrameEveryMs: Int64 = 250
 
     private let camera: FrontCamera
     private let speaker: AssistSpeaker
@@ -82,6 +84,8 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
     private var busy = false
     private var frameCount = 0
     private var refinder: (@Sendable (String) async -> PhoneBox?)?
+    private let streamIdle: @Sendable () -> Bool
+    private var lastIdleMs: Int64 = 0
     private let logger = Logger(subsystem: "cane", category: "guide")
 
     // Work queue only.
@@ -104,6 +108,7 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
         watch: GuideWatch,
         laptop: GuideLink? = nil,
         ticker: GuideTicker? = nil,
+        streamIdle: @escaping @Sendable () -> Bool = { false },
         clock: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
         onEnd: @escaping @Sendable (String, GuideEnd) -> Void = { _, _ in }
     ) {
@@ -112,6 +117,7 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
         self.watch = watch
         self.laptop = laptop
         self.ticker = ticker
+        self.streamIdle = streamIdle
         self.clock = clock
         self.onEnd = onEnd
         camera.addConsumer(self)
@@ -163,6 +169,10 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
     // MARK: - Camera queue
 
     public func frontCamera(didOutput sampleBuffer: CMSampleBuffer, hfovDeg: Double) {
+        if !lock.withLock({ active }) {
+            idleFrame(sampleBuffer, hfovDeg: hfovDeg)
+            return
+        }
         let take = lock.withLock { () -> Bool in
             guard active, !busy else { return false }
             frameCount += 1
@@ -177,6 +187,32 @@ public final class HandGuide: FrameConsumer, @unchecked Sendable {
         work.async { [self] in
             process(buffer, hfovDeg: hfovDeg)
             lock.withLock { busy = false }
+        }
+    }
+
+    /// No guide: just the picture, a few times a second, if the wearer
+    /// allows the camera on the laptop (Setup: "Show the phone camera").
+    private func idleFrame(_ sampleBuffer: CMSampleBuffer, hfovDeg: Double) {
+        guard laptop != nil else { return }
+        let now = clock()
+        let take = lock.withLock { () -> Bool in
+            guard !active, !busy, now - lastIdleMs >= Self.idleFrameEveryMs else { return false }
+            busy = true
+            lastIdleMs = now
+            return true
+        }
+        guard take else { return }
+        guard streamIdle(), let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            lock.withLock { busy = false }
+            return
+        }
+        work.async { [self] in
+            defer { lock.withLock { busy = false } }
+            guard session == nil, let laptop, let frame = jpeg(buffer, hfovDeg: hfovDeg),
+                  let update = try? GuideUpdate(tPhoneMs: now, state: "idle", target: nil, box: nil, hand: nil,
+                                                gapM: nil, metric: false, hint: nil, frame: frame)
+            else { return }
+            Task { try? await laptop.send(update) }
         }
     }
 

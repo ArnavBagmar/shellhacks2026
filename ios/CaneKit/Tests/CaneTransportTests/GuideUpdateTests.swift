@@ -24,6 +24,17 @@ final class GuideUpdateTests: XCTestCase {
         XCTAssertEqual((object["frame"] as? [String: Any])?["width"] as? Int, 480)
     }
 
+    func testTheIdleCameraCarriesNoTarget() throws {
+        let update = try GuideUpdate(tPhoneMs: 1, state: "idle", target: nil, box: nil, hand: nil, gapM: nil,
+                                     metric: false, hint: nil, frame: nil)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: update.encoded()) as? [String: Any])
+        XCTAssertTrue(object["target"] is NSNull)
+        XCTAssertThrowsError(try GuideUpdate(tPhoneMs: 1, state: "guiding", target: nil, box: nil, hand: nil,
+                                             gapM: nil, metric: false, hint: nil, frame: nil))
+        XCTAssertThrowsError(try GuideUpdate(tPhoneMs: 1, state: "idle", target: "cup", box: nil, hand: nil,
+                                             gapM: nil, metric: false, hint: nil, frame: nil))
+    }
+
     func testNonsenseIsRefusedBeforeItIsSent() {
         XCTAssertThrowsError(try GuideUpdate(tPhoneMs: 1, state: "dancing", target: "cup", box: nil, hand: nil,
                                              gapM: nil, metric: false, hint: nil, frame: nil))

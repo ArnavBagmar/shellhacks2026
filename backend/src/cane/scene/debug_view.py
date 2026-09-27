@@ -61,6 +61,9 @@ GUIDE_SHOW_MS = 45_000
 #: The fingertip's recent path, drawn as a fading trail.
 GUIDE_TRAIL = 40
 GUIDE_TRAIL_MS = 1_500
+GUIDE_FINAL_STATES = ("reached", "lost", "stopped")
+#: A guide's ending stays on the page this long before the plain camera.
+GUIDE_FINAL_HOLD_MS = 4_000
 
 #: The page's signal yellow (#ffd200) and sign black, in BGR.
 SIGN_YELLOW = (0, 210, 255)
@@ -228,8 +231,8 @@ class DebugHub:
                 self._feed.append({"t_ms": received, "kind": kind, "data": data})
 
     def on_phone_guide(self, update: Any) -> None:
-        """One ``guide`` frame (a ``GuideUpdate``): the page draws the thing's
-        box, the fingertip and the gap over the phone's own frame.
+        """One ``guide`` frame (a ``GuideUpdate``): the phone's chest camera,
+        plus, during a guide, the thing's box, the fingertip and the gap.
         """
         received = now_ms()
         jpeg: bytes | None = None
@@ -240,8 +243,13 @@ class DebugHub:
                 jpeg = None
         data = update.model_dump(exclude={"frame"})
         with self._lock:
-            if self._guide is None or self._guide.get("target") != data["target"] or data["state"] == "find_hand" \
-                    and self._guide.get("state") in ("reached", "lost", "stopped"):
+            previous = self._guide
+            if data["state"] == "idle" and previous is not None and previous["state"] in GUIDE_FINAL_STATES \
+                    and received - previous["state_since_ms"] < GUIDE_FINAL_HOLD_MS:
+                # "Got it" stays up a moment; only the picture moves on.
+                data = dict(previous)
+            if self._guide is None or self._guide.get("target") != data["target"] or data["state"] == "idle" \
+                    or data["state"] == "find_hand" and self._guide.get("state") in ("reached", "lost", "stopped"):
                 self._guide_trail.clear()
             if update.hand is not None:
                 self._guide_trail.append((received, update.hand.x, update.hand.y))

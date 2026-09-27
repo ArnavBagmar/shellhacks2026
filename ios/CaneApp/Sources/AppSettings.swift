@@ -13,6 +13,7 @@ final class AppSettings {
         static let rate = "speechRate"
         static let gain = "hapticGain"
         static let naturalVoice = "naturalVoice"
+        static let cameraOnLaptop = "cameraOnLaptop"
     }
 
     private let defaults: UserDefaults
@@ -26,6 +27,9 @@ final class AppSettings {
     /// Answers and prompts in the ElevenLabs voice (through the laptop).
     /// Hazards always use the phone's own voice.
     var naturalVoice: Bool { didSet { defaults.set(naturalVoice, forKey: Key.naturalVoice) } }
+    /// The chest camera on the laptop page all walk (~4 small frames a
+    /// second). Off: photos leave the phone only with a question or a guide.
+    var cameraOnLaptop: Bool { didSet { defaults.set(cameraOnLaptop, forKey: Key.cameraOnLaptop) } }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -34,6 +38,7 @@ final class AppSettings {
         speechRate = defaults.object(forKey: Key.rate) as? Double ?? 0.55
         hapticGain = defaults.object(forKey: Key.gain) as? Double ?? 1.0
         naturalVoice = defaults.object(forKey: Key.naturalVoice) as? Bool ?? true
+        cameraOnLaptop = defaults.object(forKey: Key.cameraOnLaptop) as? Bool ?? true
     }
 
     var laptopURL: URL? {
@@ -54,13 +59,15 @@ final class AppSettings {
 
     /// A value snapshot the non-UI runtime can read from any thread.
     var snapshot: Snapshot {
-        Snapshot(speechRate: Float(speechRate), hapticGain: Float(hapticGain), naturalVoice: naturalVoice)
+        Snapshot(speechRate: Float(speechRate), hapticGain: Float(hapticGain), naturalVoice: naturalVoice,
+                 cameraOnLaptop: cameraOnLaptop)
     }
 
     struct Snapshot: Sendable {
         let speechRate: Float
         let hapticGain: Float
         let naturalVoice: Bool
+        let cameraOnLaptop: Bool
     }
 }
 

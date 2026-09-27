@@ -385,8 +385,8 @@
     </aside>
   </section>
 
-  <section id="guide-sec" aria-label="Hand guide" hidden>
-    <div class="plate-row"><h2 class="plate">Hand guide &middot; live</h2><span class="note">tracked on the phone at camera speed: Apple Vision follows the object and the fingertips, TrueDepth measures the gap. Gemini only found the object.</span></div>
+  <section id="guide-sec" aria-label="Phone camera and hand guide" hidden>
+    <div class="plate-row"><h2 class="plate" id="guide-title">Phone camera &middot; live</h2><span class="note" id="guide-note"></span></div>
     <div class="guide">
       <div class="feed" id="guide-feed">
         <img id="guide-img" alt="The phone's chest camera during the hand guide, with the object and fingertip marked">
@@ -1018,7 +1018,16 @@ const HINT_ARROW = { "Left.": [-90, "Move left"], "Right.": [90, "Move right"], 
 const GUIDE_STALE_MS = 1500;
 const cm = (m) => Math.round(m * 100);
 
+const GUIDE_NOTES = {
+  idle: "what the chest camera sees, a few frames a second. Say \u201cHey Cane, guide me to \u2026\u201d to start a hand guide.",
+  guide: "tracked on the phone at camera speed: Apple Vision follows the object and the fingertips, TrueDepth measures the gap. Gemini only found the object.",
+};
+
 function guideSign(g, stale) {
+  if (g.state === "idle") {
+    return `<div class="arrow"><svg viewBox="0 0 100 100" aria-hidden="true"><path d="M50 84 V20 M26 44 L50 20 L74 44" stroke="currentColor" stroke-width="12" fill="none"/></svg></div>
+      <div class="words"><small>PHONE CAMERA</small><b>Ready to guide</b><span>Say \u201cHey Cane, guide me to the Rubik\u2019s cube.\u201d</span></div>`;
+  }
   const target = esc(g.target);
   if (g.state === "reached") {
     return `<div class="arrow"><svg viewBox="0 0 100 100" aria-hidden="true"><path d="M18 52 L41 75 L84 27" stroke="currentColor" stroke-width="15" fill="none"/></svg></div>
@@ -1102,6 +1111,7 @@ function renderGuide(g) {
   const feed = $("guide-feed");
   feed.style.aspectRatio = `${w} / ${h}`;
   const final = ["reached", "lost", "stopped"].includes(g.state);
+  // (idle is live too: a stalled plain camera shows STALLED like a guide.)
   const stale = !final && g.age_ms > GUIDE_STALE_MS;
   feed.classList.toggle("stale", stale);
   $("guide-wait").hidden = g.frame_seq > 0;
@@ -1113,9 +1123,12 @@ function renderGuide(g) {
     im.src = `/guide.jpg?${g.frame_seq}`;
     renderGuide.seq = g.frame_seq;
   }
+  const idle = g.state === "idle";
+  $("guide-title").textContent = idle ? "Phone camera \u00b7 live" : "Hand guide \u00b7 live";
+  $("guide-note").textContent = idle ? GUIDE_NOTES.idle : GUIDE_NOTES.guide;
   const svg = $("guide-svg");
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  svg.innerHTML = final && g.state !== "reached" ? "" : guideOverlay(g, w, h);
+  svg.innerHTML = g.state === "idle" || (final && g.state !== "reached") ? "" : guideOverlay(g, w, h);
   const sign = $("guide-sign");
   sign.className = "gsign" + (g.state === "guiding" || g.state === "reached" ? "" : " info");
   sign.innerHTML = guideSign(g, stale);

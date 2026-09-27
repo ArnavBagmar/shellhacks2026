@@ -52,6 +52,7 @@ struct SetupView: View {
                     Slider(value: $settings.hapticGain, in: 0.6...1.4, step: 0.1)
                         .accessibilityLabel("Haptic strength")
                     Toggle("Natural voice for answers", isOn: $settings.naturalVoice)
+                    Toggle("Show the phone camera on the laptop", isOn: $settings.cameraOnLaptop)
                     Button(testingHaptics ? "Playing…" : "Play the haptic alphabet") {
                         testingHaptics = true
                         Task {
@@ -63,7 +64,7 @@ struct SetupView: View {
                 } header: {
                     Text("Comfort")
                 } footer: {
-                    Text("Two clicks is left, three quick clicks is right. A short bump is ahead, a long swell is behind. A long hard rattle means act now. The natural voice (ElevenLabs, through the laptop) speaks answers; warnings always use the phone's own voice.")
+                    Text("Two clicks is left, three quick clicks is right. A short bump is ahead, a long swell is behind. A long hard rattle means act now. The natural voice (ElevenLabs, through the laptop) speaks answers; warnings always use the phone's own voice. With the phone camera on the laptop, the live view shows what the chest camera sees; off, photos leave the phone only when you ask something.")
                 }
 
                 if !model.notes.isEmpty {
@@ -78,6 +79,7 @@ struct SetupView: View {
             .onChange(of: settings.speechRate) { model.settingsChanged() }
             .onChange(of: settings.hapticGain) { model.settingsChanged() }
             .onChange(of: settings.naturalVoice) { model.settingsChanged() }
+            .onChange(of: settings.cameraOnLaptop) { model.settingsChanged() }
         }
         .accessibilityAction(.magicTap) { Task { await model.startWalking() } }
     }

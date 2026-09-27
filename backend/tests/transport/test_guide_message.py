@@ -91,3 +91,14 @@ async def test_the_server_hands_guide_frames_to_the_page_and_survives_a_bad_hook
             await phone.send(json.dumps(_frame()))
             await phone.recv()
             await phone.recv()  # still connected: pings keep coming
+
+
+def test_the_idle_camera_has_no_target_and_a_guide_always_has_one() -> None:
+    idle = _frame(state="idle", target=None, box=None, hand=None, gap_m=None, metric=False, hint=None)
+    assert isinstance(decode(json.dumps(idle)), GuideUpdate)
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    Draft202012Validator(schema).validate(idle)
+    with pytest.raises(MalformedMessageError):
+        decode(json.dumps({**idle, "target": "cup"}))
+    with pytest.raises(MalformedMessageError):
+        decode(json.dumps(_frame(target=None)))
