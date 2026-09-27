@@ -14,6 +14,12 @@
 #   ./startcane test       run both test suites
 #   ./startcane logs       follow today's laptop log and phone log
 #
+# Step 28 (the trust baseline) is a bare bridge run, not a startcane mode -- it wants no
+# phone, no cloud and no scene. Pass --record-events PATH to python -m cane.bridge to append
+# every event sent to the phone to a JSONL file, then replay it with:
+#   cd ios/CaneKit && swift run replay-cli <that file>
+# The full walk protocol is docs/steps/step-28-brief.md.
+#
 # Every mode saves what Gemini saw per question under backend/logs/views/.
 # Extra arguments after `front`/`still`/`x4` go straight to `python -m cane.scene`.
 # A second phone needs its own port: CANE_PORT=8766 ./startcane

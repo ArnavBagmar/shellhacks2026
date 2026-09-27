@@ -263,3 +263,18 @@ async def test_the_scene_hook_sends_the_answer_to_the_phone() -> None:
                           t_phone_ms=1_790_000_000_000, phone_frame=None))
 
     assert [a.status for a in sent] == ["not_found"]
+
+
+def test_recording_is_off_unless_asked_for() -> None:
+    """No flag, no recorder: the measured run is the unmeasured run."""
+    args = parse_args(["--inference-url", INFERENCE_URL])
+
+    assert build_config(args).record_events is None
+
+
+def test_record_events_is_threaded_into_the_frozen_config(tmp_path: Path) -> None:
+    target = tmp_path / "walk-a.jsonl"
+
+    args = parse_args(["--inference-url", INFERENCE_URL, "--record-events", str(target)])
+
+    assert build_config(args).record_events == target

@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from pathlib import Path
 from dataclasses import dataclass, field
 
 from cane.bridge.rungs import RUNG_1, Rung
@@ -83,6 +84,9 @@ class BridgeConfig:
     allow_unsynced: bool = False
     stats_interval_s: float = DEFAULT_STATS_INTERVAL_S
     session_id: str = field(default_factory=_new_session_id)
+    # Step 28: where to append the walk recording, or None for no recording.
+    # Off by default, so the measured run and the unmeasured run are one run.
+    record_events: Path | None = None
 
     def __post_init__(self) -> None:
         if not self.inference_url.startswith(ALLOWED_URL_SCHEMES):

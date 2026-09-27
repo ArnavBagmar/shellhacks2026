@@ -60,6 +60,7 @@ from cane.bridge.pipeline import (
     format_stats_line,
 )
 from cane.bridge.probe import CloudProbe, HttpHealthz, healthz_url_for
+from cane.bridge.recorder import open_recording, wrap_event_sink
 from cane.bridge.rungs import RUNGS, rung_by_index
 from cane.bridge.sender import OneInFlightSender
 from cane.bridge.transport_http import HttpInferenceTransport
@@ -141,6 +142,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="answer the phone's spoken questions with Gemini over the X4 view "
         "(needs the scene extra and GEMINI_API_KEY)",
     )
+    parser.add_argument(
+        "--record-events", type=Path, default=None,
+        help="append every event sent to the phone to this JSONL file, for the "
+             "step-28 trust baseline; refuses to overwrite an existing recording",
+    )
     parser.add_argument("--duration-s", type=float, default=None, help="stop after N seconds")
     parser.add_argument("--log-level", default="INFO")
     parser.add_argument(
@@ -163,6 +169,7 @@ def build_config(args: argparse.Namespace) -> BridgeConfig:
         ws_host=args.ws_host,
         ws_port=args.ws_port,
         allow_unsynced=args.allow_unsynced,
+        record_events=args.record_events,
         **overrides,
     )
 
@@ -258,6 +265,9 @@ async def run_bridge(
     # Before the camera opens: a --scene that cannot work fails the run
     # without leaving a capture device held open.
     scene_vlm = build_scene_vlm(args)
+    # Same reason --scene is resolved above: refusing to overwrite a recording
+    # must fail before a capture device is held open.
+    recording = open_recording(config.record_events) if config.record_events else None
     grab = GrabThread(open_source(config.source_spec))
     monitor = build_monitor(args)
     local = build_local_backend(args, timeout_s=config.local_timeout_s)
@@ -299,7 +309,8 @@ async def run_bridge(
             warm = asyncio.create_task(scene_vlm.warm_up())
         pipeline = BridgePipeline(
             config=config, grab=grab, sender=sender,
-            clock_provider=_clock_provider(config, server), event_sink=server,
+            clock_provider=_clock_provider(config, server),
+            event_sink=wrap_event_sink(server, recording),
             # The same object twice: `EventLinkServer` satisfies both sinks,
             # and step 23's `steer` frames ride the socket the events already
             # hold open.
@@ -324,6 +335,10 @@ async def run_bridge(
             await probe.aclose()
             await sender.aclose()
             grab.stop()
+            if recording is not None:
+                # Correctness does not depend on this: the recorder flushes
+                # every line, so a kill -9 mid-walk loses nothing either.
+                recording.close()
     logger.info("final: %s", format_stats_line(stats))
 
 

@@ -17,6 +17,7 @@ let package = Package(
         .library(name: "CaneCamera", targets: ["CaneCamera"]),
         .library(name: "CaneAssist", targets: ["CaneAssist"]),
         .executable(name: "nav-cli", targets: ["NavCLI"]),
+        .executable(name: "replay-cli", targets: ["ReplayCLI"]),
     ],
     targets: [
         .target(name: "CaneContracts"),
@@ -56,5 +57,15 @@ let package = Package(
         .testTarget(name: "CaneNavigationTests", dependencies: ["CaneNavigation"]),
         // Dev tool: live Routes/Places check once the team has a Maps key (step 12 §F7).
         .executableTarget(name: "NavCLI", dependencies: ["CaneNavigation"]),
+        // Step 28 — the trust baseline. Replays a recorded walk through the real
+        // gauntlet and tallies what the phone would have announced. Unlike NavCLI
+        // this carries a test target: it produces the numbers the milestone reports,
+        // and an unverified measuring instrument is not evidence.
+        .target(name: "CaneReplay", dependencies: ["CaneContracts", "CaneFeedback"]),
+        .testTarget(
+            name: "CaneReplayTests",
+            dependencies: ["CaneReplay", "CaneFeedback", "CaneContracts"]
+        ),
+        .executableTarget(name: "ReplayCLI", dependencies: ["CaneReplay"]),
     ]
 )
