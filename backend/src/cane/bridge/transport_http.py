@@ -19,7 +19,7 @@ RESPONSE_PREVIEW_CHARS = 200
 
 
 class HttpInferenceTransport:
-    """POSTs ``meta`` + six JPEG crops as ``multipart/form-data``."""
+    """POSTs ``meta`` + the ``CROP_COUNT`` JPEG crops as ``multipart/form-data``."""
 
     def __init__(self, url: str, request_timeout_s: float) -> None:
         self._url = url

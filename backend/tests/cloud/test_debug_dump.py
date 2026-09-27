@@ -37,9 +37,10 @@ def _response() -> InferenceResponse:
     )
 
 
-def test_the_sheet_is_three_by_two_tiles() -> None:
+def test_the_sheet_is_four_by_two_tiles_with_a_black_last_cell() -> None:
     sheet = build_sheet(_images(), _response())
-    assert sheet.shape == (TILE_PX * 2, TILE_PX * 3, 3)
+    assert sheet.shape == (TILE_PX * 2, TILE_PX * 4, 3)
+    assert int(sheet[TILE_PX:, TILE_PX * 3 :].max()) == 0  # no eighth crop
 
 
 def test_the_written_sheet_fits_the_size_budget(tmp_path: Path) -> None:
@@ -56,24 +57,24 @@ def test_the_sheet_does_not_mutate_the_decoded_crops() -> None:
 
 
 async def test_dumping_is_off_by_default(
-    app_with_fake: Harness, meta_json: Callable[..., str], six_jpegs: Callable[..., Any],
+    app_with_fake: Harness, meta_json: Callable[..., str], crop_jpegs: Callable[..., Any],
     tmp_path: Path,
 ) -> None:
     await app_with_fake.client.post(
-        "/infer", data={"meta": meta_json()}, files=list(six_jpegs(640))
+        "/infer", data={"meta": meta_json()}, files=list(crop_jpegs(640))
     )
     assert list(tmp_path.iterdir()) == []
 
 
 async def test_enabling_the_dump_writes_one_sheet_every_n_frames(
-    meta_json: Callable[..., str], six_jpegs: Callable[..., Any], tmp_path: Path
+    meta_json: Callable[..., str], crop_jpegs: Callable[..., Any], tmp_path: Path
 ) -> None:
     async with cloud_harness(dump_dir=tmp_path, dump_every_n=2) as harness:
         for index in range(4):
             response = await harness.client.post(
                 "/infer",
                 data={"meta": meta_json(t_capture_ms=T0 + 333 * index)},
-                files=list(six_jpegs(640)),
+                files=list(crop_jpegs(640)),
             )
             assert response.status_code == 200
     assert sorted(p.name for p in tmp_path.iterdir()) == [

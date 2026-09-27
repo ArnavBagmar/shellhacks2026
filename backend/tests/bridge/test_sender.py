@@ -30,7 +30,7 @@ LOOP_BLOCK_MS = 30
 SAMPLING_SLACK_MS = 8
 # Old enough that the 30 ms block below pushes it past the deadline.
 NEARLY_EXPIRED_AGE_MS = FRAME_DEADLINE_MS - LOOP_BLOCK_MS + 10
-YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0)
+YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0, 0.0)  # C6 last
 T_CAPTURE_MS = 1_790_000_000_000
 
 

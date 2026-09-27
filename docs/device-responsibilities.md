@@ -57,6 +57,7 @@ with three people.
 | C3 | +150° … −150° | rear, wraps ±180°. **Overtaking cyclists.** Seam-free |
 | C4 | −150° … −90° | left rear-quarter |
 | C5 | −90° … −30° | left front-quarter. **Crossing cyclists, cars turning in** |
+| C6 | every bearing, latitude −30° … −90° | **nadir crop** (added 2026-09-26, `x4-sphere-coverage` PRD). A 120° pinhole looking straight down, image-up = ahead. The six ring crops are 60° tall and stop at −30°, so a 1.4 m shoulder saw no floor inside 2.4 m and no table top within arm's reach; C6 sees the floor from 1 m out (the wearer's own body inside 35° of the nadir is blacked out). Bearing is radial from the crop centre; band is always `near`; no closing speed. Not yet sent to the VLM (milestone 3) |
 
 ---
 

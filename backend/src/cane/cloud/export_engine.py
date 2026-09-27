@@ -21,14 +21,16 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
+from cane.cloud.api_models import CROP_COUNT
+
 logger = logging.getLogger("cane.cloud.export_engine")
 
 EXPORT_IMGSZ = 640
-# opt = batch // 2, so batch=12 puts the optimisation profile exactly on our
-# real batch of six crops; min=(1,3,32,32) covers 512 as well as 640 (A11).
+# opt = batch // 2, so batch = 2 * CROP_COUNT puts the optimisation profile
+# exactly on our real batch of crops; min=(1,3,32,32) covers 512 as well as 640 (A11).
 # Both are overridable for a retry without a rebuild (CANE_EXPORT_BATCH,
 # CANE_EXPORT_WORKSPACE_GIB); the sidecar fingerprint carries the batch.
-EXPORT_BATCH = int(os.environ.get("CANE_EXPORT_BATCH", "12"))
+EXPORT_BATCH = int(os.environ.get("CANE_EXPORT_BATCH", str(2 * CROP_COUNT)))
 # Verified on an L4 (2026-09-26): at max shape (12, 3, 640, 640) the attention
 # block's best tactic asks for ~8 GB of builder workspace; with the earlier
 # 4 GiB cap TensorRT skipped it and failed with "could not find any
@@ -36,9 +38,11 @@ EXPORT_BATCH = int(os.environ.get("CANE_EXPORT_BATCH", "12"))
 WORKSPACE_GIB = int(os.environ.get("CANE_EXPORT_WORKSPACE_GIB", "14"))
 # Fallback when the dynamic build fails (it did on the L4 with TensorRT 10.13:
 # "could not find any implementation" for the attention block). A static
-# batch-6 engine at 640 still serves 512 crops -- ultralytics letterboxes them
-# to the engine's fixed size -- so both rung sizes keep working.
-STATIC_BATCH = 6
+# batch-CROP_COUNT engine at 640 still serves 512 crops -- ultralytics letterboxes
+# them to the engine's fixed size -- so both rung sizes keep working. The
+# sidecar fingerprint carries the batch, so an engine built for another crop
+# count is refused at startup rather than 422-ing every frame.
+STATIC_BATCH = CROP_COUNT
 TMP_SUFFIX = ".tmp"
 SIDECAR_SUFFIX = ".json"
 EXIT_FAILED = 1

@@ -29,7 +29,7 @@ from cane.bridge.capture.base import Frame
 from cane.bridge.capture.grab_thread import GrabThread
 from cane.bridge.config import BridgeConfig
 from cane.bridge.deadline import FRAME_DEADLINE_MS, past_deadline
-from cane.bridge.dewarp import CROP_YAWS_DEG, CropSet, encode_cropset, dewarp_equirect
+from cane.bridge.dewarp import CROPSET_YAWS_DEG, CropSet, encode_cropset, dewarp_equirect
 from cane.bridge.events import events_from_response
 from cane.bridge.ground_frame import ground_from_response
 from cane.bridge.health import HealthMonitor
@@ -389,7 +389,7 @@ class BridgePipeline:
             t_capture_ms=t_capture_ms,
             rung=plan.index,
             crop_px=plan.crop_px,
-            yaws_deg=CROP_YAWS_DEG,
+            yaws_deg=CROPSET_YAWS_DEG,
             session_id=self._config.session_id,
         )
 
@@ -412,7 +412,7 @@ class BridgePipeline:
     async def _handle_response(self, response: InferenceResponse) -> None:
         source = self._source()
         events = events_from_response(
-            response, CROP_YAWS_DEG, self._config.delta_deg, source
+            response, CROPSET_YAWS_DEG, self._config.delta_deg, source
         )
         if self._event_sink is None:
             self._events_undelivered += len(events)
@@ -454,7 +454,7 @@ class BridgePipeline:
         decide what a missing measurement should look like.
         """
         steer = steer_from_response(
-            response, CROP_YAWS_DEG, self._config.delta_deg, source
+            response, CROPSET_YAWS_DEG, self._config.delta_deg, source
         )
         if steer is None:
             return

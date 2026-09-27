@@ -4,7 +4,7 @@
         [--crop-px 640] [--frames 3] [--session smoke] [--key KEY]
         [--max-inference-ms 25.0]
 
-Posts the same six crops a few hundred milliseconds apart so ByteTrack
+Posts the same seven crops a few hundred milliseconds apart so ByteTrack
 reaches the two consistent range samples a non-zero `closing_mps` needs
 (frame 1 reports null, frame 2 reports 0.0), then prints one line
 per detection and exits non-zero if the service is not ready, if any request

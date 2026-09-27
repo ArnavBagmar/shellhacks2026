@@ -105,6 +105,16 @@ near 180° for seconds**, so keeping the rear seam-free protects a persistent, h
 On-camera stitching is good enough for objects beyond ~1.5 m. Our hazards live at 5–20 m. Do not
 spend hackathon hours optimising around the seam.
 
+**Vertical coverage (added 2026-09-26).** Six square 60° crops at zero pitch see latitude −30° to
++30° and nothing else — measured on the bridge's own remap tables. From a 1.4 m shoulder the floor
+first appears 2.4 m out, so a bag, dog or bollard closer than that to the side or rear was invisible,
+and a table top within arm's reach was cut off (the step-06 crops show it). A seventh crop, **C6**,
+is a 120° pinhole centred on the nadir with image-up = forward: it meets the ring at −30° and reaches
+the floor at 1 m at every bearing; the disc within 35° of the nadir is the wearer and is blacked out.
+The ring crops are untouched, so bearing math, the gap ring and the ground fit keep their geometry.
+Cost: crop count 6 → 7 in the inference contract (the L4's static engine must be re-exported at
+batch 7) and uplink ×7/6 (§3.2 table). Spec: `.claude/prds/x4-sphere-coverage.prd.md`.
+
 ### 1.4 Phone mount geometry
 
 **Landscape, tilted ~15–20° down, chest height (~1.3 m).**
@@ -532,6 +542,7 @@ Verify with hardware before the clock starts. Unowned items are up for grabs.
 | 2026-09-26 | X4 moves from hat to shoulder | Torso-rigid means image bearings are body bearings via one constant. Kills head-yaw estimation, drift correction, calibration gesture, and the AirPods audio-session conflict |
 | 2026-09-26 | Mount orientation: lens axes front/back | Seams land at ±90°, where hazards are transient and tracking bridges them. Keeps the rear seam-free for persistent overtaking detections |
 | 2026-09-26 | Use the full stitched equirect, six 60° crops | Processing only the rear fisheye left 37°–80° uncovered — the front-quarters, where crossing hazards live |
+| 2026-09-26 | Add a seventh, nadir-facing crop C6; leave the six ring crops unchanged | The ring is only 60° tall: no floor inside 2.4 m, no table tops. Pitching the ring down would break the measured ground-fit geometry and open seam gaps at the horizon; a cubemap costs a third of the pixel density on far hazards. C6 is additive and extends to a zenith crop the same way |
 | 2026-09-26 | UVC webcam mode over RTMP | RTMP adds 1–3 s with jitter. At 6.7 m/s that is a *wrong* warning, not a late one. RTMP stays viable for latency-tolerant features only |
 | 2026-09-26 | Cloud L4 + TensorRT primary, local CoreML fallback | Restores the NVIDIA centerpiece, fits the 150–400 ms Tier 2 budget, yields a real measured benchmark. Safe only because Tier 1 never leaves the device |
 | 2026-09-26 | Cloud is timeless; events route back via the laptop | Only one clock pair to sync; both detectors share one event path |

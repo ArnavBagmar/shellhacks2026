@@ -15,7 +15,7 @@ from cane.bridge.dev_stub_server import DEFAULT_DELAY_MS, build_app, parse_args
 from cane.cloud.api_models import CROP_COUNT, InferenceResponse, crop_field_name
 
 T_CAPTURE_MS = 1_790_000_000_321
-YAWS = [0.0, 60.0, 120.0, 180.0, -120.0, -60.0]
+YAWS = [0.0, 60.0, 120.0, 180.0, -120.0, -60.0, 0.0]  # C6 last
 
 
 def _meta(**patch: object) -> str:

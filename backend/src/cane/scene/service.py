@@ -33,7 +33,7 @@ from typing import Callable, Sequence, get_args
 import cv2
 import numpy as np
 
-from cane.bridge.dewarp import CROP_FOV_DEG, dewarp_equirect, encode_jpeg
+from cane.bridge.dewarp import CROP_FOV_DEG, RING_CROP_COUNT, dewarp_equirect, encode_jpeg
 from cane.bridge.events import normalize_bearing_deg
 from cane.scene.debug_view import DebugHub
 from cane.scene.tall_views import YAWS_DEG as TALL_YAWS_DEG
@@ -343,7 +343,11 @@ class SceneQueryService:
         layout = self._layout
         if layout.level:
             cropset = dewarp_equirect(equirect, self._crop_px, t_arrival_laptop_ms=0)  # type: ignore[arg-type]
-            images, yaws = cropset.images, cropset.yaws_deg
+            # The six ring crops only. The nadir crop C6 has a radial bearing
+            # geometry that ``View.centre_deg``/``fov_deg`` cannot express; giving
+            # it to the model is milestone 3 of the x4-sphere-coverage PRD.
+            images = cropset.images[:RING_CROP_COUNT]
+            yaws = cropset.yaws_deg[:RING_CROP_COUNT]
         else:
             images = tuple(tall_views(equirect, self._crop_px, vfov_deg=layout.vfov_deg,  # type: ignore[arg-type]
                                       pitch_deg=layout.pitch_deg))

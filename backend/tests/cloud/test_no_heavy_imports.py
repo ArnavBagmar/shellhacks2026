@@ -28,10 +28,10 @@ def test_importing_the_app_does_not_import_torch_or_ultralytics() -> None:
 
 
 async def test_full_request_does_not_import_torch(
-    app_with_fake: Harness, meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    app_with_fake: Harness, meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
     response = await app_with_fake.client.post(
-        "/infer", data={"meta": meta_json()}, files=list(six_jpegs(640))
+        "/infer", data={"meta": meta_json()}, files=list(crop_jpegs(640))
     )
     assert response.status_code == 200
     assert _loaded() == set()

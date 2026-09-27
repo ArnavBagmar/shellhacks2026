@@ -33,7 +33,7 @@ from .conftest import Harness, cloud_harness, post_infer
 from .depth_synthetic import CROP_PX, ideal_ground, wall_on_the_left
 
 T0 = 1_790_000_000_000
-YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0)
+YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0, 0.0)  # C6 last
 GAP_PROFILE_FIELDS = {
     "crop_index",
     "columns",
@@ -207,10 +207,10 @@ def test_the_profile_carries_no_bearing_no_metres_and_no_clock() -> None:
 
 
 async def test_infer_returns_gap_profiles_over_http(
-    meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
     async with cloud_harness(depth=scripted_head()) as harness:
-        response = await post_infer(harness, meta_json(), six_jpegs(CROP_PX))  # type: ignore[misc]
+        response = await post_infer(harness, meta_json(), crop_jpegs(CROP_PX))  # type: ignore[misc]
     assert response.status_code == 200
     body = response.json()
     assert [p["crop_index"] for p in body["gap_profiles"]] == list(DEPTH_CROPS)
@@ -219,24 +219,24 @@ async def test_infer_returns_gap_profiles_over_http(
 
 
 async def test_infer_without_a_depth_head_answers_an_empty_list(
-    app_with_fake: Harness, meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    app_with_fake: Harness, meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
     """The default posture: an older cloud and a depth-less cloud look the same
     on the wire, which is what makes the amendment additive (plan Sec 4.1).
     """
-    response = await post_infer(app_with_fake, meta_json(), six_jpegs(CROP_PX))  # type: ignore[misc]
+    response = await post_infer(app_with_fake, meta_json(), crop_jpegs(CROP_PX))  # type: ignore[misc]
     assert response.status_code == 200
     assert response.json()["gap_profiles"] == []
 
 
 async def test_a_broken_depth_model_is_not_a_503(
-    meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
     def load() -> Any:
         raise ValueError("Official implementation missing at /nowhere")
 
     async with cloud_harness(depth=DepthHead(load, label="torch")) as harness:
-        response = await post_infer(harness, meta_json(), six_jpegs(CROP_PX))  # type: ignore[misc]
+        response = await post_infer(harness, meta_json(), crop_jpegs(CROP_PX))  # type: ignore[misc]
         assert response.status_code == 200
         assert response.json()["gap_profiles"] == []
         assert (await harness.client.get("/healthz")).status_code == 200
@@ -284,11 +284,11 @@ async def test_healthz_keeps_exactly_step_sevens_shape(app_with_fake: Harness) -
 
 @pytest.mark.parametrize("crop_px", (512, 640))
 async def test_both_rung_sizes_profile_over_http(
-    crop_px: int, meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    crop_px: int, meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
     async with cloud_harness(depth=DepthHead(lambda: ScriptedDepth(), label="fake")) as harness:
         response = await post_infer(  # type: ignore[misc]
-            harness, meta_json(crop_px=crop_px), six_jpegs(crop_px)
+            harness, meta_json(crop_px=crop_px), crop_jpegs(crop_px)
         )
     assert response.status_code == 200
     profiles = response.json()["gap_profiles"]

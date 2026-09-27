@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import importlib
+import math
 from typing import Literal, get_args
 
 import pytest
 
 from cane.bridge import events as events_module
-from cane.bridge.events import events_from_response, normalize_bearing_deg
+from cane.bridge.dewarp import NADIR_CROP_INDEX, NADIR_FOV_DEG
+from cane.bridge.events import (
+    events_from_response,
+    nadir_floor_distance_m,
+    normalize_bearing_deg,
+)
+from cane.cloud.depth.constants import MOUNT_HEIGHT_M
+from cane.cloud.motion import NEAR_MAX_M
 from cane.bridge.ttl import TTL_MS_BY_CLASS, ttl_ms_for
 from cane.cloud.api_models import Detection, InferenceResponse
 from cane.contracts.awareness_event import (
@@ -19,7 +27,8 @@ from cane.contracts.awareness_event import (
     parse_awareness_event,
 )
 
-YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0)
+# Six ring yaws, then the nadir crop C6 (forward at image-up, so 0.0).
+YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0, 0.0)
 T_CAPTURE_MS = 1_790_000_000_123
 
 
@@ -190,3 +199,84 @@ def test_the_schema_version_is_taken_from_the_contract() -> None:
         importlib.reload(events_module)
 
     assert events_module.SCHEMA_VERSION == contract_version
+
+
+# --- The nadir crop C6 (x4-sphere-coverage PRD, milestone 1) ----------------
+#
+# C6 looks straight down with image-up = forward, so a box's bearing is the
+# direction of its centre from the crop centre, and its distance along the
+# floor follows from the mount height and the off-nadir angle. Everything in
+# C6 is inside 2.42 m at a 1.4 m shoulder, so its band is always "near".
+
+
+@pytest.mark.parametrize(
+    ("cx", "cy", "expected"),
+    [
+        (0.5, 0.25, 0.0),  # above the centre: straight ahead
+        (0.75, 0.5, 90.0),  # right of the centre: to the right
+        (0.5, 0.75, 180.0),  # below the centre: behind
+        (0.25, 0.5, -90.0),  # left of the centre: to the left
+        (0.75, 0.25, 45.0),  # up-right: ahead to the right
+        (0.25, 0.75, -135.0),  # down-left: behind to the left
+    ],
+)
+def test_a_nadir_detection_bears_toward_its_direction_from_the_crop_centre(
+    cx: float, cy: float, expected: float
+) -> None:
+    events = events_from_response(
+        _response(_detection(crop_index=NADIR_CROP_INDEX, cx=cx, cy=cy, track_id="6:1")),
+        yaws_deg=YAWS,
+        delta_deg=0.0,
+    )
+
+    assert events[0].bearing_deg == pytest.approx(expected)
+
+
+def test_delta_deg_rotates_a_nadir_bearing_too() -> None:
+    events = events_from_response(
+        _response(_detection(crop_index=NADIR_CROP_INDEX, cx=0.5, cy=0.25, track_id="6:1")),
+        yaws_deg=YAWS,
+        delta_deg=12.5,
+    )
+
+    assert events[0].bearing_deg == pytest.approx(12.5)
+
+
+def test_a_nadir_detection_is_near_states_no_metres_and_has_no_closing_speed() -> None:
+    """The cloud's band and closing speed come from box height against a
+    horizon-level pinhole, which means nothing looking down; the bridge
+    replaces both from the floor geometry and never states metres."""
+    detection = _detection(
+        crop_index=NADIR_CROP_INDEX, cx=0.5, cy=0.1, track_id="6:1",
+        range_band="far", closing_mps=1.5,
+    )
+
+    (event,) = events_from_response(_response(detection), yaws_deg=YAWS, delta_deg=0.0)
+
+    assert event.range_band == RangeBand.NEAR
+    assert event.closing_mps is None
+    assert event.range_m is None
+
+
+def test_nadir_floor_distance_follows_the_120_degree_pinhole() -> None:
+    half_fov = math.radians(NADIR_FOV_DEG / 2.0)
+    assert nadir_floor_distance_m(0.5, 0.5) == pytest.approx(0.0)
+    # the top edge of the crop is 60 degrees off the nadir: the floor at -30
+    assert nadir_floor_distance_m(0.5, 0.0) == pytest.approx(MOUNT_HEIGHT_M * math.tan(half_fov))
+    assert nadir_floor_distance_m(1.0, 0.5) == pytest.approx(MOUNT_HEIGHT_M * math.tan(half_fov))
+    # the edge midpoints hand over to the ring at 2.42 m ...
+    assert nadir_floor_distance_m(0.5, 0.0) < 2.5
+    # ... but a corner is 67.8 degrees off the nadir, about 3.4 m, still "near"
+    corner = nadir_floor_distance_m(1.0, 0.0)
+    assert corner == pytest.approx(MOUNT_HEIGHT_M * math.tan(math.atan(math.sqrt(2.0) * math.tan(half_fov))))
+    assert 3.3 < corner < 3.5 < NEAR_MAX_M
+
+
+def test_a_nadir_detection_with_only_ring_yaws_is_dropped_not_misplaced(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    events = events_from_response(
+        _response(_detection(crop_index=NADIR_CROP_INDEX)), yaws_deg=YAWS[:6], delta_deg=0.0
+    )
+    assert events == ()
+    assert "crop_index 6" in caplog.text

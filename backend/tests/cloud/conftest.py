@@ -1,6 +1,6 @@
 """Fixtures for the cloud service tests.
 
-JPEGs are encoded once for the whole session: `cv2.imencode` of six 640x640
+JPEGs are encoded once for the whole session: `cv2.imencode` of seven 640x640
 crops is milliseconds, and the overhead benchmark must measure the service,
 not the test's own encoder.
 """
@@ -23,7 +23,8 @@ from cane.cloud.detector.fake import ScriptedDetector
 from cane.cloud.settings import CloudSettings
 
 T_CAPTURE_MS = 1_790_123_456_789
-YAWS = [0.0, 60.0, 120.0, 180.0, -120.0, -60.0]
+# Six ring yaws, then the nadir crop C6 (oriented with forward at image-up, so 0.0).
+YAWS = [0.0, 60.0, 120.0, 180.0, -120.0, -60.0, 0.0]
 JPEG_QUALITY = 70
 Files = list[tuple[str, tuple[str, bytes, str]]]
 
@@ -40,7 +41,7 @@ def _encode(crop_px: int, seed: int) -> bytes:
 
 
 @pytest.fixture(scope="session")
-def six_jpegs() -> Callable[[int], Files]:
+def crop_jpegs() -> Callable[[int], Files]:
     cache: dict[int, Files] = {}
 
     def build(crop_px: int = 640) -> Files:

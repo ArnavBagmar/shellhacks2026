@@ -12,11 +12,14 @@ must be told which one answered (step-07-design H2).
 from __future__ import annotations
 
 import logging
+import math
 from typing import get_args
 
-from cane.bridge.dewarp import CROP_FOV_DEG
+from cane.bridge.dewarp import CROP_FOV_DEG, NADIR_CROP_INDEX, NADIR_FOV_DEG
 from cane.bridge.ttl import ttl_ms_for
 from cane.cloud.api_models import Detection, InferenceResponse
+from cane.cloud.depth.constants import MOUNT_HEIGHT_M
+from cane.cloud.motion import band_for_range
 from cane.contracts.awareness_event import (
     AwarenessEvent,
     AwarenessEventError,
@@ -54,18 +57,61 @@ def normalize_bearing_deg(deg: float) -> float:
     return wrapped + FULL_TURN_DEG if wrapped <= -HALF_TURN_DEG else wrapped
 
 
+def nadir_off_axis_deg(cx: float, cy: float) -> float:
+    """Angle between the nadir and a C6 box centre at normalised ``(cx, cy)``.
+
+    C6 is a pinhole of ``NADIR_FOV_DEG``: a point ``rho`` (in half-widths)
+    from the centre is ``atan(rho * tan(FOV / 2))`` off the axis.
+    """
+    rho = 2.0 * math.hypot(cx - 0.5, cy - 0.5)
+    return math.degrees(math.atan(rho * math.tan(math.radians(NADIR_FOV_DEG / 2.0))))
+
+
+def nadir_bearing_deg(cx: float, cy: float, delta_deg: float) -> float:
+    """C6 has forward at image-up and right at image-right, so a box bears
+    toward its direction from the crop centre; ``delta_deg`` still rotates it.
+    """
+    return normalize_bearing_deg(math.degrees(math.atan2(cx - 0.5, -(cy - 0.5))) + delta_deg)
+
+
+def nadir_floor_distance_m(cx: float, cy: float) -> float:
+    """Horizontal distance to a floor-contact point seen at ``(cx, cy)`` in C6,
+    from the shoulder height. Used only to choose a band -- the X4 path never
+    emits metres. The crop's edge midpoints are 60 degrees off the nadir (2.42 m
+    at 1.4 m, where the ring takes over); its corners reach 67.8 degrees, about
+    3.4 m, which is still well inside the 5 m ``near`` band.
+    """
+    return MOUNT_HEIGHT_M * math.tan(math.radians(nadir_off_axis_deg(cx, cy)))
+
+
 def bearing_for_detection(
     detection: Detection, yaws_deg: tuple[float, ...], delta_deg: float
 ) -> float:
-    """``yaw + (cx - 0.5) * FOV + delta``, normalized (F3).
+    """Ring crops: ``yaw + (cx - 0.5) * FOV + delta``, normalized (F3).
+    C6: the radial direction of the box from the crop centre.
 
     The linear term is the brief's mandated approximation of the pinhole
     projection (the exact inverse is ``atan(tan(FOV/2) * (2cx - 1))``); the two
     agree at the crop centre and edges and differ by at most ~1.5 degrees in
     between, which is well inside the bearing resolution the phone renders.
     """
+    if detection.crop_index == NADIR_CROP_INDEX:
+        return nadir_bearing_deg(detection.cx, detection.cy, delta_deg)
     yaw_deg = yaws_deg[detection.crop_index]
     return normalize_bearing_deg(yaw_deg + (detection.cx - 0.5) * CROP_FOV_DEG + delta_deg)
+
+
+def _range_band_and_closing(detection: Detection) -> tuple[str | None, float | None]:
+    """The cloud's band and closing speed come from box height against a
+    horizon-level pinhole. Looking straight down that means nothing, so a C6
+    detection takes its band from the floor geometry and no closing speed.
+    """
+    if detection.crop_index == NADIR_CROP_INDEX:
+        return band_for_range(nadir_floor_distance_m(detection.cx, detection.cy)).value, None
+    return (
+        detection.range_band.value if detection.range_band else None,
+        detection.closing_mps,
+    )
 
 
 def event_from_detection(
@@ -85,6 +131,7 @@ def event_from_detection(
             len(yaws_deg),
         )
         return None
+    range_band, closing_mps = _range_band_and_closing(detection)
     payload = {
         "schema": SCHEMA_VERSION,
         "source": source.value,
@@ -97,8 +144,8 @@ def event_from_detection(
         # The X4 path never states metres: monocular through a fisheye with no
         # usable ground plane (device-responsibilities.md).
         "range_m": None,
-        "range_band": detection.range_band.value if detection.range_band else None,
-        "closing_mps": detection.closing_mps,
+        "range_band": range_band,
+        "closing_mps": closing_mps,
     }
     try:
         return parse_awareness_event(payload)

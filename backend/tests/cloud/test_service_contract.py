@@ -26,9 +26,10 @@ from cane.contracts.awareness_event import (
 
 T0 = 1_790_000_000_000
 CROP_PX = 640
-YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0)
+YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0, 0.0)  # C6 last
 DELTA_DEG = 0.0
-COCO_NAMES = ("person", "bicycle", "motorcycle", "truck", "bus", "stop sign")
+# One per crop; the last is what the nadir crop C6 would see on the floor.
+COCO_NAMES = ("person", "bicycle", "motorcycle", "truck", "bus", "stop sign", "dog")
 
 
 def _meta(t_capture_ms: int) -> InferenceMeta:

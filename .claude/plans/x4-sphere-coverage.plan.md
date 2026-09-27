@@ -113,8 +113,15 @@ No linter is configured in `backend/pyproject.toml`; match the surrounding style
 | The user rules the six-crop API frozen | Unknown (PRD open question 1) | Then this plan is void and option A applies, with the steering rework it implies; confirm before Task 1 |
 
 ## Acceptance
-- [ ] All tasks complete
-- [ ] Validation passes (backend suite green, latitude probe prints 7 crops and −90 outside the mask, CaneKit unchanged)
-- [ ] Patterns mirrored, not reinvented (constants with `#:` sources, sentence test names, stripe-centroid tests, drop-and-log)
-- [ ] `docs/steps/assets/x4-sphere-coverage-crops.jpg` shows the table contents in `C6`
-- [ ] PRD milestone 1 row marked complete with this plan linked
+- [x] All tasks complete (2026-09-26, worktree `~/Desktop/shellhacks-x4`, branch `feat/x4-sphere-coverage`)
+- [x] Validation passes: backend 1391 passed / 3 skipped; latitude probe prints 7 crops, ring −30…+30, nadir −55…−22 outside the mask (deepest unmasked −55°, the PRD bar); `ios/` untouched so CaneKit is unchanged by construction
+- [x] Patterns mirrored, not reinvented
+- [x] `docs/steps/assets/x4-sphere-coverage-crops.jpg` shows the table contents in `C6`
+- [x] PRD milestone 1 row marked complete with this plan linked
+
+## Found while executing
+- The cloud app (`app.py`) and the dev stub server declare one FastAPI upload parameter per crop, so the crop count is spelled out there too; both now carry `crop_6` with an assertion against `CROP_COUNT`.
+- The cloud's own debug contact sheet (`debug_dump.py`) tiled 3×2; it now tiles 4×2 with a black last cell like the bridge snapshot.
+- Four test modules kept a private six-entry `YAWS`; all now end with the nadir's `0.0`.
+- The scene VLM keeps receiving the six ring crops only (`scene/service.py`), because `View.centre_deg`/`fov_deg` cannot express C6's radial bearing; milestone 3 owns that.
+- Milestone 2 must re-export the L4 engine (`STATIC_BATCH` is now 7) before the cloud path works live; until then the bridge's local detector carries the nadir crop.
