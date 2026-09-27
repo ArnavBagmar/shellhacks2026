@@ -181,7 +181,7 @@ def test_a_profile_is_never_zero_filled() -> None:
 
 
 def test_fewer_crops_than_the_ring_expects_is_survivable() -> None:
-    """A malformed request never reaches here (the app requires six parts),
+    """A malformed request never reaches here (the app requires ``CROP_COUNT`` parts),
     but the local-fallback caller is in-process and could pass anything.
     """
     estimator = ScriptedDepth()

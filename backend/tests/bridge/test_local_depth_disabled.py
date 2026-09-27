@@ -40,12 +40,12 @@ def test_the_local_service_is_built_with_no_depth_head() -> None:
 
 
 async def test_the_local_backend_answers_with_no_gap_profiles(
-    six_jpegs: Callable[..., tuple[bytes, ...]],
+    crop_jpegs: Callable[..., tuple[bytes, ...]],
     meta: Callable[..., InferenceMeta],
 ) -> None:
     """The other half of "no steer in local": there is no profile to steer from."""
     backend = LocalBackend.build(local_settings("fake"), warm_up_px=None)
 
-    response = await backend.infer(meta(), six_jpegs())
+    response = await backend.infer(meta(), crop_jpegs())
 
     assert response.gap_profiles == ()

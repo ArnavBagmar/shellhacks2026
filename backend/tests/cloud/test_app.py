@@ -38,9 +38,9 @@ async def _post(harness: Harness, meta: str, files: Sequence[Any], **kw: Any) ->
 
 
 async def test_infer_returns_valid_response(
-    app_with_fake: Harness, meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    app_with_fake: Harness, meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
-    response = await _post(app_with_fake, meta_json(), six_jpegs(640))
+    response = await _post(app_with_fake, meta_json(), crop_jpegs(640))
     assert response.status_code == 200
     body = InferenceResponse.model_validate_json(response.content)
     assert body.schema_version == 1
@@ -54,25 +54,25 @@ async def test_infer_returns_valid_response(
 
 
 async def test_t_capture_ms_is_echoed_byte_identical(
-    app_with_fake: Harness, meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    app_with_fake: Harness, meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
-    response = await _post(app_with_fake, meta_json(), six_jpegs(640))
+    response = await _post(app_with_fake, meta_json(), crop_jpegs(640))
     assert response.json()["t_capture_ms"] == T_CAPTURE_MS
     assert f'"t_capture_ms":{T_CAPTURE_MS}' in response.text.replace(", ", ",")
 
 
 async def test_the_wire_key_is_schema_not_schema_version(
-    app_with_fake: Harness, meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    app_with_fake: Harness, meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
-    response = await _post(app_with_fake, meta_json(), six_jpegs(640))
+    response = await _post(app_with_fake, meta_json(), crop_jpegs(640))
     assert response.json()["schema"] == 1
     assert "schema_version" not in response.text
 
 
 async def test_response_json_mentions_no_metres_and_no_bearing(
-    app_with_fake: Harness, meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    app_with_fake: Harness, meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
-    response = await _post(app_with_fake, meta_json(), six_jpegs(640))
+    response = await _post(app_with_fake, meta_json(), crop_jpegs(640))
     assert "range_m" not in response.text
     assert "bearing" not in response.text
 
@@ -131,7 +131,7 @@ class _ClockBomb:
 
 
 async def test_request_path_survives_a_raising_time_time(
-    meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
     import httpx
 
@@ -141,7 +141,7 @@ async def test_request_path_survives_a_raising_time_time(
         transport = httpx.ASGITransport(app=_ClockBomb(real_app))
         async with httpx.AsyncClient(transport=transport, base_url="http://cloud") as client:
             response = await client.post(
-                "/infer", data={"meta": meta_json()}, files=list(six_jpegs(640))
+                "/infer", data={"meta": meta_json()}, files=list(crop_jpegs(640))
             )
             health = await client.get("/healthz")
     assert response.status_code == 200
@@ -150,42 +150,42 @@ async def test_request_path_survives_a_raising_time_time(
 
 
 async def test_malformed_meta_returns_422(
-    app_with_fake: Harness, six_jpegs: Callable[..., Any]
+    app_with_fake: Harness, crop_jpegs: Callable[..., Any]
 ) -> None:
     for bad in ("{not json", "", "[]", '{"schema": 1}'):
-        response = await _post(app_with_fake, bad, six_jpegs(640))
+        response = await _post(app_with_fake, bad, crop_jpegs(640))
         assert response.status_code == 422, bad
 
 
 async def test_a_422_never_echoes_the_client_payload(
-    app_with_fake: Harness, meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    app_with_fake: Harness, meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
     secret = "../secret-" + "A" * 30
-    response = await _post(app_with_fake, meta_json(session_id=secret), six_jpegs(640))
+    response = await _post(app_with_fake, meta_json(session_id=secret), crop_jpegs(640))
     assert response.status_code == 422
     assert secret not in response.text
 
 
 async def test_missing_crop_returns_422(
-    app_with_fake: Harness, meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    app_with_fake: Harness, meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
-    response = await _post(app_with_fake, meta_json(), six_jpegs(640)[: CROP_COUNT - 1])
+    response = await _post(app_with_fake, meta_json(), crop_jpegs(640)[: CROP_COUNT - 1])
     assert response.status_code == 422
 
 
 async def test_crop_size_mismatch_returns_422(
-    app_with_fake: Harness, meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    app_with_fake: Harness, meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
     """Never trust the meta to describe the bytes."""
-    response = await _post(app_with_fake, meta_json(crop_px=512), six_jpegs(640))
+    response = await _post(app_with_fake, meta_json(crop_px=512), crop_jpegs(640))
     assert response.status_code == 422
     assert "crop" in response.text
 
 
 async def test_undecodable_jpeg_returns_422(
-    app_with_fake: Harness, meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    app_with_fake: Harness, meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
-    files = list(six_jpegs(640))
+    files = list(crop_jpegs(640))
     files[3] = (crop_field_name(3), ("crop_3.jpg", b"\xff\xd8not-an-image", "image/jpeg"))
     response = await _post(app_with_fake, meta_json(), files)
     assert response.status_code == 422
@@ -193,11 +193,11 @@ async def test_undecodable_jpeg_returns_422(
 
 
 async def test_oversize_crop_returns_413(
-    meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
     """One huge multipart part must not be spooled to the VM's disk."""
     async with cloud_harness(max_crop_bytes=1024) as harness:
-        response = await _post(harness, meta_json(), six_jpegs(640))
+        response = await _post(harness, meta_json(), crop_jpegs(640))
         assert response.status_code == 413
 
 
@@ -232,12 +232,12 @@ async def test_an_oversize_part_is_rejected_without_reading_it_whole() -> None:
 
 
 async def test_an_oversize_crop_never_reaches_the_detector(
-    meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
     """413 is decided on the first part, before any decode or inference."""
     limit = 1024
     async with cloud_harness(max_crop_bytes=limit) as harness:
-        files = list(six_jpegs(640))
+        files = list(crop_jpegs(640))
         files[0] = (crop_field_name(0), ("crop_0.jpg", b"\x00" * (limit + 4096), "image/jpeg"))
         response = await _post(harness, meta_json(), files)
         assert response.status_code == 413
@@ -246,14 +246,14 @@ async def test_an_oversize_crop_never_reaches_the_detector(
 
 
 async def test_api_key_required_when_configured(
-    meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
     async with cloud_harness(api_key="s3cret") as harness:
-        assert (await _post(harness, meta_json(), six_jpegs(640))).status_code == 401
-        wrong = await _post(harness, meta_json(), six_jpegs(640), headers={"X-Cane-Key": "no"})
+        assert (await _post(harness, meta_json(), crop_jpegs(640))).status_code == 401
+        wrong = await _post(harness, meta_json(), crop_jpegs(640), headers={"X-Cane-Key": "no"})
         assert wrong.status_code == 401
         good = await _post(
-            harness, meta_json(), six_jpegs(640), headers={"X-Cane-Key": "s3cret"}
+            harness, meta_json(), crop_jpegs(640), headers={"X-Cane-Key": "s3cret"}
         )
         assert good.status_code == 200
         assert (await harness.client.get("/warmup")).status_code == 401
@@ -262,7 +262,7 @@ async def test_api_key_required_when_configured(
 
 
 async def test_healthz_shape(
-    app_with_fake: Harness, meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    app_with_fake: Harness, meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
     before = (await app_with_fake.client.get("/healthz")).json()
     assert set(before) == {
@@ -272,7 +272,7 @@ async def test_healthz_shape(
         "detector": "fake", "engine_ready": True, "gpu": None,
         "weights": "scripted", "sessions": 0, "last_inference_ms": None,
     }
-    await _post(app_with_fake, meta_json(), six_jpegs(640))
+    await _post(app_with_fake, meta_json(), crop_jpegs(640))
     after = (await app_with_fake.client.get("/healthz")).json()
     assert after["sessions"] == 1
     assert after["last_inference_ms"] > 0.0
@@ -312,11 +312,11 @@ class _ExplodingDetector:
 
 
 async def test_detector_failure_returns_503_without_a_traceback(
-    meta_json: Callable[..., str], six_jpegs: Callable[..., Any], caplog: pytest.LogCaptureFixture
+    meta_json: Callable[..., str], crop_jpegs: Callable[..., Any], caplog: pytest.LogCaptureFixture
 ) -> None:
     async with cloud_harness(_ExplodingDetector()) as harness:  # type: ignore[arg-type]
         with caplog.at_level(logging.ERROR):
-            response = await _post(harness, meta_json(), six_jpegs(640))
+            response = await _post(harness, meta_json(), crop_jpegs(640))
     assert response.status_code == 503
     assert response.json() == {"detail": "inference unavailable"}
     assert _ExplodingDetector.secret not in response.text
@@ -343,7 +343,7 @@ class _CountingDetector(ScriptedDetector):
 
 
 async def test_concurrent_requests_are_serialized(
-    meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
     """The bridge sends one request at a time, but /warmup, the smoke tool
     and step 8's health poll can all overlap it -- and a TensorRT execution
@@ -352,8 +352,8 @@ async def test_concurrent_requests_are_serialized(
     detector = _CountingDetector()
     async with cloud_harness(detector) as harness:  # type: ignore[arg-type]
         await asyncio.gather(
-            _post(harness, meta_json(), six_jpegs(640)),
-            _post(harness, meta_json(t_capture_ms=T_CAPTURE_MS + 333), six_jpegs(640)),
+            _post(harness, meta_json(), crop_jpegs(640)),
+            _post(harness, meta_json(t_capture_ms=T_CAPTURE_MS + 333), crop_jpegs(640)),
         )
     assert detector.max_inflight == 1
 
@@ -367,9 +367,9 @@ async def test_the_lock_is_not_a_module_global() -> None:
 
 
 async def test_non_inference_overhead_p50_under_budget(
-    meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
-    files = six_jpegs(640)  # encoded once, outside the loop
+    files = crop_jpegs(640)  # encoded once, outside the loop
     empty = ScriptedDetector([tuple(() for _ in range(CROP_COUNT))])
     async with cloud_harness(empty) as harness:  # type: ignore[arg-type]
         samples: list[float] = []
@@ -398,7 +398,7 @@ async def test_non_inference_overhead_p50_under_budget(
 
 
 async def test_a_detection_that_grows_produces_a_closing_speed(
-    meta_json: Callable[..., str], six_jpegs: Callable[..., Any]
+    meta_json: Callable[..., str], crop_jpegs: Callable[..., Any]
 ) -> None:
     """End to end through HTTP, not just the service: the id is stable and,
     once two samples agree on the direction, a signed range rate reaches the
@@ -408,7 +408,7 @@ async def test_a_detection_that_grows_produces_a_closing_speed(
         ids, closings = [], []
         for index in range(3):
             meta = meta_json(t_capture_ms=T_CAPTURE_MS + 333 * index)
-            body = InferenceResponse.model_validate_json((await _post(harness, meta, six_jpegs(640))).content)
+            body = InferenceResponse.model_validate_json((await _post(harness, meta, crop_jpegs(640))).content)
             ids.append(body.detections[0].track_id)
             closings.append(body.detections[0].closing_mps)
     assert len(set(ids)) == 1

@@ -23,7 +23,7 @@ from cane.cloud.api_models import (
 from cane.contracts.awareness_event import T_CAPTURE_MS_MAX, T_CAPTURE_MS_MIN
 
 T_CAPTURE_MS = 1_790_123_456_789
-YAWS = [0.0, 60.0, 120.0, 180.0, -120.0, -60.0]
+YAWS = [0.0, 60.0, 120.0, 180.0, -120.0, -60.0, 0.0]
 FORBIDDEN_DETECTION_FIELDS = frozenset({"range_m", "bearing_deg", "urgency", "ttl_ms"})
 FORBIDDEN_GAP_PROFILE_FIELDS = frozenset(
     {"t_capture_ms", "t_cloud_ms", "timestamp", "bearing_deg", "steer", "proximity"}
@@ -71,12 +71,12 @@ def test_t_capture_ms_outside_contract_window_is_rejected() -> None:
 
 def test_yaws_deg_accepts_integers() -> None:
     """A bridge serialising [0, 60, 120, ...] must not be 422'd (A2.3)."""
-    meta = InferenceMeta.model_validate_json(meta_json(yaws_deg=[0, 60, 120, 180, -120, -60]))
-    assert meta.yaws_deg == (0.0, 60.0, 120.0, 180.0, -120.0, -60.0)
+    meta = InferenceMeta.model_validate_json(meta_json(yaws_deg=[0, 60, 120, 180, -120, -60, 0]))
+    assert meta.yaws_deg == tuple(YAWS)
     assert isinstance(meta.yaws_deg, tuple)
 
 
-def test_yaws_deg_requires_exactly_six() -> None:
+def test_yaws_deg_requires_exactly_crop_count_entries() -> None:
     for bad in ([0.0] * (CROP_COUNT - 1), [0.0] * (CROP_COUNT + 1), []):
         with pytest.raises(ValidationError):
             InferenceMeta.model_validate_json(meta_json(yaws_deg=bad))
@@ -210,7 +210,7 @@ def test_gap_profile_band_rows_must_be_ordered_and_non_negative() -> None:
             GapProfile.model_validate_json(gap_profile_json(band_rows=bad))
 
 
-def test_gap_profile_crop_index_spans_all_six_crops() -> None:
+def test_gap_profile_crop_index_spans_every_crop() -> None:
     """Only C5/C0/C1 are populated today (plan Sec 1.2), but that is step 22's
     policy, not the contract's: the field is a crop index, so its bound is
     the crop count.
@@ -218,7 +218,7 @@ def test_gap_profile_crop_index_spans_all_six_crops() -> None:
     for index in range(CROP_COUNT):
         profile = GapProfile.model_validate_json(gap_profile_json(crop_index=index))
         assert profile.crop_index == index
-    for bad in (-1, CROP_COUNT, 6):
+    for bad in (-1, CROP_COUNT, CROP_COUNT + 1):
         with pytest.raises(ValidationError):
             GapProfile.model_validate_json(gap_profile_json(crop_index=bad))
 

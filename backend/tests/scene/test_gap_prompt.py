@@ -245,7 +245,7 @@ def test_the_clause_is_bounded_in_size_and_in_numbers(
     assert len(re.findall(r"\d+(?:\.\d+)?", clause)) <= MAX_GAP_CLAUSE_NUMBERS
 
 
-def test_the_bound_is_small_enough_to_be_free_beside_six_jpegs() -> None:
+def test_the_bound_is_small_enough_to_be_free_beside_crop_jpegs() -> None:
     assert MAX_GAP_CLAUSE_CHARS <= 280
 
 

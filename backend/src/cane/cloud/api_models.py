@@ -28,7 +28,9 @@ from cane.contracts.awareness_event import (
 )
 
 SCHEMA_VERSION = 1
-CROP_COUNT = 6
+#: Six 60-degree ring crops (C0..C5) plus the 120-degree nadir crop C6
+#: (docs/device-responsibilities.md crop table; PRD x4-sphere-coverage).
+CROP_COUNT = 7
 #: Shepherd stage 4, verbatim: 16 vertical columns per view. Three forward
 #: crops of 16 are the bridge's 48-column ring over -90..+90 (plan Sec 3).
 COLUMNS_PER_CROP = 16
@@ -65,7 +67,7 @@ GroundOffset = Annotated[float, Field(strict=False, allow_inf_nan=False)]
 
 
 def crop_field_name(index: int) -> str:
-    """Multipart field name for crop ``index`` (``crop_0`` .. ``crop_5``)."""
+    """Multipart field name for crop ``index`` (``crop_0`` .. ``crop_6``)."""
     if not CROP_INDEX_MIN <= index <= CROP_INDEX_MAX:
         raise ValueError(f"crop index must be 0..{CROP_INDEX_MAX}, got {index}")
     return f"{CROP_FIELD_PREFIX}{index}"
@@ -246,7 +248,7 @@ class InferenceResponse(BaseModel):
 
 
 class InferenceRequest(BaseModel):
-    """``meta`` + exactly six JPEG crops, ready to be posted as multipart."""
+    """``meta`` + exactly ``CROP_COUNT`` JPEG crops, ready to be posted as multipart."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 

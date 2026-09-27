@@ -1,6 +1,6 @@
 """Shared fixtures for the bridge tests (step 8 onwards).
 
-JPEGs are encoded once per session: six 640x640 `cv2.imencode` calls are
+JPEGs are encoded once per session: seven 640x640 `cv2.imencode` calls are
 milliseconds each, and the fallback tests post the same crops dozens of
 times. Textured noise, not a flat colour -- a flat crop compresses to a few
 hundred bytes and would make the decode cost unrepresentative.
@@ -39,7 +39,8 @@ from cane.cloud.api_models import (
 )
 
 T_CAPTURE_MS = 1_790_123_456_789
-YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0)
+# Six ring yaws, then the nadir crop C6 (oriented with forward at image-up, so 0.0).
+YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0, 0.0)
 JPEG_QUALITY = 70
 DEFAULT_CROP_PX = 640
 SESSION_ID = "bridge-step8"
@@ -56,7 +57,7 @@ def encode_crop(crop_px: int, seed: int, quality: int = JPEG_QUALITY) -> bytes:
 
 
 @pytest.fixture(scope="session")
-def six_jpegs() -> Callable[..., Jpegs]:
+def crop_jpegs() -> Callable[..., Jpegs]:
     cache: dict[tuple[int, int], Jpegs] = {}
 
     def build(crop_px: int = DEFAULT_CROP_PX, quality: int = JPEG_QUALITY) -> Jpegs:

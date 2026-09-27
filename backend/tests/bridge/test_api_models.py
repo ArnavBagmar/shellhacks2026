@@ -21,7 +21,7 @@ from cane.cloud.api_models import (
 from cane.contracts.awareness_event import ObjectClass, RangeBand
 
 T_CAPTURE_MS = 1_790_000_000_123
-YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0)
+YAWS = (0.0, 60.0, 120.0, 180.0, -120.0, -60.0, 0.0)
 
 
 def _meta_json(**patch: object) -> str:
@@ -81,7 +81,7 @@ def test_meta_sequences_are_tuples_so_the_model_is_deeply_immutable() -> None:
 
 
 def test_yaws_may_arrive_as_json_integers() -> None:
-    meta = InferenceMeta.model_validate_json(_meta_json(yaws_deg=[0, 60, 120, 180, -120, -60]))
+    meta = InferenceMeta.model_validate_json(_meta_json(yaws_deg=[0, 60, 120, 180, -120, -60, 0]))
     assert meta.yaws_deg == YAWS
 
 
@@ -91,7 +91,7 @@ def test_yaws_may_arrive_as_json_integers() -> None:
         {"t_capture_ms": "1790000000123"},  # strict: no string->int coercion
         {"rung": 0},
         {"rung": 5},
-        {"yaws_deg": [0.0, 60.0]},  # must be exactly six
+        {"yaws_deg": [0.0, 60.0]},  # must be exactly CROP_COUNT
         {"session_id": ""},
         {"session_id": "has spaces"},
         {"crop_px": 700},  # not a multiple of 32
@@ -124,7 +124,7 @@ def test_detection_allows_null_motion_fields() -> None:
 @pytest.mark.parametrize(
     "patch",
     [
-        {"crop_index": 6},
+        {"crop_index": CROP_COUNT},
         {"crop_index": -1},
         {"cx": 1.2},
         {"cy": -0.01},
@@ -171,7 +171,7 @@ def test_a_cloud_track_id_with_a_generation_segment_is_accepted() -> None:
     assert detection.track_id == "3:12:7"
 
 
-def test_request_carries_exactly_six_crops_and_names_its_fields() -> None:
+def test_request_carries_exactly_crop_count_crops_and_names_its_fields() -> None:
     request = InferenceRequest(
         meta=_meta(), crops=tuple(b"jpeg-%d" % i for i in range(CROP_COUNT))
     )

@@ -149,7 +149,7 @@ def test_the_warm_up_runs_at_the_crop_size_it_is_given() -> None:
 
 
 async def test_a_local_inference_over_its_budget_is_a_timeout_and_frees_the_slot(
-    six_jpegs: Callable[..., Jpegs],
+    crop_jpegs: Callable[..., Jpegs],
 ) -> None:
     """Local inference also takes time; a stuck model must not hold the
     one-in-flight slot for the rest of the walk.
@@ -164,7 +164,7 @@ async def test_a_local_inference_over_its_budget_is_a_timeout_and_frees_the_slot
 
     started = time.monotonic()
     with pytest.raises(BackendTimeout):
-        await backend.infer(make_meta(), six_jpegs())
+        await backend.infer(make_meta(), crop_jpegs())
     elapsed = time.monotonic() - started
 
     assert elapsed < SLOW_DETECT_S
@@ -172,12 +172,12 @@ async def test_a_local_inference_over_its_budget_is_a_timeout_and_frees_the_slot
     # request is answered normally.
     await asyncio.sleep(SLOW_DETECT_S)
     slow.sleep_s = 0.0
-    response = await backend.infer(make_meta(), six_jpegs())
+    response = await backend.infer(make_meta(), crop_jpegs())
     assert response.t_capture_ms == T_CAPTURE_MS
 
 
 async def test_a_frame_arriving_while_an_abandoned_worker_still_runs_is_rejected_not_run(
-    six_jpegs: Callable[..., Jpegs],
+    crop_jpegs: Callable[..., Jpegs],
 ) -> None:
     """`asyncio.timeout` frees the slot but cannot stop the thread. The
     service is not thread-safe, so the next frame must be *rejected* (a
@@ -191,17 +191,17 @@ async def test_a_frame_arriving_while_an_abandoned_worker_still_runs_is_rejected
         timeout_s=LOCAL_BUDGET_S,
     )
     with pytest.raises(BackendTimeout):
-        await backend.infer(make_meta(), six_jpegs())
+        await backend.infer(make_meta(), crop_jpegs())
 
     started = time.monotonic()
     with pytest.raises(BackendError):
-        await backend.infer(make_meta(), six_jpegs())
+        await backend.infer(make_meta(), crop_jpegs())
     assert time.monotonic() - started < LOCAL_BUDGET_S, "rejected immediately, not queued"
     assert len(slow.batches) == 1, "the service was never entered concurrently"
 
     await asyncio.sleep(SLOW_DETECT_S)
     slow.sleep_s = 0.0
-    response = await backend.infer(make_meta(), six_jpegs())
+    response = await backend.infer(make_meta(), crop_jpegs())
     assert response.t_capture_ms == T_CAPTURE_MS
     assert len(slow.batches) == 2
 
@@ -221,12 +221,12 @@ def test_the_local_budget_default_is_the_configurable_one() -> None:
 
 
 async def test_local_backend_answers_with_a_valid_response_echoing_the_stamp(
-    six_jpegs: Callable[..., Jpegs],
+    crop_jpegs: Callable[..., Jpegs],
 ) -> None:
     backend = _local_backend()
     meta = make_meta()
 
-    response = await backend.infer(meta, six_jpegs())
+    response = await backend.infer(meta, crop_jpegs())
 
     assert isinstance(response, InferenceResponse)
     assert response.t_capture_ms == meta.t_capture_ms
@@ -235,12 +235,12 @@ async def test_local_backend_answers_with_a_valid_response_echoing_the_stamp(
 
 
 async def test_local_backend_keeps_its_tracker_state_under_a_local_session_id(
-    six_jpegs: Callable[..., Jpegs],
+    crop_jpegs: Callable[..., Jpegs],
 ) -> None:
     """Cloud and local must never share tracker state (E1)."""
     backend = _local_backend()
 
-    await backend.infer(make_meta(), six_jpegs())
+    await backend.infer(make_meta(), crop_jpegs())
 
     assert backend.service.registry.sessions == (f"{SESSION_ID}{LOCAL_SESSION_SUFFIX}",)
 
@@ -256,22 +256,22 @@ def test_a_maximum_length_session_id_still_yields_a_contract_valid_local_id() ->
 
 
 async def test_local_backend_rejects_a_crop_that_does_not_decode(
-    six_jpegs: Callable[..., Jpegs],
+    crop_jpegs: Callable[..., Jpegs],
 ) -> None:
     backend = _local_backend()
-    jpegs = (b"not a jpeg",) + six_jpegs()[1:]
+    jpegs = (b"not a jpeg",) + crop_jpegs()[1:]
 
     with pytest.raises(BackendError):
         await backend.infer(make_meta(), jpegs)
 
 
 async def test_local_backend_rejects_a_crop_whose_size_contradicts_meta(
-    six_jpegs: Callable[..., Jpegs],
+    crop_jpegs: Callable[..., Jpegs],
 ) -> None:
     backend = _local_backend()
 
     with pytest.raises(BackendError):
-        await backend.infer(make_meta(crop_px=512), six_jpegs(DEFAULT_CROP_PX))
+        await backend.infer(make_meta(crop_px=512), crop_jpegs(DEFAULT_CROP_PX))
 
 
 # --------------------------------------------------------------------------
@@ -306,17 +306,17 @@ def _ok_body(t_capture_ms: int) -> bytes:
 
 
 async def test_cloud_backend_maps_an_httpx_timeout_to_backend_timeout(
-    six_jpegs: Callable[..., Jpegs],
+    crop_jpegs: Callable[..., Jpegs],
 ) -> None:
     transport = FakeTransport(lambda: httpx.ReadTimeout("too slow"))
     backend = CloudBackend(transport)
 
     with pytest.raises(BackendTimeout):
-        await backend.infer(make_meta(), six_jpegs())
+        await backend.infer(make_meta(), crop_jpegs())
 
 
 async def test_cloud_backend_times_out_a_request_slower_than_its_own_budget(
-    six_jpegs: Callable[..., Jpegs],
+    crop_jpegs: Callable[..., Jpegs],
 ) -> None:
     """A slow answer is a *timeout outcome*, not a slow RTT (E1)."""
 
@@ -331,11 +331,11 @@ async def test_cloud_backend_times_out_a_request_slower_than_its_own_budget(
     backend = CloudBackend(Hanging(), timeout_s=SHORT_TIMEOUT_S)
 
     with pytest.raises(BackendTimeout):
-        await backend.infer(make_meta(), six_jpegs())
+        await backend.infer(make_meta(), crop_jpegs())
 
 
 async def test_cloud_backend_maps_a_5xx_to_backend_error_with_its_status(
-    six_jpegs: Callable[..., Jpegs],
+    crop_jpegs: Callable[..., Jpegs],
 ) -> None:
     transport = FakeTransport(
         lambda: CloudResponseError("boom", status_code=HTTP_SERVER_ERROR)
@@ -343,44 +343,44 @@ async def test_cloud_backend_maps_a_5xx_to_backend_error_with_its_status(
     backend = CloudBackend(transport)
 
     with pytest.raises(BackendError) as excinfo:
-        await backend.infer(make_meta(), six_jpegs())
+        await backend.infer(make_meta(), crop_jpegs())
     assert excinfo.value.status == HTTP_SERVER_ERROR
 
 
 async def test_cloud_backend_maps_a_refused_connection_to_a_statusless_error(
-    six_jpegs: Callable[..., Jpegs],
+    crop_jpegs: Callable[..., Jpegs],
 ) -> None:
     transport = FakeTransport(lambda: httpx.ConnectError("connection refused"))
     backend = CloudBackend(transport)
 
     with pytest.raises(BackendError) as excinfo:
-        await backend.infer(make_meta(), six_jpegs())
+        await backend.infer(make_meta(), crop_jpegs())
     assert excinfo.value.status is None
 
 
 async def test_cloud_backend_maps_an_unparseable_200_to_a_backend_error(
-    six_jpegs: Callable[..., Jpegs],
+    crop_jpegs: Callable[..., Jpegs],
 ) -> None:
     transport = FakeTransport(lambda: b"{not json")
     backend = CloudBackend(transport)
 
     with pytest.raises(BackendError) as excinfo:
-        await backend.infer(make_meta(), six_jpegs())
+        await backend.infer(make_meta(), crop_jpegs())
     assert excinfo.value.status == HTTP_OK
 
 
 async def test_cloud_backend_posts_the_six_crops_and_the_meta_it_was_given(
-    six_jpegs: Callable[..., Jpegs],
+    crop_jpegs: Callable[..., Jpegs],
 ) -> None:
     meta = make_meta()
     transport = FakeTransport(lambda: _ok_body(meta.t_capture_ms))
     backend = CloudBackend(transport)
 
-    response = await backend.infer(meta, six_jpegs())
+    response = await backend.infer(meta, crop_jpegs())
 
     assert response.t_capture_ms == meta.t_capture_ms
     assert transport.requests[0].meta == meta
-    assert transport.requests[0].crops == six_jpegs()
+    assert transport.requests[0].crops == crop_jpegs()
     assert backend.source is Source.X4_CLOUD
     await backend.aclose()
     assert transport.closed
@@ -414,19 +414,19 @@ class RecordingBackend:
 
 
 async def test_switching_backend_routes_by_the_monitors_current_mode(
-    six_jpegs: Callable[..., Jpegs],
+    crop_jpegs: Callable[..., Jpegs],
 ) -> None:
     mode = FakeMode(is_local=False)
     cloud = RecordingBackend("cloud", Source.X4_CLOUD)
     local = RecordingBackend("local", Source.X4_LOCAL)
     switching = SwitchingBackend(mode, cloud=cloud, local=local)
 
-    await switching.infer(make_meta(), six_jpegs())
+    await switching.infer(make_meta(), crop_jpegs())
     assert (cloud.calls, local.calls) == (1, 0)
     assert switching.source is Source.X4_CLOUD
 
     mode.is_local = True
-    await switching.infer(make_meta(), six_jpegs())
+    await switching.infer(make_meta(), crop_jpegs())
     assert (cloud.calls, local.calls) == (1, 1)
     assert switching.source is Source.X4_LOCAL
 
@@ -464,9 +464,9 @@ def _comparable(event: AwarenessEvent) -> dict[str, object]:
 
 
 async def test_the_same_frames_produce_the_same_events_on_both_backends(
-    six_jpegs: Callable[..., Jpegs],
+    crop_jpegs: Callable[..., Jpegs],
 ) -> None:
-    jpegs = six_jpegs(DEFAULT_CROP_PX)
+    jpegs = crop_jpegs(DEFAULT_CROP_PX)
     local = LocalBackend.build(
         CloudSettings(detector="fake"),
         detector=ScriptedDetector(_script()),
