@@ -143,7 +143,9 @@ laptop ──► AwarenessEvent(source="x4_cloud") ──► phone
 - **Never states metres.** Monocular through a fisheye with no usable ground plane. A number would be a guess dressed as a measurement.
 - **Never computes urgency.** It emits facts; the phone decides what matters.
 - **Never reads its own clock in the cloud.** `t_capture` is stamped on the laptop and echoed through untouched.
-- Does not do OCR or face work — fisheye crops are wrong for both.
+- Does not do face work — fisheye crops are wrong for it.
+- Signage: amended 2026-09-27. The crops this step produces are rectilinear, so reading signs off
+  them is sound; the sweep that does it lives in `scene/signscan.py` and is off the safety path.
 - Does not touch the safety-critical path. If it dies, front warnings keep working.
 
 ---

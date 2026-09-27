@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import contextlib
 import json
 import logging
 import sys
@@ -36,6 +37,13 @@ import cv2
 
 from cane.bridge.capture.grab_thread import GrabThread
 from cane.scene.frames import EquirectProvider, GrabProvider, StillProvider
+from cane.scene.places import PlaceMemory
+from cane.scene.signscan import (
+    SIGN_SCAN_ENV,
+    SignScanner,
+    scan_interval_s,
+    scanning_enabled,
+)
 from cane.scene.service import DEFAULT_VLM_TIMEOUT_S, HEAD_WORN_LAYOUT, LEVEL_LAYOUT, SceneQueryService
 from cane.scene.vlm import FakeVLM, GeminiVLM, VisionLanguageModel, VlmUnavailableError
 from cane.scene.voice import API_KEY_ENV as VOICE_KEY_ENV
@@ -133,11 +141,18 @@ async def run_one_shot(service: SceneQueryService, vlm: VisionLanguageModel, que
     return 0 if answer.status != "unavailable" else 1
 
 
-async def serve(service: SceneQueryService, vlm: VisionLanguageModel, host: str, port: int) -> None:
+async def serve(
+    service: SceneQueryService,
+    vlm: VisionLanguageModel,
+    host: str,
+    port: int,
+    places: PlaceMemory | None = None,
+) -> None:
     from cane.transport.server import EventLinkServer
 
     box: list[EventLinkServer] = []
     voice = ElevenLabsVoice.from_env()
+    scanner = _sign_scanner(vlm, service, places)
 
     async def on_query(query: SceneQuery) -> None:
         answer = await service.handle(query)
@@ -157,7 +172,38 @@ async def serve(service: SceneQueryService, vlm: VisionLanguageModel, host: str,
         else:
             logger.info("natural voice: %s", voice.name)
         await asyncio.gather(warm_up(vlm), voice.warm_up() if voice is not None else asyncio.sleep(0))
-        await asyncio.Event().wait()
+        # Started after the warm-up so the first sweep does not pay for the
+        # TLS handshake the wearer's first question would otherwise have paid.
+        sweeping = None if scanner is None else asyncio.create_task(scanner.run())
+        try:
+            await asyncio.Event().wait()
+        finally:
+            if sweeping is not None:
+                sweeping.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await sweeping
+
+
+def _sign_scanner(
+    vlm: VisionLanguageModel, service: SceneQueryService, places: PlaceMemory | None
+) -> SignScanner | None:
+    """The background signage sweep, or ``None`` when it is switched off.
+
+    Reuses the scene model: ``GeminiVLM.scan`` is a single unhedged call, so a
+    sweep costs one request where a wearer's question costs two or three.
+    """
+    if places is None:
+        return None
+    if not scanning_enabled():
+        logger.info("sign scan off (%s)", SIGN_SCAN_ENV)
+        return None
+    return SignScanner(
+        vlm=vlm,  # type: ignore[arg-type]
+        views=service.scan_views,
+        memory=places,
+        interval_s=scan_interval_s(),
+        busy=lambda: service.busy,  # the wearer always wins the model
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -186,14 +232,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         still = frames.image if isinstance(frames, StillProvider) else None
         debug = start_debug_view(grab=grab, still=still)
+    # Sign memory only earns its keep while serving a walk: a one-shot question
+    # has no earlier sightings to remember.
+    places = PlaceMemory() if args.serve else None
     service = SceneQueryService(
         vlm, frames, settle_s=0.0 if not args.serve else 0.4, vlm_timeout_s=args.vlm_timeout_s,
         dump_dir=args.save_views, weather=weather_from_env(), debug=debug,
         # The X4 is worn on the head; one-shot runs keep the level crops.
         layout=HEAD_WORN_LAYOUT if args.serve else LEVEL_LAYOUT,
+        places=places,
     )
     try:
-        return run(args, service, vlm)
+        return run(args, service, vlm, places)
     finally:
         if grab is not None:
             grab.stop()
@@ -220,10 +270,15 @@ def start_live_source(spec: str) -> GrabThread | None:
     return grab
 
 
-def run(args: argparse.Namespace, service: SceneQueryService, vlm: VisionLanguageModel) -> int:
+def run(
+    args: argparse.Namespace,
+    service: SceneQueryService,
+    vlm: VisionLanguageModel,
+    places: PlaceMemory | None = None,
+) -> int:
     if args.serve:
         try:
-            asyncio.run(serve(service, vlm, args.ws_host, args.ws_port))
+            asyncio.run(serve(service, vlm, args.ws_host, args.ws_port, places))
         except KeyboardInterrupt:
             pass
         return 0

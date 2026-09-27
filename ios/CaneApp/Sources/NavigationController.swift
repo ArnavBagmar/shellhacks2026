@@ -16,6 +16,15 @@ final class NavigationController {
     private lazy var sources = CoreLocationSources()
     private var engine: NavigationEngine?
     private var cueTask: Task<Void, Never>?
+    /// Indoors or outdoors, from how well GPS is working. Lives here because
+    /// this is where the app's single `CLLocationManager` lives, and a GPS fix
+    /// must never reach the awareness path (see `CaneNavigation.md`).
+    private var estimator = IndoorOutdoorEstimator()
+    private var watch: Task<Void, Never>?
+    private var onSettingChange: (@MainActor (WalkSetting) -> Void)?
+    /// True while a route is active. Following walking directions *is* being
+    /// outdoors, and it also means the engine owns the location stream.
+    private var routing = false
     private let logger = Logger(subsystem: "cane", category: "navigation")
 
     static let retriedKinds: Set<CueKind> = [.arrived, .offRoute, .gpsLost, .gpsRestored]
@@ -36,12 +45,32 @@ final class NavigationController {
         self.steerBias = steerBias
     }
 
+    /// Indoors, outdoors, or `nil` before GPS has said anything either way.
+    ///
+    /// `nil` matters: it is not "outdoors". A destination asked before the
+    /// first fix should go to the engine that needs no fix.
+    var setting: WalkSetting? {
+        routing ? .outdoors : estimator.setting
+    }
+
+    /// Start watching GPS quality so the app knows which engine owns a
+    /// destination. `onChange` fires only when the verdict actually moves, so
+    /// it is the right place to say it out loud.
+    func watchSetting(onChange: @escaping @MainActor (WalkSetting) -> Void) {
+        onSettingChange = onChange
+        startWatch()
+    }
+
     func start(to place: String) async {
         guard let key = try? NavigationSecrets.apiKey() else {
             await say("Navigation isn't set up on this phone.")
             return
         }
         stop()
+        // The engine becomes the location stream's only consumer for the walk.
+        routing = true
+        watch?.cancel()
+        watch = nil
         sources.requestAuthorization()
         let transport = URLSessionTransport()
         let engine = NavigationEngine(
@@ -74,6 +103,49 @@ final class NavigationController {
             Task { await engine.stop() }
         }
         engine = nil
+        routing = false
+        startWatch()
+    }
+
+    // MARK: - Watching GPS quality
+
+    private func startWatch() {
+        guard !routing, watch == nil, onSettingChange != nil else { return }
+        sources.requestAuthorization()
+        let sources = self.sources
+        watch = Task { [weak self] in
+            // A slow heartbeat beside the stream: a phone carried inside stops
+            // producing fixes altogether, and that silence is itself the
+            // evidence that the wearer is no longer outside.
+            let heartbeat = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(5))
+                    guard !Task.isCancelled else { return }
+                    self?.noteNoFix()
+                }
+            }
+            defer { heartbeat.cancel() }
+            for await fix in sources.locations() {
+                guard !Task.isCancelled else { break }
+                self?.note(fix)
+            }
+        }
+    }
+
+    private func note(_ fix: LocationFix) {
+        apply(estimator.seeing(fix))
+    }
+
+    private func noteNoFix() {
+        apply(estimator.seeingNothing(atMs: Int64(Date().timeIntervalSince1970 * 1_000)))
+    }
+
+    private func apply(_ next: IndoorOutdoorEstimator) {
+        let before = estimator.setting
+        estimator = next
+        guard let now = next.setting, now != before else { return }
+        logger.info("setting is now \(now.rawValue, privacy: .public)")
+        onSettingChange?(now)
     }
 
     /// -1 left, +1 right, 0 for anything that is not a turn happening now.

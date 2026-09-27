@@ -2,6 +2,7 @@ import CaneAssist
 import CaneCamera
 import CaneContracts
 import CaneFeedback
+import CaneNavigation
 import CaneOutput
 import CaneTransport
 import CaneVoice
@@ -32,6 +33,8 @@ final class Runtime {
         var onDepth: @Sendable (String) -> Void
         /// The laptop link is down (banner title + what to check), or nil.
         var onLinkProblem: @Sendable (LinkProblem?) -> Void
+        /// "indoors" / "outdoors" for the chest badge, on every flip.
+        var onSetting: @Sendable (String) -> Void
     }
 
     struct LinkProblem: Equatable, Sendable {
@@ -53,6 +56,9 @@ final class Runtime {
     private let coordinator: QueryCoordinator
     private let voice: VoiceRouter
     private let navigation: NavigationController
+    /// Indoors or outdoors: written by the navigation controller's GPS
+    /// watch, read by the coordinator and the router.
+    private let walkSetting: WalkSettingBox
     private let listener = SpeechListener()
     private let callbacks: Callbacks
     let diagnostics: Diagnostics
@@ -122,6 +128,8 @@ final class Runtime {
 
         let camera = FrontCamera()
         self.camera = camera
+        let walkSetting = WalkSettingBox()
+        self.walkSetting = walkSetting
         coordinator = QueryCoordinator(
             link: client,
             speaker: arbiter,
@@ -132,6 +140,10 @@ final class Runtime {
             },
             clock: Self.now,
             userGain: { settings.current.hapticGain },
+            // Indoors a "not found" is not the end of the conversation: the
+            // wearer can walk on while the laptop keeps reading signage.
+            // Outdoors this stays off -- Maps owns getting them somewhere.
+            keepSearching: { settings.current.forceIndoors || walkSetting.value == .indoors },
             onDistance: { outcome in
                 var fields: [String: DiagnosticEvent.Value] = ["outcome": .text(outcome.label)]
                 if let sample = outcome.sample {
@@ -158,6 +170,7 @@ final class Runtime {
             arbiter: arbiter,
             coordinator: coordinator,
             navigate: { place in await navigation.start(to: place) },
+            setting: { settings.current.forceIndoors ? .indoors : walkSetting.value },
             onHeard: callbacks.onHeard,
             diagnostics: diagnostics
         )
@@ -179,7 +192,8 @@ final class Runtime {
             onLinkProblem: { problem in
                 diag.record("link_alert", ["problem": .text(problem?.title ?? "none")])
                 ui.onLinkProblem(problem)
-            }
+            },
+            onSetting: { value in diag.record("setting", ["value": .text(value)]); ui.onSetting(value) }
         )
     }
 
@@ -192,6 +206,7 @@ final class Runtime {
         ])
         let session = AudioSessionConfig.configure()
         callbacks.onNote("audio: \(session)")
+        startSettingWatch()
         if ProcessInfo.processInfo.isLowPowerModeEnabled {
             callbacks.onNote("Low Power Mode is on -- haptics may feel weak")
         }
@@ -346,6 +361,22 @@ final class Runtime {
                 try? await Task.sleep(for: .seconds(1))
             }
         })
+    }
+
+    /// Watch GPS quality so the app knows which engine owns a destination,
+    /// and say it once whenever the verdict moves.
+    ///
+    /// The flip is spoken on purpose. The wearer is about to get a different
+    /// kind of answer to the same question, and discovering that by surprise
+    /// mid-walk is worse than one short sentence.
+    private func startSettingWatch() {
+        let box = walkSetting, arbiter = arbiter, callbacks = callbacks
+        navigation.watchSetting { setting in
+            box.set(setting)
+            callbacks.onSetting(setting.rawValue)
+            let text = setting == .indoors ? AnswerPhrasing.nowIndoors : AnswerPhrasing.nowOutdoors
+            Task { await arbiter.say(SpokenPhrase(text: text), on: .prompt, maxWaitMs: 0) }
+        }
     }
 
     private func startCamera() async {

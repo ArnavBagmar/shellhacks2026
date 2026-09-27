@@ -13,7 +13,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from typing import Protocol, Sequence
+from typing import Protocol, Sequence, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
@@ -61,6 +61,10 @@ JPEG_MIME = "image/jpeg"
 #: Low temperature: this is a lookup, not creative writing.
 TEMPERATURE = 0.2
 
+#: Which reply shape a call asks the model for: a wearer's answer
+#: (:class:`VlmReply`) or a signage sweep (:class:`ScanReply`).
+_ReplyT = TypeVar("_ReplyT", bound=BaseModel)
+
 
 @dataclass(frozen=True)
 class LabeledImage:
@@ -85,6 +89,38 @@ class VlmReply(BaseModel):
     confidence: str | None = None
 
 
+class SignRead(BaseModel):
+    """One sign the model says it can read, in one image.
+
+    Deliberately the same (``image_index``, ``x_center``) shape as
+    :class:`VlmReply`: direction never crosses this boundary as words, so the
+    scanner turns the pair into a bearing with ``View.bearing_at`` exactly as
+    the query path does.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    image_index: int | None = None
+    x_center: float | None = None
+    #: The sign's words, as printed. Not interpreted here.
+    text: str | None = None
+    confidence: str | None = None
+
+
+class ScanReply(BaseModel):
+    """What one sweep of the ring for signage returns.
+
+    ``setting`` is carried on the same reply because the images needed to read
+    signs are the images that say whether this is a corridor or a street --
+    one call, two answers, and the scanner stops spending calls outdoors.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    signs: list[SignRead] | None = None
+    setting: str | None = None
+
+
 class VisionLanguageModel(Protocol):
     @property
     def name(self) -> str: ...
@@ -92,6 +128,19 @@ class VisionLanguageModel(Protocol):
     async def ask(
         self, prompt: str, images: Sequence[LabeledImage], *, search: bool = False
     ) -> VlmReply: ...
+
+
+class SignScanningModel(Protocol):
+    """What the scanner asks of a model: one unhedged sweep, never a question.
+
+    Separate from :class:`VisionLanguageModel` so the scanner can be given a
+    cheaper, single-call instance than the one answering the wearer.
+    """
+
+    @property
+    def name(self) -> str: ...
+
+    async def scan(self, prompt: str, images: Sequence[LabeledImage]) -> ScanReply: ...
 
 
 class VlmUnavailableError(RuntimeError):
@@ -245,13 +294,43 @@ class GeminiVLM:
         contents.append(prompt)
         return contents
 
+    async def scan(self, prompt: str, images: Sequence[LabeledImage]) -> ScanReply:
+        """One sweep of the ring for signage: a single call, deliberately.
+
+        The hedging in :meth:`ask` exists because a wearer is standing still
+        waiting for an answer. Nobody is waiting for a scan -- it runs in the
+        background for the life of the walk -- so paying two or three times
+        for every sweep would be spending the wearer's quota on impatience
+        nobody feels. A failed sweep is simply the next sweep's problem.
+        """
+        return await self._generate(
+            self._model,
+            self._contents(prompt, images),
+            thinking=self._thinking,
+            search=False,
+            schema=ScanReply,
+        )
+
     async def _call(
         self, model: str, contents: list[object], *, thinking: object | None, search: bool = False
     ) -> VlmReply:
+        return await self._generate(
+            model, contents, thinking=thinking, search=search, schema=VlmReply
+        )
+
+    async def _generate(
+        self,
+        model: str,
+        contents: list[object],
+        *,
+        thinking: object | None,
+        search: bool = False,
+        schema: type[_ReplyT],
+    ) -> _ReplyT:
         types = self._types
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_schema=VlmReply,
+            response_schema=schema,
             temperature=TEMPERATURE,
             # Latency over depth: the wearer is standing still waiting.
             thinking_config=types.ThinkingConfig(thinking_level=thinking) if thinking else None,
@@ -274,11 +353,11 @@ class GeminiVLM:
             raise VlmUnavailableError(f"{model}{' with search' if search else ''} call failed: {reason}") from exc
         logger.info("%s%s answered in %.1fs", model, " with search" if search else "", time.monotonic() - started)
         parsed = response.parsed
-        if isinstance(parsed, VlmReply):
+        if isinstance(parsed, schema):
             return parsed
         text = response.text or ""
         try:
-            return VlmReply.model_validate_json(text)
+            return schema.model_validate_json(text)
         except ValueError as exc:
             raise VlmUnavailableError(f"{model} returned non-JSON: {text[:200]!r}") from exc
 
@@ -307,12 +386,21 @@ class FakeVLM:
         *,
         error: Exception | None = None,
         delay_s: float = 0.0,
+        scan_reply: ScanReply | None = None,
+        scan_replies: Sequence[ScanReply] | None = None,
+        scan_error: Exception | None = None,
     ) -> None:
         self._reply = reply or VlmReply(status="not_found")
         self._error = error
         self._delay_s = delay_s
+        #: A sweep at a time, so a test can walk a sign across the ring; the
+        #: last one repeats once the script runs out.
+        self._scan_replies = tuple(scan_replies) if scan_replies else ()
+        self._scan_reply = scan_reply or ScanReply(signs=[], setting="indoor")
+        self._scan_error = scan_error
         self.calls: list[tuple[str, tuple[LabeledImage, ...]]] = []
         self.searches: list[bool] = []
+        self.scans: list[tuple[str, tuple[LabeledImage, ...]]] = []
 
     @property
     def name(self) -> str:
@@ -328,3 +416,14 @@ class FakeVLM:
         if self._error is not None:
             raise self._error
         return self._reply
+
+    async def scan(self, prompt: str, images: Sequence[LabeledImage]) -> ScanReply:
+        index = len(self.scans)
+        self.scans.append((prompt, tuple(images)))
+        if self._delay_s:
+            await asyncio.sleep(self._delay_s)
+        if self._scan_error is not None:
+            raise self._scan_error
+        if not self._scan_replies:
+            return self._scan_reply
+        return self._scan_replies[min(index, len(self._scan_replies) - 1)]

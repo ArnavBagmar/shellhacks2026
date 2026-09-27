@@ -1,4 +1,5 @@
 import CaneAssist
+import CaneNavigation
 import CaneOutput
 import CaneVoice
 import Foundation
@@ -13,6 +14,9 @@ actor VoiceRouter {
     private let arbiter: OutputArbiter
     private let coordinator: QueryCoordinator
     private let navigate: @Sendable (String) async -> Void
+    /// Indoors or outdoors right now, or nil before GPS has said. Decides who
+    /// owns a destination: the laptop's sign memory, or the Routes engine.
+    private let setting: @Sendable () -> WalkSetting?
     private let onHeard: @Sendable (String) -> Void
     private let diagnostics: Diagnostics
     private let logger = Logger(subsystem: "cane", category: "voice-router")
@@ -21,6 +25,7 @@ actor VoiceRouter {
         arbiter: OutputArbiter,
         coordinator: QueryCoordinator,
         navigate: @escaping @Sendable (String) async -> Void,
+        setting: @escaping @Sendable () -> WalkSetting? = { nil },
         onHeard: @escaping @Sendable (String) -> Void,
         diagnostics: Diagnostics
     ) {
@@ -28,6 +33,7 @@ actor VoiceRouter {
         self.arbiter = arbiter
         self.coordinator = coordinator
         self.navigate = navigate
+        self.setting = setting
         self.onHeard = onHeard
     }
 
@@ -63,8 +69,11 @@ actor VoiceRouter {
                 "intent": .text(intent.map { String(describing: $0) } ?? "none"),
             ])
             let arbiter = arbiter, coordinator = coordinator, navigate = navigate, onHeard = onHeard
+            let setting = setting
             Task {
-                let understood = await Self.route(text, arbiter: arbiter, coordinator: coordinator, navigate: navigate)
+                let understood = await Self.route(
+                    text, arbiter: arbiter, coordinator: coordinator, navigate: navigate, setting: setting
+                )
                 if !understood {
                     // Show exactly what was heard (the screen is the only
                     // way to debug this), and let the wearer just repeat it.
@@ -82,7 +91,8 @@ actor VoiceRouter {
     /// Returns false when the words matched no intent.
     private static func route(
         _ text: String, arbiter: OutputArbiter, coordinator: QueryCoordinator,
-        navigate: @Sendable (String) async -> Void
+        navigate: @Sendable (String) async -> Void,
+        setting: @Sendable () -> WalkSetting? = { nil }
     ) async -> Bool {
         guard let intent = IntentParser.route(text) else {
             logger.info("not understood: \(text, privacy: .public)")
@@ -92,7 +102,17 @@ actor VoiceRouter {
         if await coordinator.handle(intent, utterance: text) { return true }
         switch intent {
         case .navigate(let place):
-            await navigate(place)
+            // "Take me to room 100" inside a building is not a Maps question:
+            // Places would resolve it to the building the wearer is already
+            // standing in. Indoors the laptop's sign memory is the only thing
+            // that knows where room 100 is, so the destination becomes a find.
+            // Outdoors -- and before GPS has said anything -- Maps owns it.
+            if setting() == .indoors {
+                logger.info("indoors: \(place, privacy: .public) goes to the sign engine, not Maps")
+                await coordinator.handle(.find(place), utterance: "where is \(place)")
+            } else {
+                await navigate(place)
+            }
         case .time:
             await arbiter.say(SpokenPhrase(text: AnswerPhrasing.time()), on: .prompt, maxWaitMs: 3_000)
         case .help:

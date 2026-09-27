@@ -30,6 +30,9 @@ final class AppModel {
     private(set) var depthLine: String?
     /// The laptop link is down: shown as a banner on the chest screen.
     private(set) var linkProblem: Runtime.LinkProblem?
+    /// "indoors" or "outdoors", or nil before GPS has said either way. A
+    /// separate axis from `Activity`, which is single-valued by design.
+    private(set) var walkSetting: String?
 
     private var runtime: Runtime?
     private var hazardClear: Task<Void, Never>?
@@ -102,7 +105,8 @@ final class AppModel {
             onAssist: { [weak self] state in Task { @MainActor in self?.assist = state } },
             onNote: { [weak self] text in Task { @MainActor in self?.note(text) } },
             onDepth: { [weak self] line in Task { @MainActor in self?.showDepth(line) } },
-            onLinkProblem: { [weak self] problem in Task { @MainActor in self?.linkProblem = problem } }
+            onLinkProblem: { [weak self] problem in Task { @MainActor in self?.linkProblem = problem } },
+            onSetting: { [weak self] value in Task { @MainActor in self?.walkSetting = value } }
         )
     }
 

@@ -13,6 +13,7 @@ final class AppSettings {
         static let rate = "speechRate"
         static let gain = "hapticGain"
         static let naturalVoice = "naturalVoice"
+        static let forceIndoors = "forceIndoors"
     }
 
     private let defaults: UserDefaults
@@ -26,6 +27,13 @@ final class AppSettings {
     /// Answers and prompts in the ElevenLabs voice (through the laptop).
     /// Hazards always use the phone's own voice.
     var naturalVoice: Bool { didSet { defaults.set(naturalVoice, forKey: Key.naturalVoice) } }
+    /// Ignore GPS and always treat the walk as indoors.
+    ///
+    /// The escape hatch for a building that fools the estimator -- a glass
+    /// lobby or an atrium can give a sky-quality fix indoors, which would send
+    /// "take me to room 100" to a Maps engine that can only find the building
+    /// the wearer is already standing in.
+    var forceIndoors: Bool { didSet { defaults.set(forceIndoors, forKey: Key.forceIndoors) } }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -34,6 +42,7 @@ final class AppSettings {
         speechRate = defaults.object(forKey: Key.rate) as? Double ?? 0.55
         hapticGain = defaults.object(forKey: Key.gain) as? Double ?? 1.0
         naturalVoice = defaults.object(forKey: Key.naturalVoice) as? Bool ?? true
+        forceIndoors = defaults.object(forKey: Key.forceIndoors) as? Bool ?? false
     }
 
     var laptopURL: URL? {
@@ -44,13 +53,15 @@ final class AppSettings {
 
     /// A value snapshot the non-UI runtime can read from any thread.
     var snapshot: Snapshot {
-        Snapshot(speechRate: Float(speechRate), hapticGain: Float(hapticGain), naturalVoice: naturalVoice)
+        Snapshot(speechRate: Float(speechRate), hapticGain: Float(hapticGain), naturalVoice: naturalVoice,
+                 forceIndoors: forceIndoors)
     }
 
     struct Snapshot: Sendable {
         let speechRate: Float
         let hapticGain: Float
         let naturalVoice: Bool
+        let forceIndoors: Bool
     }
 }
 

@@ -98,7 +98,10 @@ AVCaptureSession frame
 - **The master clock.** Everything else syncs to it.
 - **All output.** Haptics, TTS, spatial audio, priority queue, urgency policy.
 - **Voice intent recognition.**
-- **Sign and text reading** — `VNRecognizeTextRequest` needs a rectilinear view; fisheye crops would wreck OCR.
+- ~~**Sign and text reading**~~ — **moved to the X4 path, 2026-09-27.** The premise was that the
+  alternative was a fisheye view; it is not. The X4's crops are dewarped to rectilinear before
+  inference, and reading signage there buys what the phone structurally cannot: the sign beside and
+  behind the wearer, including one they have already passed. See `scene/signscan.py`.
 - **Navigation** — routes, heading, turn cues.
 
 ### What the phone explicitly does NOT do
@@ -153,7 +156,11 @@ laptop ──► AwarenessEvent(source="x4_cloud") ──► phone
 - **Never states metres.** Monocular through a fisheye with no usable ground plane. A number would be a guess dressed as a measurement.
 - **Never computes urgency.** It emits facts; the phone decides what matters.
 - **Never reads its own clock in the cloud.** `t_capture` is stamped on the laptop and echoed through untouched.
-- Does not do OCR or face work — fisheye crops are wrong for both.
+- Does not do face work — fisheye crops are wrong for it.
+- **Does read signage, as of 2026-09-27.** Not off the fisheye: off the same dewarped rectilinear
+  crops the detector uses. A background sweep publishes what it reads into an in-session memory, so
+  "where is the nearest restroom" can be answered about a sign that has left the view. Still not on
+  the safety path -- the sweep runs as its own task and yields to the wearer's questions.
 - Does not touch the safety-critical path. If it dies, front warnings keep working.
 
 ---

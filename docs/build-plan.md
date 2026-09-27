@@ -239,8 +239,14 @@ The consumer. Buildable on hour 1 from the golden fixture with no camera, laptop
 - **Computation** — on-demand only, voice-triggered. Full-frame OCR, filter by box area and
   confidence, read the largest plausible result
 - **Cloud / external** — none
-- **Why phone-only** — OCR needs a rectilinear view. Fisheye crops would wreck it, so this can
-  never move to the X4 path
+- **Why phone-only** — OCR needs a rectilinear view, and the *raw* equirect would wreck it.
+
+**Amended 2026-09-27 (indoor sign wayfinding).** "Never" was wrong, and the reason is that the X4
+path does not send the equirect anywhere: `bridge/dewarp.py` cuts it into six 60° **rectilinear**
+crops before anything looks at it, which is exactly the view OCR wants. Reading signage off those
+crops is now built (`scene/signscan.py`) and it is strictly better than the phone for this job,
+because the wearer's own camera cannot see the plate they have already walked past. Step 13's
+on-phone `VNRecognizeTextRequest` remains unbuilt and is no longer on the critical path
 
 ---
 

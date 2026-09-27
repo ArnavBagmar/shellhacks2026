@@ -50,6 +50,7 @@ struct SetupView: View {
                     Slider(value: $settings.hapticGain, in: 0.6...1.4, step: 0.1)
                         .accessibilityLabel("Haptic strength")
                     Toggle("Natural voice for answers", isOn: $settings.naturalVoice)
+                    Toggle("Always indoors (ignore GPS)", isOn: $settings.forceIndoors)
                     Button(testingHaptics ? "Playing…" : "Play the haptic alphabet") {
                         testingHaptics = true
                         Task {
@@ -76,6 +77,7 @@ struct SetupView: View {
             .onChange(of: settings.speechRate) { model.settingsChanged() }
             .onChange(of: settings.hapticGain) { model.settingsChanged() }
             .onChange(of: settings.naturalVoice) { model.settingsChanged() }
+            .onChange(of: settings.forceIndoors) { model.settingsChanged() }
         }
         .accessibilityAction(.magicTap) { Task { await model.startWalking() } }
     }

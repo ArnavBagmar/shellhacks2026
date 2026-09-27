@@ -41,6 +41,8 @@ from cane.scene.tall_views import HEAD_PITCH_DEG, HEAD_VFOV_DEG, bearing_offset,
 from cane.scene.frames import EquirectProvider
 from cane.scene.gap import ClearWay, ClearWayProvider
 from cane.scene.gap_speech import clear_way_fragment, clear_way_sentence
+from cane.scene.place_names import spoken_subject
+from cane.scene.places import PlaceProvider, Recall, Sighting
 from cane.scene.prompt import GapHint, build_prompt, crop_label, phone_label
 from cane.scene.vlm import LabeledImage, VisionLanguageModel, VlmReply
 from cane.scene.weather import WeatherSource, is_weather_question
@@ -71,6 +73,17 @@ X_EDGE_TOLERANCE = 1e-6
 #: model's route hint follows it.
 FOUND_DETAIL_JOIN = "; "
 _CONFIDENCES: tuple[str, ...] = get_args(Confidence)
+#: The sweep is not a question, but ``_crop_views`` is written against one.
+#: ``describe_around`` is the kind that narrows nothing, so this asks for the
+#: whole ring -- which is the point of scanning at all.
+_SCAN_QUERY = SceneQuery(
+    query_id="sign-scan",
+    kind="describe_around",
+    target=None,
+    utterance="",
+    t_phone_ms=0,
+    phone_frame=None,
+)
 
 
 @dataclass(frozen=True)
@@ -206,7 +219,9 @@ class SceneQueryService:
         weather: WeatherSource | None = None,
         debug: DebugHub | None = None,
         layout: ViewLayout = LEVEL_LAYOUT,
+        places: PlaceProvider | None = None,
     ) -> None:
+        self._places = places
         self._layout = layout
         self._weather = weather
         self._debug = debug
@@ -246,6 +261,14 @@ class SceneQueryService:
 
     async def answer(self, query: SceneQuery) -> SceneAnswer:
         started = self._monotonic()
+        # Memory first, but only when it can still point. A sighting fresh
+        # enough to carry a bearing is a complete answer and the scanner has
+        # already paid for it, so asking the model again would cost the wearer
+        # seconds for something already known. A sighting too old to point
+        # waits below: the sign may be in view right now.
+        remembered = self._recall(query)
+        if remembered is not None and remembered.bearing_deg is not None:
+            return self._remembered(query, remembered, started)
         # Looked up while the wearer holds still and the crops are cut.
         facts_task = None
         if query.kind == "ask" and self._weather is not None and is_weather_question(query.utterance):
@@ -282,6 +305,11 @@ class SceneQueryService:
             logger.warning("query %s: %s failed: %s", query.query_id, self._vlm.name, exc)
             return await self._debugged(query, views, None, self._unavailable(query, started), str(exc)[:200])
         answer = self._to_answer(query, reply, views, started, way)
+        # The ring looked and saw nothing, but the wearer walked past one
+        # earlier. "I don't see any" would be true and useless; "you passed
+        # one, a while ago" is the answer they asked for.
+        if answer.status == "not_found" and remembered is not None:
+            answer = self._remembered(query, remembered, started)
         if self._dump_dir is not None:
             await asyncio.to_thread(self._dump, query, views, reply, answer, prompt)
         await self._debugged(query, views, reply, answer, None, facts)
@@ -491,6 +519,60 @@ class SceneQueryService:
             phone_box=phone_box,
         )
 
+    @property
+    def busy(self) -> bool:
+        """Whether one of the wearer's questions is in flight right now.
+
+        The background sign sweep checks this before spending a model call:
+        the wearer is standing still waiting for an answer, and a sweep that
+        nobody asked for must not be what they are queued behind.
+        """
+        return self._current is not None
+
+    async def scan_views(self) -> list[View]:
+        """The current ring crops, for the background sign sweep.
+
+        Deliberately not ``_views``: there is no settle wait because nobody
+        just turned their head to speak, and no phone photo because the phone
+        only sends one with a question.
+        """
+        if self._frames is None:
+            return []
+        equirect = await self._frames.fresh_equirect()
+        if equirect is None:
+            return []
+        try:
+            return await asyncio.to_thread(self._crop_views, equirect, _SCAN_QUERY)
+        except ValueError as exc:
+            logger.warning("sign scan: X4 frame unusable: %s", exc)
+            return []
+
+    def _recall(self, query: SceneQuery) -> Recall | None:
+        """What memory holds for this question, if it is a ``find`` at all."""
+        if self._places is None or query.kind != "find" or not query.target:
+            return None
+        return self._places.recall(query.target)
+
+    def _remembered(self, query: SceneQuery, recalled: Recall, started: float) -> SceneAnswer:
+        """An answer built from a sign seen earlier rather than one in view.
+
+        ``bearing_deg`` is whatever memory was willing to stand behind: the
+        angle when the sighting is fresh, ``None`` once it is not, which the
+        phone already speaks as "...nearby, direction unclear". Confidence
+        drops to ``low`` in that case so the wearer hears "Maybe" -- the
+        honest word for a place we know exists but can no longer point at.
+        """
+        sighting = recalled.sighting
+        return self._build(
+            query,
+            started,
+            status="found",
+            subject=_clean(spoken_subject(sighting.text), MAX_SUBJECT_CHARS) or query.target,
+            bearing_deg=recalled.bearing_deg,
+            detail=_age_clause(recalled.age_ms),
+            confidence="low" if recalled.bearing_deg is None else _memory_confidence(sighting),
+        )
+
     def _unavailable(self, query: SceneQuery, started: float) -> SceneAnswer:
         return self._build(query, started, status="unavailable")
 
@@ -506,6 +588,37 @@ class SceneQueryService:
         }
         values.update(fields)
         return SceneAnswer.model_validate(values)
+
+
+#: Under this, a sighting is "now" and saying when it was seen is noise.
+MEMORY_FRESH_MS = 5_000
+#: A sign read this many times is solid enough to speak with confidence.
+MEMORY_CONFIDENT_SIGHTINGS = 2
+
+
+def _age_clause(age_ms: int) -> str | None:
+    """"seen 15 seconds ago", or nothing at all if it was seen just now.
+
+    The wearer needs this to judge the answer for themselves: a restroom sign
+    seen four minutes ago is worth walking toward, and one seen four seconds
+    ago is worth turning toward. Only they can tell the difference, so only
+    they can be told.
+    """
+    if age_ms < MEMORY_FRESH_MS:
+        return None
+    seconds = round(age_ms / 1000)
+    if seconds < 60:
+        return f"seen {seconds} seconds ago"
+    minutes = round(seconds / 60)
+    return f"seen about {minutes} minute{'s' if minutes != 1 else ''} ago"
+
+
+def _memory_confidence(sighting: Sighting) -> str:
+    """How sure a *pointable* memory is: the model's own word, firmed up by
+    having read the same sign more than once."""
+    if sighting.confidence >= 0.9 and sighting.seen_count >= MEMORY_CONFIDENT_SIGHTINGS:
+        return "high"
+    return "medium"
 
 
 def _described_detail(way: ClearWay | None, detail: str) -> str:

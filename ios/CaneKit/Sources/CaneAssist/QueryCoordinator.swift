@@ -58,6 +58,16 @@ public actor QueryCoordinator {
     public static let stillLooking = "Still looking."
     public static let answerMaxWaitMs = 15_000
     public static let promptMaxWaitMs = 3_000
+    /// A standing search asks again this often while the wearer walks. Cheap
+    /// on purpose: the laptop answers most of these out of the signs it has
+    /// already read, without spending a model call.
+    public static let keepWalkingRetryMs = 5_000
+    /// ...and says something out loud at least this often, so the wearer never
+    /// has to wonder whether the search is still alive.
+    public static let reassureEveryMs = 10_000
+    /// A search cannot run forever. Two minutes of walking is enough to have
+    /// passed real signage; past that, saying so beats promising silently.
+    public static let standingSearchMaxMs = 120_000
 
     private let link: QueryLink
     private let speaker: AssistSpeaker
@@ -69,10 +79,22 @@ public actor QueryCoordinator {
     private let locale: Locale
     private var phrases: PromptPicker
     private let onDistance: @Sendable (DistanceOutcome) -> Void
+    private let keepSearching: @Sendable () -> Bool
+    private let standingRetryMs: Int
     private let logger = Logger(subsystem: "cane", category: "assist")
 
     public private(set) var state: State = .idle
     private var target: String?
+    /// A `find` the wearer is still owed an answer to, kept alive while they
+    /// walk. Only indoors: outdoors the Maps engine owns getting them there.
+    private struct StandingSearch {
+        let target: String
+        let startedMs: Int64
+        var lastSpokeMs: Int64
+    }
+
+    private var standing: StandingSearch?
+    private var standingTask: Task<Void, Never>?
     /// The depth map from the current question's photo, and whether the
     /// wearer asked "how far".
     private var depth: DepthMap?
@@ -89,6 +111,8 @@ public actor QueryCoordinator {
         userGain: @escaping @Sendable () -> Float = { 1.0 },
         timeoutMs: Int = QueryCoordinator.answerTimeoutMs,
         locale: Locale = .current,
+        keepSearching: @escaping @Sendable () -> Bool = { false },
+        standingRetryMs: Int = QueryCoordinator.keepWalkingRetryMs,
         onDistance: @escaping @Sendable (DistanceOutcome) -> Void = { _ in },
         choosePhrase: @escaping @Sendable (Int) -> Int = { Int.random(in: 0..<$0) }
     ) {
@@ -101,6 +125,8 @@ public actor QueryCoordinator {
         self.userGain = userGain
         self.timeoutMs = timeoutMs
         self.locale = locale
+        self.keepSearching = keepSearching
+        self.standingRetryMs = standingRetryMs
         self.onDistance = onDistance
     }
 
@@ -112,6 +138,9 @@ public actor QueryCoordinator {
     /// Returns false for any other intent (the caller routes it).
     @discardableResult
     public func handle(_ intent: VoiceIntent, utterance: String? = nil) async -> Bool {
+        // The wearer asking anything new -- including "cancel" -- retires the
+        // search they were waiting on. Retries reach `ask` directly instead.
+        stopStanding()
         switch intent {
         case .find(let target):
             await ask(.find, target: target, utterance: utterance ?? "is there a \(target) around")
@@ -139,6 +168,14 @@ public actor QueryCoordinator {
             return
         }
         timeoutTask?.cancel()
+        // Indoors, "I don't see one" is not the end of the conversation: the
+        // wearer can keep walking and the laptop keeps reading signage while
+        // they do. Outdoors this is off and the plain answer is spoken.
+        if answer.status == .notFound, let searchTarget = target, keepSearching() {
+            await continueStandingSearch(for: searchTarget)
+            return
+        }
+        stopStanding()
         setState(.answering)
         var distance: DistanceOutcome?
         if answer.status == .found {
@@ -158,7 +195,10 @@ public actor QueryCoordinator {
 
     // MARK: - Internals
 
-    private func ask(_ kind: SceneQueryKind, target: String?, utterance: String, distanceAsked: Bool = false) async {
+    private func ask(
+        _ kind: SceneQueryKind, target: String?, utterance: String, distanceAsked: Bool = false,
+        announce: Bool = true
+    ) async {
         finish()
         let id = makeId()
         let capture = snapshot()
@@ -197,8 +237,71 @@ public actor QueryCoordinator {
         case .find where distanceAsked: .measure
         case .find, .describeAround: .lookAround
         }
+        // A standing search's re-asks are silent: "Looking around" every few
+        // seconds for two minutes would be unbearable.
+        guard announce else { return }
         let prompt = phrases.next(moment)
         _ = await speaker.say(SpokenPhrase(text: prompt), on: .prompt, haptic: nil, pan: 0, maxWaitMs: Self.promptMaxWaitMs)
+    }
+
+    // MARK: - A search that survives the answer
+
+    /// Takes responsibility for a `not_found`: either keep looking as the
+    /// wearer walks, or say the search is over. Never falls through to
+    /// "I don't see one", which is the answer this replaces.
+    private func continueStandingSearch(for searchTarget: String) async {
+        let now = clock()
+        guard var search = standing else {
+            standing = StandingSearch(target: searchTarget, startedMs: now, lastSpokeMs: now)
+            await speakStanding(AnswerPhrasing.keepWalking(target: searchTarget))
+            scheduleRetry(for: searchTarget)
+            return
+        }
+        if now - search.startedMs >= Self.standingSearchMaxMs {
+            stopStanding()
+            await speakStanding(AnswerPhrasing.searchGaveUp(target: searchTarget))
+            return
+        }
+        if now - search.lastSpokeMs >= Self.reassureEveryMs {
+            search.lastSpokeMs = now
+            // On the prompt channel: a reassurance is the one line that is
+            // better dropped than delivered late.
+            _ = await speaker.say(SpokenPhrase(text: phrases.next(.stillLooking)), on: .prompt,
+                                  haptic: nil, pan: 0, maxWaitMs: 0)
+        }
+        standing = search
+        setState(.idle)
+        scheduleRetry(for: searchTarget)
+    }
+
+    private func speakStanding(_ text: String) async {
+        setState(.answering)
+        speaker.cancel(upTo: .prompt)
+        _ = await speaker.say(SpokenPhrase(text: text), on: .answer, haptic: nil, pan: 0,
+                              maxWaitMs: Self.answerMaxWaitMs)
+        setState(.idle)
+    }
+
+    private func scheduleRetry(for searchTarget: String) {
+        standingTask?.cancel()
+        let waitMs = standingRetryMs
+        standingTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(waitMs))
+            guard !Task.isCancelled else { return }
+            await self?.retryStanding(searchTarget)
+        }
+    }
+
+    private func retryStanding(_ searchTarget: String) async {
+        guard let search = standing, search.target == searchTarget else { return }
+        await ask(.find, target: searchTarget, utterance: "is there a \(searchTarget) around",
+                  announce: false)
+    }
+
+    private func stopStanding() {
+        standingTask?.cancel()
+        standingTask = nil
+        standing = nil
     }
 
     private func startTimeout(for id: String) {

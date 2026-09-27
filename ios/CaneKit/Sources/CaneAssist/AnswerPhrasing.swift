@@ -18,6 +18,25 @@ public enum AnswerPhrasing {
     public static let help = "Say Hey Cane, then ask me anything, like: is there a bathroom around, "
         + "how far is that chair, what's in front of me, or take me to a place."
     public static let listening = "Yes?"
+    /// Said once when the mode flips, so a wearer whose next question is
+    /// answered by a different engine is never surprised by it.
+    public static let nowIndoors = "Indoors now. I'll find things from the building's signs."
+    public static let nowOutdoors = "Outdoors now. I'll use walking directions."
+
+    /// Indoors, "I don't see one" is a dead end when the wearer could simply
+    /// walk further. The laptop keeps reading signage as they go, so the
+    /// honest answer is an instruction plus a promise.
+    public static func keepWalking(target: String?) -> String {
+        guard let target else { return "Not yet. Keep walking and I'll tell you when I see one." }
+        return "Not yet. Keep walking and I'll tell you when I see \(article(for: target)) \(target)."
+    }
+
+    /// The end of a standing search: it has to stop eventually, and stopping
+    /// silently would leave the wearer waiting for a promise nobody kept.
+    public static func searchGaveUp(target: String?) -> String {
+        guard let target else { return "I still haven't seen one. Ask me again when you've moved." }
+        return "I still haven't seen \(article(for: target)) \(target). Ask me again when you've moved."
+    }
 
     /// `distance` is what the TrueDepth map said about the answer's box;
     /// `asked` is true for "how far is ...", which always gets a word on

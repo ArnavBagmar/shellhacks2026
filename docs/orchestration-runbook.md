@@ -323,7 +323,7 @@ wrong from memory and a wrong field costs an hour.
 
 ## Step 13 — Sign and text reading
 
-**Intent:** Cheap, high-demo-value, permanently phone-only.
+**Intent:** Cheap, high-demo-value. ~~Permanently phone-only~~ -- **superseded 2026-09-27**: signage is now read off the X4's dewarped rectilinear crops instead (`scene/signscan.py`), which sees the signs behind the wearer too. This step is unbuilt and no longer needed for wayfinding; it would only add a forward-cone reader that works with the laptop unplugged.
 **Chain rationale:** Contained Vision-framework work; no specialist adds value over the language reviewer.
 
 ```bash

@@ -67,7 +67,14 @@ from cane.bridge.transport_http import HttpInferenceTransport
 from cane.bridge.uplink import MonitoredUplink
 from cane.scene.frames import GrabProvider
 from cane.scene.gap import LatestClearWay, SteerTap
+from cane.scene.places import PlaceMemory
 from cane.scene.service import HEAD_WORN_LAYOUT, SceneQueryService
+from cane.scene.signscan import (
+    SIGN_SCAN_ENV,
+    SignScanner,
+    scan_interval_s,
+    scanning_enabled,
+)
 from cane.scene.vlm import GeminiVLM, VlmUnavailableError
 from cane.scene.voice import ElevenLabsVoice
 from cane.scene.weather import weather_from_env
@@ -281,23 +288,30 @@ async def run_bridge(
     # below -- no IPC, and nothing in the steering modules changes. Left as
     # None without --scene, which keeps the default run byte-identical.
     clear_ways: LatestClearWay | None = None
+    scene_service = None
+    # Indoor wayfinding: the signs this walk has read, so that a plate the
+    # wearer strolled past is already an answer by the time they ask. Lives
+    # and dies with this process -- one bridge run is one session, which is
+    # exactly the memory lifetime the PRD asks for.
+    places: PlaceMemory | None = None
     if scene_vlm is not None:
         from cane.scene.debug_view import start_debug_view
 
         clear_ways = LatestClearWay()
-        scene_hook = SceneHook(
-            SceneQueryService(
-                scene_vlm,
-                GrabProvider(grab),
-                clear_ways=clear_ways,
-                delta_deg=config.delta_deg,
-                weather=weather_from_env(),
-                # Local page at http://localhost:8780 (CANE_DEBUG_PORT=0: off).
-                debug=start_debug_view(grab=grab),
-                # Gemini's views only; the detector keeps its level crops.
-                layout=HEAD_WORN_LAYOUT,
-            )
+        places = PlaceMemory()
+        scene_service = SceneQueryService(
+            scene_vlm,
+            GrabProvider(grab),
+            clear_ways=clear_ways,
+            delta_deg=config.delta_deg,
+            weather=weather_from_env(),
+            # Local page at http://localhost:8780 (CANE_DEBUG_PORT=0: off).
+            debug=start_debug_view(grab=grab),
+            # Gemini's views only; the detector keeps its level crops.
+            layout=HEAD_WORN_LAYOUT,
+            places=places,
         )
+        scene_hook = SceneHook(scene_service)
     # The natural voice rides with --scene: it speaks the answers.
     scene_voice = ElevenLabsVoice.from_env() if scene_vlm is not None else None
     async with EventLinkServer(
@@ -333,11 +347,19 @@ async def run_bridge(
         # Outside the one-in-flight sender on purpose: the prober must never
         # occupy the slot a frame needs, and it only fires while local.
         prober = asyncio.create_task(probe.run())
+        # Same reasoning as the prober, for the same reason: a model call takes
+        # seconds, so the sign sweep cannot live in the deadline-guarded tick.
+        # It is off the safety path entirely and yields to the wearer.
+        scanner_task = _start_sign_scan(scene_vlm, scene_service, places)
         try:
             stats = await pipeline.run(duration_s=duration_s)
         finally:
             if warm is not None:
                 warm.cancel()
+            if scanner_task is not None:
+                scanner_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await scanner_task
             prober.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await prober
@@ -349,6 +371,37 @@ async def run_bridge(
                 # every line, so a kill -9 mid-walk loses nothing either.
                 recording.close()
     logger.info("final: %s", format_stats_line(stats))
+
+
+def _start_sign_scan(
+    vlm: object | None,
+    service: SceneQueryService | None,
+    places: PlaceMemory | None,
+) -> asyncio.Task[None] | None:
+    """Start the background signage sweep, or nothing at all.
+
+    Returns ``None`` without ``--scene`` (there is no model to ask) and when
+    ``CANE_SIGN_SCAN=off``, which leaves the query path behaving exactly as it
+    did before indoor wayfinding existed.
+
+    The sweep reuses the scene model rather than building a second client:
+    ``GeminiVLM.scan`` is deliberately a single unhedged call, so a sweep costs
+    one request where a wearer's question costs two or three.
+    """
+    if vlm is None or service is None or places is None:
+        return None
+    if not scanning_enabled():
+        logger.info("sign scan off (%s)", SIGN_SCAN_ENV)
+        return None
+    scanner = SignScanner(
+        vlm=vlm,  # type: ignore[arg-type]
+        views=service.scan_views,
+        memory=places,
+        interval_s=scan_interval_s(),
+        # The wearer always wins the model.
+        busy=lambda: service.busy,
+    )
+    return asyncio.create_task(scanner.run())
 
 
 def _log_banner(

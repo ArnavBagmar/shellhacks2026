@@ -132,10 +132,21 @@ struct ChestDisplayView: View {
         switch model.activity {
         case .offline: return model.linkProblem == nil ? "CONNECTING" : "NO LAPTOP"
         case .idle: return "READY"
-        case .listening: return "SAY “HEY CANE”"
+        case .listening: return listeningText
         case .thinking: return "LOOKING AROUND"
         case .speaking: return "SPEAKING"
         case .hazard(let u): return u >= 3 ? "STOP" : "HAZARD"
+        }
+    }
+
+    /// While walking, the status line also carries which engine owns a
+    /// destination. `Activity` is single-valued by design, so the mode rides
+    /// here rather than becoming a case of its own.
+    private var listeningText: String {
+        switch model.walkSetting {
+        case "indoors": return "INDOORS · SAY “HEY CANE”"
+        case "outdoors": return "OUTDOORS · SAY “HEY CANE”"
+        default: return "SAY “HEY CANE”"
         }
     }
 

@@ -163,6 +163,45 @@ _ASK = (
 )
 
 
+#: A sign's words, kept short enough to be a label rather than a paragraph of
+#: whatever else is printed on a directory board.
+MAX_SIGN_TEXT_WORDS = 6
+#: How many signs one sweep may return. A corridor has a handful; a number far
+#: above that means the model is reading posters, menus and fire notices.
+MAX_SIGNS = 12
+
+_SCAN = (
+    "Read the building's signage. List every sign, room number, door plate or directional "
+    "pictogram whose words you can actually read in these images -- restrooms, room numbers, "
+    "exits, elevators, stairs, and named places like a cafe. "
+    "Answer with JSON: signs = a list of at most {max_signs} entries, each with "
+    "image_index = the image the sign is in, x_center = the sign's horizontal centre in that "
+    "image from 0.0 (left edge) to 1.0 (right edge), text = what the sign says in at most "
+    "{text_words} words, confidence = \"low\", \"medium\" or \"high\" for how sure you are of "
+    "the words. Use the printed wording, not a description: \"RESTROOMS\", \"ROOM 100\", "
+    "\"ROOMS 100-110\", \"EXIT\". "
+    "Leave out anything you are guessing at, anything too far or too blurred to read, and "
+    "advertising, posters and menus. An empty list is the right answer when no signage is "
+    "legible -- it is far better than a guess, because a wrong room number sends this person "
+    "to the wrong door. "
+    "Also set setting = \"indoor\" if these images show the inside of a building (corridors, "
+    "ceilings, doorways, rooms) or \"outdoor\" if they show outside (sky, street, parked cars, "
+    "open ground). "
+    "No direction words anywhere: position is computed from image_index and x_center."
+)
+
+
+def build_scan_prompt() -> str:
+    """The background sweep: what signs are visible, and are we inside?
+
+    Deliberately takes no query -- nobody asked. This runs for the life of the
+    walk so that a sign the wearer passes is already in memory by the time
+    they think to ask about it, and so the one call that reads the signage
+    also says whether the sign engine should be running at all.
+    """
+    return _PREAMBLE + _SCAN.format(max_signs=MAX_SIGNS, text_words=MAX_SIGN_TEXT_WORDS)
+
+
 def context_line(now: datetime, location: str | None, facts: str | None = None) -> str:
     """Where and when (plus any looked-up facts, e.g. live weather), for
     questions the images alone cannot answer.
