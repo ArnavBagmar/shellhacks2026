@@ -210,6 +210,73 @@ final class QueryCoordinatorTests: XCTestCase {
         XCTAssertTrue(speaker.said.map(\.0).contains("I don't see a bathroom nearby."))
     }
 
+    // MARK: Guide my hand
+
+    private final class GuideBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _requests: [GuideRequest] = []
+        var requests: [GuideRequest] { lock.withLock { _requests } }
+        func add(_ r: GuideRequest) { lock.withLock { _requests.append(r) } }
+    }
+
+    private func guideCoordinator(_ link: FakeLink, _ speaker: FakeSpeaker, _ box: GuideBox) -> QueryCoordinator {
+        let frame = try? PhoneFrame(jpeg: Data([0xFF, 0xD8, 0xFF, 0xE0]), hfovDeg: 70, width: 1280, height: 720)
+        return QueryCoordinator(link: link, speaker: speaker, snapshot: { FrontCapture(frame: frame) },
+                                clock: { 1_790_000_000_000 }, makeId: { "q-1" }, onGuide: { box.add($0); return "Reach out slowly." },
+                                choosePhrase: { _ in 0 })
+    }
+
+    func testGuideMyHandFindsTheThingThenHandsItsPhotoBoxToTheGuide() async throws {
+        let link = FakeLink(), speaker = FakeSpeaker(), guides = GuideBox()
+        let c = guideCoordinator(link, speaker, guides)
+        await c.handle(.guideHand("rubik's cube"))
+        XCTAssertEqual(link.sent.first?.kind, .find)
+        XCTAssertEqual(link.sent.first?.target, "rubik's cube")
+
+        let box = try PhoneBox(xMin: 0.6, yMin: 0.5, xMax: 0.7, yMax: 0.62)
+        await c.receive(try SceneAnswer(queryId: "q-1", status: .found, subject: "Rubik's cube", bearingDeg: 12,
+                                        detail: "on the table", confidence: .high, latencyMs: 1_500, phoneBox: box))
+
+        XCTAssertEqual(speaker.said.last?.0, "Straight ahead, Rubik's cube, on the table. Reach out slowly.")
+        XCTAssertEqual(guides.requests, [GuideRequest(target: "rubik's cube", box: box)])
+    }
+
+    func testGuideForAThingOnlyThe360SawAsksTheWearerToFaceIt() async throws {
+        let link = FakeLink(), speaker = FakeSpeaker(), guides = GuideBox()
+        let c = guideCoordinator(link, speaker, guides)
+        await c.handle(.guideHand("cup"))
+        await c.receive(try SceneAnswer(queryId: "q-1", status: .found, subject: "cup", bearingDeg: 90,
+                                        detail: nil, confidence: .high, latencyMs: 1_500))
+
+        XCTAssertEqual(speaker.said.last?.0, "To your right, cup. " + AnswerPhrasing.faceItToGuide)
+        XCTAssertTrue(guides.requests.isEmpty)
+    }
+
+    func testAPlainFindNeverStartsAGuide() async throws {
+        let link = FakeLink(), speaker = FakeSpeaker(), guides = GuideBox()
+        let c = guideCoordinator(link, speaker, guides)
+        await c.handle(.find("cup"))
+        await c.receive(try SceneAnswer(queryId: "q-1", status: .found, subject: "cup", bearingDeg: 0, detail: nil,
+                                        confidence: .high, latencyMs: 1_500,
+                                        phoneBox: try PhoneBox(xMin: 0.4, yMin: 0.4, xMax: 0.5, yMax: 0.5)))
+        XCTAssertTrue(guides.requests.isEmpty)
+    }
+
+    func testHelpMeGrabItMeansTheLastThingFound() async throws {
+        let link = FakeLink(), speaker = FakeSpeaker(), guides = GuideBox()
+        let c = guideCoordinator(link, speaker, guides)
+
+        await c.handle(.guideHand(nil))
+        XCTAssertEqual(speaker.said.last?.0, AnswerPhrasing.guideWhat)
+        XCTAssertTrue(link.sent.isEmpty)
+
+        await c.handle(.find("rubik's cube"))
+        await c.receive(try SceneAnswer(queryId: "q-1", status: .found, subject: "Rubik's cube", bearingDeg: 60,
+                                        detail: nil, confidence: .high, latencyMs: 1_500))
+        await c.handle(.guideHand(nil))
+        XCTAssertEqual(link.sent.last?.target, "rubik's cube")
+    }
+
     func testNavigationAndSignReadingAreNotItsJob() async {
         let c = coordinator(FakeLink(), FakeSpeaker())
         let nav = await c.handle(.navigate("library"))

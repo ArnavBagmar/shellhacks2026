@@ -35,6 +35,25 @@ final class IntentParserTests: XCTestCase {
         XCTAssertEqual(IntentParser.parse("stop"), .cancel)
     }
 
+    func testGuideMyHandPhrasings() {
+        let cases: [(String, String?)] = [
+            ("guide my hand to the Rubik's cube", "rubik's cube"),
+            ("can you guide my hand to the rubik's cube please", "rubik's cube"),
+            ("help me grab the water bottle", "water bottle"),
+            ("help me reach the cup on the table", "cup on the table"),
+            ("help me pick up my keys", "my keys"),
+            ("lead my hand towards the remote", "remote"),
+            ("guide my hand", nil),
+            ("help me grab it", nil),
+            ("guide my hand to that", nil),
+        ]
+        for (utterance, target) in cases {
+            XCTAssertEqual(IntentParser.parse(utterance), .guideHand(target), utterance)
+        }
+        // Not a route: "take my hand" is the hand, "take me to" is a walk.
+        XCTAssertEqual(IntentParser.parse("take me to the cafe"), .navigate("cafe"))
+    }
+
     /// Step 26 gave the voice layer the gap ring, so "which way is clear" is now a
     /// question the system can actually answer from the same number the steering cue
     /// is rendered from -- but the parser returned nil for it, so the wearer heard

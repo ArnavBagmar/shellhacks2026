@@ -6,6 +6,8 @@ let package = Package(
     platforms: [
         .iOS(.v17),
         .macOS(.v14),
+        // Only CaneGuide is built for the watch (the hand guide's taps).
+        .watchOS(.v10),
     ],
     products: [
         .library(name: "CaneContracts", targets: ["CaneContracts"]),
@@ -16,6 +18,7 @@ let package = Package(
         .library(name: "CaneVoice", targets: ["CaneVoice"]),
         .library(name: "CaneCamera", targets: ["CaneCamera"]),
         .library(name: "CaneAssist", targets: ["CaneAssist"]),
+        .library(name: "CaneGuide", targets: ["CaneGuide"]),
         .executable(name: "nav-cli", targets: ["NavCLI"]),
         .executable(name: "replay-cli", targets: ["ReplayCLI"]),
     ],
@@ -46,11 +49,16 @@ let package = Package(
         .testTarget(name: "CaneCameraTests", dependencies: ["CaneCamera"]),
         // Step 20 — "Hey Cane, is there a bathroom around?": intent -> query ->
         // the laptop's Gemini answer -> speech.
-        .target(name: "CaneAssist", dependencies: ["CaneTransport", "CaneOutput", "CaneVoice", "CaneCamera"]),
+        .target(name: "CaneAssist", dependencies: ["CaneTransport", "CaneOutput", "CaneVoice", "CaneCamera", "CaneGuide"]),
         .testTarget(
             name: "CaneAssistTests",
-            dependencies: ["CaneAssist", "CaneTransport", "CaneOutput", "CaneVoice", "CaneCamera"]
+            dependencies: ["CaneAssist", "CaneTransport", "CaneOutput", "CaneVoice", "CaneCamera", "CaneGuide"]
         ),
+        // "Hey Cane, guide my hand to the Rubik's cube": the rules that turn
+        // a tracked thing + a fingertip into watch taps and direction words.
+        // Foundation-only, so the watch app links it too.
+        .target(name: "CaneGuide"),
+        .testTarget(name: "CaneGuideTests", dependencies: ["CaneGuide"]),
         // Step 12 — navigation engine (Routes API, heading, turn cues). Deliberately
         // independent of CaneContracts: CoreLocation never feeds the awareness path.
         .target(name: "CaneNavigation"),

@@ -13,6 +13,7 @@ actor VoiceRouter {
     private let arbiter: OutputArbiter
     private let coordinator: QueryCoordinator
     private let navigation: NavigationController
+    private let guide: HandGuide
     private let onHeard: @Sendable (String) -> Void
     private let diagnostics: Diagnostics
     private let logger = Logger(subsystem: "cane", category: "voice-router")
@@ -21,6 +22,7 @@ actor VoiceRouter {
         arbiter: OutputArbiter,
         coordinator: QueryCoordinator,
         navigation: NavigationController,
+        guide: HandGuide,
         onHeard: @escaping @Sendable (String) -> Void,
         diagnostics: Diagnostics
     ) {
@@ -28,6 +30,7 @@ actor VoiceRouter {
         self.arbiter = arbiter
         self.coordinator = coordinator
         self.navigation = navigation
+        self.guide = guide
         self.onHeard = onHeard
     }
 
@@ -55,6 +58,8 @@ actor VoiceRouter {
             onHeard("Hey Cane")
             say(phrases.next(.listening))
         case .command(let text):
+            // Anything said ends a hand guide: "stop", or the next question.
+            guide.stop()
             onHeard(text)
             logger.info("heard: \(text, privacy: .public)")
             let intent = IntentParser.route(text)

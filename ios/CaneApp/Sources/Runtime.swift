@@ -2,6 +2,7 @@ import CaneAssist
 import CaneCamera
 import CaneContracts
 import CaneFeedback
+import CaneGuide
 import CaneOutput
 import CaneTransport
 import CaneVoice
@@ -14,6 +15,7 @@ import os
 ///     laptop --steer---> FeedbackManager --> SteerCueOutput -^ (step 24)
 ///     laptop <--query--- QueryCoordinator <-- VoiceRouter <-- SpeechListener (open mic)
 ///     laptop --answer--> QueryCoordinator --> OutputArbiter
+///                             `--> HandGuide (front camera + TrueDepth) --> watch taps
 ///     laptop <--speak--- NaturalSpeechRenderer (answers, prompts) --voice--> clip player
 ///
 /// The phone is the master clock: every `now` here is phone wall-clock ms.
@@ -48,6 +50,8 @@ final class Runtime {
     let settings: SettingsBox
     let client: EventLinkClient
     let camera: FrontCamera
+    /// "Guide my hand to ...": live tracking once Gemini found the thing.
+    let guide: HandGuide
     private let laptopVoice: LaptopVoice
     private let feedback: FeedbackManager
     private let coordinator: QueryCoordinator
@@ -125,6 +129,13 @@ final class Runtime {
 
         let camera = FrontCamera()
         self.camera = camera
+        let guide = HandGuide(
+            camera: camera, speaker: arbiter, watch: WatchLink.shared, clock: Self.now,
+            onEnd: { target, end in
+                diagnostics.record("guide_end", ["target": .text(target), "end": .text(end.rawValue)])
+            }
+        )
+        self.guide = guide
         coordinator = QueryCoordinator(
             link: client,
             speaker: arbiter,
@@ -144,6 +155,14 @@ final class Runtime {
                     fields["accuracy"] = .text(sample.accuracy.rawValue)
                 }
                 diagnostics.record("distance", fields)
+            },
+            onGuide: { request in
+                diagnostics.record("guide_start", [
+                    "target": .text(request.target), "watch": .text(WatchLink.shared.status),
+                    "box": .text(String(format: "%.2f,%.2f,%.2f,%.2f", request.box.xMin, request.box.yMin,
+                                        request.box.xMax, request.box.yMax)),
+                ])
+                return guide.start(request)
             }
         )
         let navigation = NavigationController(
@@ -161,6 +180,7 @@ final class Runtime {
             arbiter: arbiter,
             coordinator: coordinator,
             navigation: navigation,
+            guide: guide,
             onHeard: callbacks.onHeard,
             diagnostics: diagnostics
         )
@@ -211,6 +231,7 @@ final class Runtime {
         startLoops()
         await startCamera()
         await startMicrophone()
+        callbacks.onNote("watch: \(WatchLink.shared.status)")
         interruptionObserver = AudioSessionConfig.observeInterruptions { [arbiter] began in
             guard !began else { return }
             Task { await arbiter.say(SpokenPhrase(text: "Output interrupted. Back now."), on: .prompt, maxWaitMs: 3_000) }
@@ -225,6 +246,7 @@ final class Runtime {
         tasks.removeAll()
         listener.stop()
         network.stop()
+        guide.stop()
         camera.stop()
         navigation.stop()
         client.disconnect()

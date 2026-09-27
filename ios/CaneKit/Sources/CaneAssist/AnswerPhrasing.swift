@@ -16,7 +16,7 @@ public enum AnswerPhrasing {
     public static let cancelled = "Okay."
     public static let notUnderstood = "Sorry, I didn't catch that."
     public static let help = "Say Hey Cane, then ask me anything, like: is there a bathroom around, "
-        + "how far is that chair, what's in front of me, or take me to a place. "
+        + "how far is that chair, guide my hand to the cup, what's in front of me, or take me to a place. "
         + "While navigating: repeat that, where am I going, or stop navigation."
     public static let listening = "Yes?"
 
@@ -69,6 +69,9 @@ public enum AnswerPhrasing {
         }
     }
 
+    /// Found in a 360 view only: the phone camera must see it to track it.
+    public static let faceItToGuide = "Turn to face it, then ask me again to guide your hand."
+    public static let guideWhat = "What should I guide your hand to?"
     public static let faceItToMeasure = "Face it and ask again to measure how far."
     public static let noDepthSensor = "This phone can't measure distance."
     public static let noCleanReading = "I can't get a clean distance reading right now."

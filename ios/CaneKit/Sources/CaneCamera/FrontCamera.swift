@@ -117,8 +117,7 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
         let width = Int(image.extent.width.rounded())
         let height = Int(image.extent.height.rounded())
         var depth: DepthMap?
-        if withDepth, let map = probe?.latestMap() {
-            let turned = map.rotatedClockwise(lock.withLock { depthLagDeg })
+        if withDepth, let turned = liveDepthMap() {
             let photoAspect = Double(width) / Double(max(height, 1))
             let depthAspect = Double(turned.width) / Double(max(turned.height, 1))
             if abs(photoAspect - depthAspect) > 0.02 {
@@ -128,6 +127,12 @@ public final class FrontCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDe
         }
         return Snapshot(jpeg: jpeg, hfovDeg: hfov(width: width, height: height), width: width, height: height,
                         depth: depth)
+    }
+
+    /// The newest whole TrueDepth map, turned to match the video frames
+    /// (one ~1 MB copy): the hand guide measures its boxes in it every frame.
+    public func liveDepthMap() -> DepthMap? {
+        probe?.latestMap()?.rotatedClockwise(lock.withLock { depthLagDeg })
     }
 
     // MARK: - Setup

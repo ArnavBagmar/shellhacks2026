@@ -7,6 +7,11 @@ public enum VoiceIntent: Equatable, Sendable {
     /// "How far is the Sprite can?" -> `.howFar("sprite can")`: a find
     /// whose answer must carry a distance (TrueDepth, front camera only).
     case howFar(String)
+    /// "Guide my hand to the Rubik's cube" -> `.guideHand("rubik's cube")`:
+    /// find it, then track it and the wearer's hand live and tap the watch
+    /// faster as they close. `nil` ("help me grab it") means the last thing
+    /// found.
+    case guideHand(String?)
     /// "What's around me?"
     case describeAround
     /// "What's in front of me?"
@@ -63,6 +68,9 @@ public enum IntentParser {
         if navigationStatusPhrases.contains(where: text.contains) { return .navigationStatus }
         if timePhrases.contains(where: text.contains) { return .time }
         if text == "help" || helpPhrases.contains(where: text.contains) { return .help }
+        // Before "take me to" and the finds: "help me reach the cup" is a
+        // hand guide, not a question about the cup.
+        if let rest = after(guidePrefixes, in: text) { return .guideHand(guideTarget(rest)) }
         if let place = after(navigatePrefixes, in: text).flatMap(clean) { return .navigate(place) }
         if let target = after(howFarPrefixes, in: text).flatMap(clean) { return .howFar(target) }
         if let target = after(findPrefixes, in: text).flatMap(clean) {
@@ -157,6 +165,26 @@ public enum IntentParser {
         "where am i going", "where are we going", "where are you taking me", "what is my destination",
         "what's my destination", "are we there yet", "how much further", "how much farther", "navigation status",
     ]
+
+    /// Matched as whole words anywhere; the target (if any) follows.
+    static let guidePrefixes = [
+        "guide my hand", "lead my hand", "take my hand", "move my hand", "help me grab", "help me reach",
+        "help me pick up", "help me touch", "help me get hold of",
+    ]
+    static let guideLinks = ["to ", "towards ", "toward ", "over to "]
+    static let pronouns: Set<String> = ["it", "that", "this", "them", "that thing", "this thing", "that one", "this one"]
+
+    /// "to the rubik's cube" -> "rubik's cube"; "it" / "" -> nil (the last
+    /// thing found).
+    static func guideTarget(_ rest: String) -> String? {
+        var text = rest
+        for link in guideLinks where text.hasPrefix(link) {
+            text = String(text.dropFirst(link.count))
+            break
+        }
+        guard let target = clean(text), !pronouns.contains(target) else { return nil }
+        return target
+    }
 
     static let navigatePrefixes = [
         "take me to ", "navigate to ", "directions to ", "guide me to ", "walk me to ", "get me to ",

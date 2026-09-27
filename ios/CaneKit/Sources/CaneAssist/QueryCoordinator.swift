@@ -32,6 +32,18 @@ public protocol AssistSpeaker: Sendable {
 
 extension OutputArbiter: AssistSpeaker {}
 
+/// "Guide my hand to ..." once Gemini found the thing in the phone photo:
+/// where to start tracking it.
+public struct GuideRequest: Sendable, Equatable {
+    public let target: String
+    public let box: PhoneBox
+
+    public init(target: String, box: PhoneBox) {
+        self.target = target
+        self.box = box
+    }
+}
+
 /// "Hey Cane, is there a bathroom around?" from intent to spoken answer.
 ///
 /// 1. send the `query` at once (the laptop's settle timer starts now), with
@@ -69,6 +81,8 @@ public actor QueryCoordinator {
     private let locale: Locale
     private var phrases: PromptPicker
     private let onDistance: @Sendable (DistanceOutcome) -> Void
+    /// Starts the live guide; returns the words to add to the answer.
+    private let onGuide: @Sendable (GuideRequest) async -> String?
     private let logger = Logger(subsystem: "cane", category: "assist")
 
     public private(set) var state: State = .idle
@@ -77,6 +91,11 @@ public actor QueryCoordinator {
     /// wearer asked "how far".
     private var depth: DepthMap?
     private var distanceAsked = false
+    /// The current question is a "guide my hand": a found answer in the
+    /// phone photo hands over to the live guide.
+    private var guideAsked = false
+    /// The last thing found, for "help me grab it".
+    private var lastFound: String?
     private var timeoutTask: Task<Void, Never>?
     private var stateObserver: (@Sendable (State) -> Void)?
 
@@ -90,6 +109,7 @@ public actor QueryCoordinator {
         timeoutMs: Int = QueryCoordinator.answerTimeoutMs,
         locale: Locale = .current,
         onDistance: @escaping @Sendable (DistanceOutcome) -> Void = { _ in },
+        onGuide: @escaping @Sendable (GuideRequest) async -> String? = { _ in nil },
         choosePhrase: @escaping @Sendable (Int) -> Int = { Int.random(in: 0..<$0) }
     ) {
         self.phrases = PromptPicker(choose: choosePhrase)
@@ -102,6 +122,7 @@ public actor QueryCoordinator {
         self.timeoutMs = timeoutMs
         self.locale = locale
         self.onDistance = onDistance
+        self.onGuide = onGuide
     }
 
     public func observeState(_ observer: @escaping @Sendable (State) -> Void) {
@@ -117,6 +138,13 @@ public actor QueryCoordinator {
             await ask(.find, target: target, utterance: utterance ?? "is there a \(target) around")
         case .howFar(let target):
             await ask(.find, target: target, utterance: utterance ?? "how far is the \(target)", distanceAsked: true)
+        case .guideHand(let named):
+            guard let target = named ?? lastFound else {
+                _ = await speaker.say(SpokenPhrase(text: AnswerPhrasing.guideWhat), on: .prompt, haptic: nil, pan: 0,
+                                      maxWaitMs: Self.promptMaxWaitMs)
+                return true
+            }
+            await ask(.find, target: target, utterance: utterance ?? "guide my hand to the \(target)", guide: true)
         case .describeAround:
             await ask(.describeAround, target: nil, utterance: utterance ?? "what is around me")
         case .describeFront:
@@ -148,14 +176,30 @@ public actor QueryCoordinator {
         timeoutTask?.cancel()
         setState(.answering)
         var distance: DistanceOutcome?
+        let guide: GuideRequest? = if guideAsked, answer.status == .found, let box = answer.phoneBox {
+            GuideRequest(target: target ?? answer.subject ?? "it", box: box)
+        } else {
+            nil
+        }
+        if answer.status == .found, let found = target ?? answer.subject {
+            lastFound = found
+        }
         if answer.status == .found {
             let outcome = DistanceOutcome.evaluate(box: answer.phoneBox, depth: depth)
             onDistance(outcome)
             distance = outcome
         }
         depth = nil
-        let text = AnswerPhrasing.phrase(for: answer, target: target, distance: distance, asked: distanceAsked,
+        var text = AnswerPhrasing.phrase(for: answer, target: target, distance: distance, asked: distanceAsked,
                                          locale: locale)
+        if guideAsked, answer.status == .found, guide == nil {
+            text += " " + AnswerPhrasing.faceItToGuide
+        }
+        // Tracking starts now, before the answer is spoken: the photo the
+        // box belongs to is already seconds old.
+        if let guide, let more = await onGuide(guide) {
+            text += " " + more
+        }
         let haptic = HapticScript.navigation(side: AnswerPhrasing.side(for: answer), userGain: Double(userGain()))
         logger.info("answer \(answer.queryId, privacy: .public) \(answer.status.rawValue, privacy: .public) in \(answer.latencyMs) ms: \(text, privacy: .public)")
         speaker.cancel(upTo: .prompt)
@@ -165,7 +209,8 @@ public actor QueryCoordinator {
 
     // MARK: - Internals
 
-    private func ask(_ kind: SceneQueryKind, target: String?, utterance: String, distanceAsked: Bool = false) async {
+    private func ask(_ kind: SceneQueryKind, target: String?, utterance: String, distanceAsked: Bool = false,
+                     guide: Bool = false) async {
         finish()
         let id = makeId()
         let capture = snapshot()
@@ -186,6 +231,7 @@ public actor QueryCoordinator {
         // photo means nothing on another.
         self.depth = capture.frame == nil ? nil : capture.depth
         self.distanceAsked = distanceAsked
+        self.guideAsked = guide
         setState(.looking(queryId: id))
         do {
             try await link.send(query)
@@ -240,6 +286,7 @@ public actor QueryCoordinator {
         target = nil
         depth = nil
         distanceAsked = false
+        guideAsked = false
         setState(.idle)
     }
 

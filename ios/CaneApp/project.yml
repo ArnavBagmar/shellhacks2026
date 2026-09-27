@@ -1,11 +1,13 @@
 # The phone app. Generate the Xcode project with:
 #   cd ios/CaneApp && xcodegen
 # then open CaneApp.xcodeproj. All logic lives in ../CaneKit; this target is
-# the composition root and the chest display.
+# the composition root and the chest display. CaneWatch (../CaneWatch) is
+# the Apple Watch app for "guide my hand": it only taps the wrist.
 name: CaneApp
 options:
   deploymentTarget:
     iOS: "26.0"
+    watchOS: "10.0"
   createIntermediateGroups: true
 configFiles:
   Debug: Config/Base.xcconfig
@@ -20,6 +22,8 @@ targets:
     sources:
       - path: Sources
     dependencies:
+      # Embedded as the companion watch app.
+      - target: CaneWatch
       - package: CaneKit
         products:
           - CaneContracts
@@ -30,6 +34,7 @@ targets:
           - CaneVoice
           - CaneCamera
           - CaneAssist
+          - CaneGuide
     info:
       path: Sources/Info.plist
       properties:
@@ -63,6 +68,35 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_PREVIEWS: YES
+  CaneWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: ../CaneWatch/Sources
+    dependencies:
+      - package: CaneKit
+        products:
+          - CaneGuide
+    info:
+      path: ../CaneWatch/Sources/Info.plist
+      properties:
+        CFBundleDisplayName: Cane
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: $(CANE_BUNDLE_ID)
+        # Keeps the taps going with the wrist lowered while reaching.
+        WKBackgroundModes:
+          - physical-therapy
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(CANE_BUNDLE_ID).watchkitapp
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: "5.0"
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_PREVIEWS: YES

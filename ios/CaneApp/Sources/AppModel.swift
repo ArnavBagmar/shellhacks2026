@@ -37,6 +37,9 @@ final class AppModel {
 
     init() {
         settingsBox = SettingsBox(AppSettings().snapshot)
+        // Activate the watch channel at launch, not on the first guide: the
+        // handshake takes a moment.
+        _ = WatchLink.shared
     }
 
     var activity: Activity {
