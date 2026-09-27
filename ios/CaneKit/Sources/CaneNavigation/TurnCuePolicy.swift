@@ -25,6 +25,9 @@ public enum TurnCuePolicy {
     public static let straightReminderS: Double = 20
     public static let minWalkSpeedMps: Double = 0.5
     public static let gpsLostAfterS: Double = 10
+    /// Fixes must flow this long before "GPS back": one stray fix between
+    /// buildings made it say lost / back / lost (2026-09-27).
+    public static let gpsBackAfterS: Double = 3
     /// No `.correctHeading` this soon after a `.now`: the heading swings
     /// through the vertex while the walker turns (seen on the live FIU route).
     public static let postManeuverGraceS: Double = 6
@@ -77,12 +80,18 @@ public enum TurnCuePolicy {
     ) -> Decision? {
         let silentForS = Double(nowMs - follower.timestampMs) / 1_000
         if silentForS >= gpsLostAfterS {
+            next.gpsBackSinceMs = nil
             guard !next.gpsLostAnnounced else { return .stayQuiet }
             next.gpsLostAnnounced = true
             return .speak(TurnCue(kind: .gpsLost, direction: .straight, distanceM: nil))
         }
         guard next.gpsLostAnnounced else { return nil }
+        let since = next.gpsBackSinceMs ?? follower.timestampMs
+        next.gpsBackSinceMs = since
+        // Still paused until the fixes have held for a moment.
+        guard Double(nowMs - since) / 1_000 >= gpsBackAfterS else { return .stayQuiet }
         next.gpsLostAnnounced = false
+        next.gpsBackSinceMs = nil
         return .speak(TurnCue(kind: .gpsRestored, direction: .straight, distanceM: nil))
     }
 

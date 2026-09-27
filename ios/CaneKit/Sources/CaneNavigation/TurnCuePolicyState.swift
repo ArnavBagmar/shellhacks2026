@@ -16,6 +16,8 @@ extension TurnCuePolicy {
         var offRouteAnnounced = false
         var arrivedAnnounced = false
         var gpsLostAnnounced = false
+        /// First fix after a "GPS lost": "GPS back" waits for a steady run.
+        var gpsBackSinceMs: Int64?
 
         public init() {}
     }

@@ -337,22 +337,28 @@ final class TurnCuePolicyTests: XCTestCase {
         XCTAssertEqual(kinds.compactMap { $0 }, [.gpsLost], "one gpsLost, and nothing else at all")
         XCTAssertEqual(kinds.firstIndex(of: .gpsLost), 9, "ten seconds without a fix")
 
-        // Fixes resume: GPS back first, and the missed prepare after.
+        // Fixes resume: still paused until they hold for 3 s, then GPS back
+        // first, and the missed prepare after.
         let resumed = samples[52]
-        let restored = LocationFix(
-            latLng: resumed.fix.latLng,
-            horizontalAccuracyM: 5,
-            speedMps: 1.4,
-            timestampMs: 64_000
-        )
-        followerState = follower.advance(
-            from: followerState, fix: restored, heading: resumed.heading
-        )
-        let (afterRestore, restoredCue) = TurnCuePolicy.evaluate(
-            state: policyState, follower: followerState, nowMs: 64_000
-        )
+        var restoredCue: TurnCue?
+        for second in 0...3 {
+            let restored = LocationFix(
+                latLng: resumed.fix.latLng,
+                horizontalAccuracyM: 5,
+                speedMps: 1.4,
+                timestampMs: 64_000 + Int64(second) * 1_000
+            )
+            followerState = follower.advance(
+                from: followerState, fix: restored, heading: resumed.heading
+            )
+            let (next, cue) = TurnCuePolicy.evaluate(
+                state: policyState, follower: followerState, nowMs: restored.timestampMs
+            )
+            policyState = next
+            if second < 3 { XCTAssertNil(cue, "one stray fix is not GPS back") } else { restoredCue = cue }
+        }
         let (_, followUp) = TurnCuePolicy.evaluate(
-            state: afterRestore, follower: followerState, nowMs: 64_500
+            state: policyState, follower: followerState, nowMs: 67_500
         )
 
         XCTAssertEqual(restoredCue?.kind, .gpsRestored)

@@ -32,9 +32,9 @@
     /// queue the manager was created on. The stream continuations are
     /// `Sendable` and thread-safe by contract.
     public final class CoreLocationSources: NSObject, @unchecked Sendable {
-        /// Brief H4/F1: best accuracy, a metre of movement, three
-        /// degrees of turn.
-        public static let distanceFilterM: CLLocationDistance = 1
+        /// Brief H4/F1 asked for a metre of movement; every fix is taken
+        /// now (see `init`). Kept for reference.
+        public static let distanceFilterM: CLLocationDistance = kCLDistanceFilterNone
         public static let headingFilterDeg: CLLocationDegrees = 3
 
         private let manager: CLLocationManager
@@ -58,7 +58,12 @@
             super.init()
             manager.delegate = self
             manager.desiredAccuracy = kCLLocationAccuracyBest
-            manager.distanceFilter = CoreLocationSources.distanceFilterM
+            // Every fix, moving or not: with a 1 m filter a walker standing
+            // at a corner got no fix for 10 s and heard "GPS lost" (2026-09-27).
+            manager.distanceFilter = kCLDistanceFilterNone
+            // A walk, not a drive; and iOS must never pause a guided walk.
+            manager.activityType = .fitness
+            manager.pausesLocationUpdatesAutomatically = false
             manager.headingFilter = CoreLocationSources.headingFilterDeg
         }
 
