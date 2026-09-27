@@ -118,6 +118,27 @@ class Detection(BaseModel):
     range_band: Annotated[RangeBand | None, Field(strict=False)] = None
 
 
+class GroundHazardReading(BaseModel):
+    """One crop's worst descending ground discontinuity (step 29).
+
+    Additive and optional: a response from before step 29 carries no
+    ``ground_hazard`` at all, and the bridge simply sends no ``ground`` frame.
+
+    ``drop_ratio`` is a **ratio, never a depth**. Depth Anything V2 is
+    affine-invariant in disparity, measured, so this sensor cannot know that a
+    hole is 15 cm deep; it can know the floor there reads 2.4x farther than a
+    flat floor would at that row. Everything downstream is forbidden from
+    turning that into centimetres.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    column: Annotated[int, Field(ge=0, lt=COLUMNS_PER_CROP)]
+    span: Annotated[int, Field(ge=1, le=COLUMNS_PER_CROP)]
+    drop_ratio: Annotated[float, Field(gt=1.0, allow_inf_nan=False)]
+    confidence: Annotated[float, Field(ge=0.0, le=1.0, allow_inf_nan=False)]
+
+
 class GapProfile(BaseModel):
     """One crop's depth column profile (step 21's shape; step 22 fills it).
 
@@ -181,6 +202,9 @@ class GapProfile(BaseModel):
     anchored: bool
     ground_scale: GroundScale | None = None
     ground_offset: GroundOffset | None = None
+    #: Step 29. ``None`` means the floor was clear *or* unreadable -- the
+    #: detector refuses to guess, so the two are deliberately one answer.
+    ground_hazard: GroundHazardReading | None = None
 
     @property
     def has_affine_scale(self) -> bool:

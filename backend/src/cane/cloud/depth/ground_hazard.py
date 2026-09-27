@@ -11,7 +11,8 @@ disparity, measured, so there are no centimetres here and there never will be
 from this sensor alone. What there is, is a *ratio*: the ground in this column
 reads 1.8x farther away than a flat floor would at that row. That is enough to
 say "step down, ahead to the left" and nowhere near enough to say "15 cm", so
-this module reports the ratio and the caller is forbidden from dressing it up.
+this module reports the ratio and everything downstream is forbidden from
+dressing it up.
 
 **Why a hole reads low.** Relative *inverse* depth grows towards the feet, so
 farther is smaller. Inverting the step-27 fit, `d = scale / (z - offset)`, a
@@ -31,7 +32,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
@@ -39,16 +40,30 @@ from numpy.typing import NDArray
 from cane.cloud.api_models import COLUMNS_PER_CROP
 from cane.cloud.depth.constants import MOUNT_HEIGHT_M
 from cane.cloud.depth.geometry import ground_rows, row_inverse_distance
-from cane.cloud.depth.profile import GroundFit
 
 logger = logging.getLogger(__name__)
+
+
+class AffineFit(Protocol):
+    """Just the two numbers this module needs from step 27's ground fit.
+
+    Structural rather than an import of `GroundFit`, for two reasons: it breaks
+    what would otherwise be an import cycle with `profile`, and it says plainly
+    that the detector has no business reading the fit's *verdict*. Whether the
+    scale is trustworthy enough to state metres (`anchored`) is a question about
+    metres, and this module never states one.
+    """
+
+    scale: float | None
+    offset: float | None
+
 
 #: Below this the column is not a hazard. 1.35 means "a third farther than the
 #: floor should be here", which a wet patch, a shadow or a paving seam does not
 #: reach and a kerb or an open pothole clears easily. Set well above 1 on
 #: purpose: Sec 2.3's argument is that a half-working detector is worse than
-#: none, so the cost of a miss is deliberately preferred to the cost of a
-#: false alarm. A demo knob, like `UrgencyPolicy.staticActM`.
+#: none, so the cost of a miss is deliberately preferred to the cost of a false
+#: alarm. A demo knob, like `UrgencyPolicy.staticActM`.
 MIN_DROP_RATIO: Final = 1.35
 
 #: The ratio at which confidence saturates. A floor reading three times its
@@ -80,7 +95,7 @@ class GroundHazard:
 def detect_ground_hazard(
     depth: NDArray[np.float32],
     crop_px: int,
-    fit: GroundFit,
+    fit: AffineFit,
     *,
     mount_height_m: float = MOUNT_HEIGHT_M,
 ) -> GroundHazard | None:
@@ -133,14 +148,13 @@ def detect_ground_hazard(
 
 
 def _distance_ratio(
-    strip: NDArray[np.float64], inverse_d: NDArray[np.float64], fit: GroundFit
+    strip: NDArray[np.float64], inverse_d: NDArray[np.float64], fit: AffineFit
 ) -> NDArray[np.float64]:
     """Recovered distance over flat-floor distance, per cell.
 
-    Both `scale` and `offset` cancel out of nothing here -- they are exactly
-    what turns a scale-free map into a comparable ratio, which is why this
-    needs step 27's two-parameter fit and could not have been built on the
-    one-parameter version Sec 2.3 assumed.
+    This is what needs step 27's *two*-parameter fit: with only a scale, the
+    offset would leak straight into the ratio and every floor would look like a
+    hazard at one distance and none at another.
     """
     assert fit.scale is not None and fit.offset is not None
     denominator = strip - fit.offset

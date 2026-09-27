@@ -18,6 +18,7 @@ from cane.cloud.depth.ground_hazard import (
     detect_ground_hazard,
 )
 from cane.cloud.depth.profile import fit_ground
+
 from .depth_synthetic import CROP_PX, affine_ground
 
 SCALE = 4.0
@@ -29,9 +30,7 @@ def _fit(depth):
     return fit_ground(depth, CROP_PX, max_residual=MAX_RESIDUAL)
 
 
-def _carve(
-    depth, *, first_col: int, last_col: int, ratio: float, crop_px: int = CROP_PX
-):
+def _carve(depth, *, first_col: int, last_col: int, ratio: float, crop_px: int = CROP_PX):
     """Push one slab of floor `ratio` times farther away than it really is.
 
     Farther means a larger `d`, so a smaller `1/d`, so a **smaller** raw
@@ -40,9 +39,7 @@ def _carve(
     rows = ground_rows(crop_px)
     assert rows is not None
     out = depth.copy()
-    inverse_d = row_inverse_distance(
-        np.arange(rows[0], rows[1], dtype=np.float64), crop_px
-    )
+    inverse_d = row_inverse_distance(np.arange(rows[0], rows[1], dtype=np.float64), crop_px)
     dropped = SCALE * (inverse_d / ratio) + OFFSET
     out[rows[0] : rows[1], first_col : last_col + 1] = dropped[:, None].astype(np.float32)
     return out
@@ -138,8 +135,9 @@ class TestRefusingToGuess:
 
     def test_no_ground_fit_means_no_hazard(self) -> None:
         depth = _flat()
-        wall = fit_ground(np.full((CROP_PX, CROP_PX), 2.0, dtype=np.float32),
-                          CROP_PX, max_residual=MAX_RESIDUAL)
+        wall = fit_ground(
+            np.full((CROP_PX, CROP_PX), 2.0, dtype=np.float32), CROP_PX, max_residual=MAX_RESIDUAL
+        )
         assert wall.scale is None
 
         assert detect_ground_hazard(depth, CROP_PX, wall) is None

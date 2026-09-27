@@ -8,6 +8,7 @@ public enum InboundMessage: Equatable, Sendable {
     case event(AwarenessEvent)
     case answer(SceneAnswer)
     case steer(SteerCommand)
+    case ground(GroundCue)
     /// The natural-voice audio for one `SpeakRequest`.
     case voice(VoiceClip)
     case unknown(type: String)
@@ -38,6 +39,8 @@ public enum InboundMessage: Equatable, Sendable {
             return .answer(try SceneAnswer.decode(object))
         case "steer":
             return .steer(try SteerCommand.decode(object))
+        case "ground":
+            return .ground(try GroundCue.decode(object))
         case "voice":
             return .voice(try VoiceClip.decode(object))
         default:

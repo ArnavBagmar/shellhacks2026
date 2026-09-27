@@ -152,7 +152,7 @@ rig, inside the hackathon window:
 |---|---|---|---|---|
 | 1 | Trust baseline measured | The traffic walk and parked-car block are recorded and counted, so every later claim has a before | in-progress | `.claude/plans/threat-aware-hazards.plan.md` |
 | 2 | Path-conflict gate | Passing traffic no longer triggers Stops; a real collision course still does | complete (field validation in 4) | `.claude/plans/threat-aware-hazards-m2.plan.md` |
-| 3 | Ground-discontinuity channel | The user is told about a drop-off or pothole ahead before the cane tip finds it | pending | — |
+| 3 | Ground-discontinuity channel | The user is told about a drop-off or pothole ahead before the cane tip finds it | complete (field validation in 4) | `.claude/tdd/threat-aware-hazards-m3.tdd.md` |
 | 4 | Trust baseline re-measured | Both claims are backed by a measured before/after on the same route | pending | — |
 | 5 | *(post-hackathon)* Semantic roadway suppression | Hazards standing on the roadway are demoted by scene understanding, not geometry alone | pending | — |
 | 6 | *(post-hackathon)* Metric ground-hazard depth | "Step down, about 15 cm" becomes sayable — depends on the affine scale fit (step 27) | pending | — |
@@ -168,15 +168,22 @@ rig, inside the hackathon window:
 - [ ] **What is the miss-distance threshold?** A sidewalk-to-near-lane offset
       of ~3.5 m should be suppressed and a head-on approach must not be. The
       boundary between them is unknown and has to come off the measured walk.
-- [ ] **Does a new ground-hazard class break the frozen contract?** `contracts/`
-      is frozen and a change means re-running step 2 in both languages. Riding
-      `unknown_obstacle` avoids that but loses the phrasing. Decide before
-      milestone 3 starts.
-- [ ] **How does a ground-hazard cue arbitrate against the steering cue?** Both
-      want the forward cone and the same output channel.
-- [ ] **What confidence floor makes the ground channel better than silence?**
-      §2.3 argues a half-working detector is a net negative; the floor is the
-      whole defence and it is currently unset.
+- [x] **Does a new ground-hazard class break the frozen contract?**
+      **Answered 2026-09-26: neither option was needed.** A hole has no metric
+      range and no closing rate, so the urgency ladder scores it 1 — haptic only,
+      never spoken — whatever class it wears. It therefore gets its own `ground`
+      frame, as steering did in step 21, and `awareness_event.schema.json` stays
+      frozen with its 12 classes untouched.
+- [x] **How does a ground-hazard cue arbitrate against the steering cue?**
+      **Answered: it does not have to.** A ground cue is presented on the
+      `.hazard` channel, which preempts everything including `.steering`; the
+      steering cue is the lowest thing in the house and is dropped while it
+      plays.
+- [x] **What confidence floor makes the ground channel better than silence?**
+      **Set, but derived rather than measured**: `MIN_DROP_RATIO` 1.35 in the
+      detector and `MIN_ANNOUNCE_CONFIDENCE` 0.35 on the laptop, together roughly
+      "the floor reads twice as far away as it should". Both are named constants
+      that milestone 1's recordings can re-tune offline.
 - [ ] **Is the path-conflict decision the consumer's to make?** §4.6 is explicit
       that producers emit facts and the consumer computes urgency, which argues
       the gate lives with the consumer — and the yaw data is only there anyway.

@@ -128,3 +128,20 @@ async def test_never_more_than_two_requests_at_once() -> None:
     voice = ElevenLabsVoice("k", client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     await asyncio.gather(*(voice.synthesize(f"phrase {i}") for i in range(6)))
     assert peak == 2
+
+
+async def test_a_clip_is_kept_on_disk_across_runs(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, content=MP3)
+
+    def fresh() -> ElevenLabsVoice:
+        return ElevenLabsVoice("k", client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+                               cache_dir=tmp_path)
+
+    assert await fresh().synthesize("Hmm, one sec.") == MP3
+    assert await fresh().synthesize("Hmm, one sec.") == MP3  # a new run: read from disk
+    assert len(requests) == 1
+    assert len(list(tmp_path.glob("*.mp3"))) == 1

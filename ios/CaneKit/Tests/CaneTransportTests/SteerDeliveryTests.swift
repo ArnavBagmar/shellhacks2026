@@ -15,13 +15,16 @@ final class SteerDeliveryTests: XCTestCase {
         let (steers, steerContinuation) = AsyncStream<SteerCommand>.makeStream(
             bufferingPolicy: .bufferingNewest(InboundSinks.steerBuffer)
         )
-        // `voices` arrived with the natural-voice work; this test does not read it.
+        // `voices` arrived with the natural-voice work and `grounds` with step 29;
+        // this test reads neither.
         let (_, voiceContinuation) = AsyncStream<VoiceClip>.makeStream()
+        let (_, groundContinuation) = AsyncStream<GroundCue>.makeStream()
         return (
             InboundSinks(
                 events: eventContinuation,
                 answers: answerContinuation,
                 steers: steerContinuation,
+                grounds: groundContinuation,
                 voices: voiceContinuation
             ),
             events, answers, steers

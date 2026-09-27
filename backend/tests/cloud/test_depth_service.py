@@ -43,6 +43,10 @@ GAP_PROFILE_FIELDS = {
     # Step 27: the recovered affine pair, `d = scale / (column - offset)`.
     "ground_scale",
     "ground_offset",
+    # Step 29: a *column index* and a *ratio*. Still no bearing (the bridge
+    # owns that), still no metres (the sensor cannot know them), still no
+    # clock -- so this field does not weaken what this set is guarding.
+    "ground_hazard",
 }
 
 

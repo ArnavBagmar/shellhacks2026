@@ -35,7 +35,7 @@ let package = Package(
         ),
         // Step 10 — haptics, speech, earcon and the output arbiter. Pure policy
         // is Foundation-only; engine wrappers are iOS-only behind protocols.
-        .target(name: "CaneOutput", dependencies: ["CaneContracts", "CaneFeedback"]),
+        .target(name: "CaneOutput", dependencies: ["CaneContracts", "CaneFeedback", "CaneTransport"]),
         .testTarget(name: "CaneOutputTests", dependencies: ["CaneOutput", "CaneFeedback", "CaneContracts"]),
         // Step 11 + 20 — open mic: wake word, intent grammar, on-device speech.
         .target(name: "CaneVoice"),

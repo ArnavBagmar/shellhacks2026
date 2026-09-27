@@ -34,6 +34,10 @@ public actor EventLinkClient {
     /// as `events`; see `InboundSinks.steerBuffer` for why only the newest is
     /// kept.
     public nonisolated let steerCommands: AsyncStream<SteerCommand>
+    /// Step 29: ground discontinuities ahead. Buffered like `steerCommands`
+    /// -- only the newest matters, because an older one describes a patch of
+    /// pavement the wearer has already walked over.
+    public nonisolated let groundCues: AsyncStream<GroundCue>
     /// Natural-voice clips, matched by `speakId`.
     public nonisolated let voices: AsyncStream<VoiceClip>
     let sinks: InboundSinks
@@ -59,17 +63,22 @@ public actor EventLinkClient {
         let (steers, steerContinuation) = AsyncStream<SteerCommand>.makeStream(
             bufferingPolicy: .bufferingNewest(InboundSinks.steerBuffer)
         )
+        let (grounds, groundContinuation) = AsyncStream<GroundCue>.makeStream(
+            bufferingPolicy: .bufferingNewest(InboundSinks.steerBuffer)
+        )
         let (voices, voiceContinuation) = AsyncStream<VoiceClip>.makeStream(
             bufferingPolicy: .bufferingNewest(8)
         )
         self.events = events
         self.answers = answers
         self.steerCommands = steers
+        self.groundCues = grounds
         self.voices = voices
         self.sinks = InboundSinks(
             events: eventContinuation,
             answers: answerContinuation,
             steers: steerContinuation,
+            grounds: groundContinuation,
             voices: voiceContinuation
         )
     }
@@ -167,6 +176,7 @@ struct InboundSinks: Sendable {
     let events: AsyncStream<AwarenessEvent>.Continuation
     let answers: AsyncStream<SceneAnswer>.Continuation
     let steers: AsyncStream<SteerCommand>.Continuation
+    let grounds: AsyncStream<GroundCue>.Continuation
     let voices: AsyncStream<VoiceClip>.Continuation
 
     /// Routes one decoded frame to its stream. `ping` is not here: answering
@@ -181,6 +191,8 @@ struct InboundSinks: Sendable {
             answers.yield(answer)
         case .steer(let command):
             steers.yield(command)
+        case .ground(let cue):
+            grounds.yield(cue)
         case .voice(let clip):
             voices.yield(clip)
         case .ping, .unknown:
@@ -192,6 +204,7 @@ struct InboundSinks: Sendable {
         events.finish()
         answers.finish()
         steers.finish()
+        grounds.finish()
         voices.finish()
     }
 }

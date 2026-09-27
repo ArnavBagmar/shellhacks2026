@@ -23,7 +23,7 @@ from typing import Final
 import numpy as np
 from numpy.typing import NDArray
 
-from cane.cloud.api_models import COLUMNS_PER_CROP, GapProfile
+from cane.cloud.api_models import COLUMNS_PER_CROP, GapProfile, GroundHazardReading
 from cane.cloud.depth.constants import (
     MOUNT_HEIGHT_M,
     NO_FIT_RESIDUAL,
@@ -31,6 +31,7 @@ from cane.cloud.depth.constants import (
     RESIDUAL_REFERENCE_M,
 )
 from cane.cloud.depth.geometry import band_rows, ground_rows, row_inverse_distance
+from cane.cloud.depth.ground_hazard import GroundHazard, detect_ground_hazard
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,7 @@ class CropDepthProfile:
     anchored: bool
     ground_scale: float | None
     ground_offset: float | None
+    ground_hazard: GroundHazardReading | None = None
 
     def __post_init__(self) -> None:
         if self.anchored and (self.ground_scale is None or self.ground_offset is None):
@@ -107,6 +109,7 @@ class CropDepthProfile:
             anchored=self.anchored,
             ground_scale=self.ground_scale,
             ground_offset=self.ground_offset,
+            ground_hazard=self.ground_hazard,
         )
 
 
@@ -238,6 +241,10 @@ def build_profile(
         logger.warning("crop %d: the depth band is not finite; emitting no profile", crop_index)
         return None
     fit = fit_ground(depth, crop_px, max_residual=max_residual, mount_height_m=mount_height_m)
+    # Step 29 rides the fit rather than repeating it: the affine pair is exactly
+    # what turns a scale-free map into a comparable ratio, so there is no ground
+    # hazard to find without one.
+    hazard = detect_ground_hazard(depth, crop_px, fit, mount_height_m=mount_height_m)
     return CropDepthProfile(
         crop_index=crop_index,
         columns=column_means(band),
@@ -246,4 +253,18 @@ def build_profile(
         anchored=fit.anchored,
         ground_scale=fit.scale,
         ground_offset=fit.offset,
+        ground_hazard=_reading(hazard),
+    )
+
+
+def _reading(hazard: GroundHazard | None) -> GroundHazardReading | None:
+    """The detector's value object as the wire model. Kept here rather than in
+    `ground_hazard` so that module stays pure numpy with no pydantic."""
+    if hazard is None:
+        return None
+    return GroundHazardReading(
+        column=hazard.column,
+        span=hazard.span,
+        drop_ratio=hazard.drop_ratio,
+        confidence=hazard.confidence,
     )
