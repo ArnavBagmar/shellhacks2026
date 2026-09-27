@@ -784,9 +784,13 @@ async function loadClips() {
       <code>backend/logs/hazard_clips</code>, and plays back here.</p></div>`;
     return;
   }
-  $("clip-select").innerHTML = list.map((c) => `<option value="${c.id}">${new Date(c.started_ms).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })} &middot; ${esc(c.cls || "car")} ${c.max_closing_mps != null ? num(c.max_closing_mps, 1) + " m/s" : ""} &middot; ${c.duration_s} s</option>`).join("");
+  $("clip-select").innerHTML = list.map((c) => `<option value="${c.id}">${c.kept ? "\u2605 " : ""}${new Date(c.started_ms).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })} &middot; ${esc(c.cls || "car")} ${c.max_closing_mps != null ? num(c.max_closing_mps, 1) + " m/s" : ""} &middot; ${c.duration_s} s</option>`).join("");
   $("clip-pick").hidden = list.length < 2;
-  const keep = list.some((c) => c.id === replay.id) ? replay.id : (store.get("cane.clip") && list.some((c) => c.id === store.get("cane.clip")) ? store.get("cane.clip") : list[0].id);
+  // The kept presentation run first, unless someone picked another one.
+  const kept = list.find((c) => c.kept);
+  const saved = store.get("cane.clip");
+  const keep = list.some((c) => c.id === replay.id) ? replay.id
+    : kept ? kept.id : (saved && list.some((c) => c.id === saved) ? saved : list[0].id);
   $("clip-select").value = keep;
   if (keep !== replay.id || !replay.doc) openClip(keep);
 }

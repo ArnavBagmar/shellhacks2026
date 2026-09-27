@@ -116,3 +116,24 @@ def test_the_hub_records_alarms_and_the_phones_words() -> None:
     hub.on_phone_diag({"kind": "say", "data": {"text": "Stop! Car coming from your left."}})
     assert seen[0][0] == "offer" and seen[0][1][0]["kind"] == "alarm"
     assert seen[1] == ("said", "Stop! Car coming from your left.")
+
+
+def test_a_kept_run_is_listed_first_and_served(tmp_path) -> None:
+    fresh, kept = tmp_path / "fresh", tmp_path / "kept"
+    for base, name, started in ((fresh, "20260927-140000", 2), (kept, "20260927-062947", 1)):
+        (base / name).mkdir(parents=True)
+        (base / name / "clip.json").write_text(json.dumps(
+            {"id": name, "started_ms": started, "ended_ms": started + 1000, "frames": [], "said": []}))
+        (base / name / "f000.jpg").write_bytes(b"\xff\xd8" + name.encode())
+    listed = list_clips(fresh, kept)
+    assert [(c["id"], c["kept"]) for c in listed] == [("20260927-062947", True), ("20260927-140000", False)]
+    assert clip_file("20260927-062947", "f000.jpg", fresh, kept) == b"\xff\xd8" + b"20260927-062947"
+    assert clip_file("20260927-140000", "f000.jpg", fresh, kept) == b"\xff\xd8" + b"20260927-140000"
+
+
+def test_the_presentation_run_is_in_the_repo() -> None:
+    from cane.scene.hazard_clips import KEPT_DIR
+
+    doc = json.loads((KEPT_DIR / "20260927-062947" / "clip.json").read_text())
+    assert len(doc["frames"]) == 73
+    assert any(s["text"].startswith("Stop! Car coming") for s in doc["said"])

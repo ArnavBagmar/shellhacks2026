@@ -123,6 +123,7 @@ class DebugHub:
         delta_deg: float = 0.0,
         clips_dir: Path | None = None,
         car_alerts: Any | None = None,
+        kept_clips_dir: Path | None = None,
     ) -> None:
         from cane.scene.hazard_clips import HazardRecorder
         from cane.scene.hazard_view import HazardBoard
@@ -134,6 +135,10 @@ class DebugHub:
         #: The car-alert switch (``startcane full`` only): off, no vehicle is
         #: shown, alerted or saved.
         self.car_alerts = car_alerts
+        #: Runs kept for the presentation (``backend/demo/hazard_clips``).
+        from cane.scene.hazard_clips import KEPT_DIR
+
+        self.kept_clips_dir = kept_clips_dir if kept_clips_dir is not None else (KEPT_DIR if clips_dir is None else None)
         self._lock = threading.Lock()
         self._live_frame = live_frame
         self._frame_counter = frame_counter
@@ -552,12 +557,12 @@ def serve_debug(hub: DebugHub, port: int = DEFAULT_PORT, host: str = "127.0.0.1"
                 elif path == "/clips.json":
                     from cane.scene.hazard_clips import list_clips
 
-                    self._send(200, "application/json", json.dumps(list_clips(hub.clips.directory)).encode())
+                    self._send(200, "application/json", json.dumps(list_clips(hub.clips.directory, hub.kept_clips_dir)).encode())
                 elif path.startswith("/clips/"):
                     from cane.scene.hazard_clips import clip_file
 
                     _, _, name, file = path.split("/", 3)
-                    body = clip_file(name, file, hub.clips.directory)
+                    body = clip_file(name, file, hub.clips.directory, hub.kept_clips_dir)
                     kind = "application/json" if file.endswith(".json") else "image/jpeg"
                     self._send(200 if body else 404, kind if body else "text/plain", body or b"not found")
                 elif path.startswith("/query/"):

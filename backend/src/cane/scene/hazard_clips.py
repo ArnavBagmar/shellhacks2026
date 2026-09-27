@@ -38,6 +38,9 @@ logger = logging.getLogger(__name__)
 #: backend/logs/hazard_clips (logs/ is gitignored).
 DEFAULT_DIR = Path(__file__).resolve().parents[3] / "logs" / "hazard_clips"
 CLIPS_DIR_ENV = "CANE_CLIPS_DIR"
+#: backend/demo/hazard_clips: runs kept for the presentation. Committed to
+#: git (logs/ is not), listed next to the fresh ones and picked by default.
+KEPT_DIR = Path(__file__).resolve().parents[3] / "demo" / "hazard_clips"
 PRE_ROLL_S = 6.0
 POST_ROLL_S = 4.0
 MAX_CLIP_S = 30.0
@@ -250,10 +253,18 @@ class HazardRecorder:
         logger.info("hazard clip saved: %s (%d frames)", target, len(clip.frames))
 
 
-def list_clips(directory: Path | None = None) -> list[dict[str, Any]]:
-    """Newest first: what the page's clip picker shows."""
-    directory = directory or clips_dir()
-    out = []
+def list_clips(directory: Path | None = None, kept: Path | None = None) -> list[dict[str, Any]]:
+    """Newest first: what the page's clip picker shows. Clips in ``kept``
+    come first, marked ``kept`` (the page picks the newest of them).
+    """
+    kept_clips = [dict(c, kept=True) for c in _clips_in(kept)] if kept is not None else []
+    kept_ids = {c["id"] for c in kept_clips}
+    fresh = [dict(c, kept=False) for c in _clips_in(directory or clips_dir()) if c["id"] not in kept_ids]
+    return kept_clips + fresh
+
+
+def _clips_in(directory: Path) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
     if not directory.is_dir():
         return out
     for child in directory.iterdir():
@@ -276,12 +287,13 @@ def list_clips(directory: Path | None = None) -> list[dict[str, Any]]:
     return out
 
 
-def clip_file(name: str, file: str, directory: Path | None = None) -> bytes | None:
+def clip_file(name: str, file: str, directory: Path | None = None, kept: Path | None = None) -> bytes | None:
     """One file of one clip, refusing anything that is not a clip's own."""
     if not CLIP_ID.match(name) or not re.fullmatch(r"clip\.json|[fs]\d{3}\.jpg", file):
         return None
-    path = (directory or clips_dir()) / name / file
-    try:
-        return path.read_bytes()
-    except OSError:
-        return None
+    for base in ([kept] if kept is not None else []) + [directory or clips_dir()]:
+        try:
+            return (base / name / file).read_bytes()
+        except OSError:
+            continue
+    return None
